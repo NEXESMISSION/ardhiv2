@@ -1,0 +1,69 @@
+/**
+ * Input sanitization utilities
+ * Prevents XSS attacks by sanitizing user input
+ */
+
+/**
+ * Sanitize text input - removes potentially dangerous characters
+ */
+export function sanitizeText(input: string): string {
+  if (!input) return ''
+  
+  return input
+    .trim()
+    .replace(/[<>]/g, '') // Remove < and > to prevent HTML injection
+    .replace(/javascript:/gi, '') // Remove javascript: protocol
+    .replace(/on\w+=/gi, '') // Remove event handlers (onclick, onerror, etc.)
+    .slice(0, 10000) // Max length limit
+}
+
+/**
+ * Sanitize email - basic email sanitization
+ */
+export function sanitizeEmail(email: string): string {
+  if (!email) return ''
+  
+  return email
+    .trim()
+    .toLowerCase()
+    .replace(/[<>]/g, '')
+    .slice(0, 254) // Max email length
+}
+
+/**
+ * Sanitize phone number - keep only digits and + sign
+ */
+export function sanitizePhone(phone: string): string {
+  if (!phone) return ''
+  
+  return phone
+    .trim()
+    .replace(/[^\d+]/g, '') // Keep only digits and +
+    .slice(0, 20) // Max phone length
+}
+
+/**
+ * Sanitize CIN - keep only alphanumeric
+ */
+export function sanitizeCIN(cin: string): string {
+  if (!cin) return ''
+  
+  return cin
+    .trim()
+    .replace(/[^a-zA-Z0-9]/g, '') // Keep only alphanumeric
+    .slice(0, 50) // Max CIN length
+}
+
+/**
+ * Sanitize notes/description - more permissive but still safe
+ */
+export function sanitizeNotes(notes: string): string {
+  if (!notes) return ''
+  
+  return notes
+    .trim()
+    .replace(/<script[^>]*>.*?<\/script>/gi, '') // Remove script tags
+    .replace(/<iframe[^>]*>.*?<\/iframe>/gi, '') // Remove iframe tags
+    .slice(0, 5000) // Max notes length
+}
+

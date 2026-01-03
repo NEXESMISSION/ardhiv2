@@ -1,0 +1,221 @@
+export type LandStatus = 'Available' | 'Reserved' | 'Sold' | 'Cancelled'
+export type PaymentType = 'Full' | 'Installment'
+export type SaleStatus = 'Pending' | 'AwaitingPayment' | 'InstallmentsOngoing' | 'Completed' | 'Cancelled'
+export type ReservationStatus = 'Pending' | 'Confirmed' | 'Cancelled' | 'Expired'
+export type InstallmentStatus = 'Unpaid' | 'Paid' | 'Late' | 'Partial'
+export type PaymentRecordType = 'BigAdvance' | 'SmallAdvance' | 'Installment' | 'Full' | 'Partial' | 'Field' | 'Refund'
+export type UserRole = 'Owner' | 'Manager' | 'FieldStaff'
+export type UserStatus = 'Active' | 'Inactive'
+
+export interface Role {
+  id: string
+  name: UserRole
+  permissions: Record<string, boolean>
+  created_at: string
+  updated_at: string
+}
+
+export interface User {
+  id: string
+  name: string
+  email: string
+  role: UserRole
+  status: UserStatus
+  created_at: string
+  updated_at: string
+}
+
+export interface LandBatch {
+  id: string
+  name: string
+  total_surface: number
+  total_cost: number
+  date_acquired: string
+  notes: string | null
+  real_estate_tax_number: string | null
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface LandPiece {
+  id: string
+  land_batch_id: string
+  piece_number: string
+  surface_area: number
+  purchase_cost: number
+  selling_price_full: number
+  selling_price_installment: number
+  status: LandStatus
+  reserved_until: string | null
+  reservation_client_id: string | null
+  notes: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface Client {
+  id: string
+  name: string
+  cin: string
+  phone: string | null
+  email: string | null
+  address: string | null
+  client_type: string
+  notes: string | null
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface Reservation {
+  id: string
+  client_id: string
+  land_piece_ids: string[]
+  small_advance_amount: number
+  reservation_date: string
+  reserved_until: string
+  status: ReservationStatus
+  notes: string | null
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface Sale {
+  id: string
+  client_id: string
+  land_piece_ids: string[]
+  reservation_id: string | null
+  payment_type: PaymentType
+  total_purchase_cost: number
+  total_selling_price: number
+  profit_margin: number
+  small_advance_amount: number
+  big_advance_amount: number
+  installment_start_date: string | null
+  installment_end_date: string | null
+  number_of_installments: number | null
+  monthly_installment_amount: number | null
+  status: SaleStatus
+  sale_date: string
+  notes: string | null
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface Installment {
+  id: string
+  sale_id: string
+  installment_number: number
+  amount_due: number
+  amount_paid: number
+  stacked_amount: number
+  due_date: string
+  paid_date: string | null
+  status: InstallmentStatus
+  notes: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface Payment {
+  id: string
+  client_id: string
+  sale_id: string | null
+  installment_id: string | null
+  reservation_id: string | null
+  amount_paid: number
+  payment_type: PaymentRecordType
+  payment_date: string
+  payment_method: string
+  notes: string | null
+  recorded_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface AuditLog {
+  id: string
+  user_id: string | null
+  action: string
+  table_name: string
+  record_id: string | null
+  old_values: Record<string, unknown> | null
+  new_values: Record<string, unknown> | null
+  ip_address: string | null
+  user_agent: string | null
+  created_at: string
+}
+
+export interface Debt {
+  id: string
+  creditor_name: string
+  amount_owed: number
+  due_date: string
+  check_number: string | null
+  reference_number: string | null
+  notes: string | null
+  status: string
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface Database {
+  public: {
+    Tables: {
+      roles: {
+        Row: Role
+        Insert: Omit<Role, 'id' | 'created_at' | 'updated_at'>
+        Update: Partial<Omit<Role, 'id'>>
+      }
+      users: {
+        Row: User
+        Insert: Omit<User, 'created_at' | 'updated_at'>
+        Update: Partial<Omit<User, 'id'>>
+      }
+      land_batches: {
+        Row: LandBatch
+        Insert: Omit<LandBatch, 'id' | 'created_at' | 'updated_at'>
+        Update: Partial<Omit<LandBatch, 'id'>>
+      }
+      land_pieces: {
+        Row: LandPiece
+        Insert: Omit<LandPiece, 'id' | 'created_at' | 'updated_at'>
+        Update: Partial<Omit<LandPiece, 'id'>>
+      }
+      clients: {
+        Row: Client
+        Insert: Omit<Client, 'id' | 'created_at' | 'updated_at'>
+        Update: Partial<Omit<Client, 'id'>>
+      }
+      reservations: {
+        Row: Reservation
+        Insert: Omit<Reservation, 'id' | 'created_at' | 'updated_at'>
+        Update: Partial<Omit<Reservation, 'id'>>
+      }
+      sales: {
+        Row: Sale
+        Insert: Omit<Sale, 'id' | 'created_at' | 'updated_at'>
+        Update: Partial<Omit<Sale, 'id'>>
+      }
+      installments: {
+        Row: Installment
+        Insert: Omit<Installment, 'id' | 'created_at' | 'updated_at'>
+        Update: Partial<Omit<Installment, 'id'>>
+      }
+      payments: {
+        Row: Payment
+        Insert: Omit<Payment, 'id' | 'created_at' | 'updated_at'>
+        Update: Partial<Omit<Payment, 'id'>>
+      }
+      audit_logs: {
+        Row: AuditLog
+        Insert: Omit<AuditLog, 'id' | 'created_at'>
+        Update: never
+      }
+    }
+  }
+}
