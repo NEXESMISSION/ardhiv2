@@ -1,7 +1,8 @@
 import { createContext, useContext, useEffect, useState, useRef, type ReactNode } from 'react'
 import type { User as SupabaseUser, Session } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
-import type { User, UserRole } from '@/types/database'
+import type { User, UserRole, UserStatus } from '@/types/database'
+import { retryWithBackoff, isRetryableError } from '@/lib/retry'
 
 interface AuthContextType {
   user: SupabaseUser | null
@@ -11,6 +12,7 @@ interface AuthContextType {
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>
   signOut: () => Promise<void>
   hasPermission: (permission: string) => boolean
+  getPermissionDeniedMessage: (permission: string) => string
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
@@ -45,18 +47,18 @@ const rolePermissions: Record<UserRole, Record<string, boolean>> = {
     view_clients: true,
     edit_clients: true,
     delete_clients: false,
-    view_sales: true,
-    create_sales: true,
-    edit_sales: true,
+    view_sales: false,
+    create_sales: false,
+    edit_sales: false,
     edit_prices: false,
     view_installments: true,
     edit_installments: true,
     view_payments: true,
     record_payments: true,
-    view_financial: true,
+    view_financial: true, // For expenses
     view_profit: false,
     manage_users: false,
-    view_audit_logs: true,
+    view_audit_logs: false,
   },
   FieldStaff: {
     view_dashboard: true,
@@ -67,14 +69,14 @@ const rolePermissions: Record<UserRole, Record<string, boolean>> = {
     edit_clients: true,
     delete_clients: false,
     view_sales: true,
-    create_sales: false,
-    edit_sales: false,
+    create_sales: true,
+    edit_sales: true, // Allow confirmation of sales
     edit_prices: false,
     view_installments: true,
-    edit_installments: false,
+    edit_installments: true, // Allow recording payments
     view_payments: true,
     record_payments: true,
-    view_financial: false,
+    view_financial: true, // For expenses
     view_profit: false,
     manage_users: false,
     view_audit_logs: false,
@@ -86,6 +88,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<User | null>(null)
   const [session, setSession] = useState<Session | null>(null)
   const [loading, setLoading] = useState(true)
+  const [userPermissions, setUserPermissions] = useState<Record<string, boolean>>({})
   const fetchingRef = useRef(false)
   const initializedRef = useRef(false)
   const inactivityTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -101,7 +104,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (initializedRef.current) return
     initializedRef.current = true
     
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    // Use retry mechanism for initial session fetch
+    retryWithBackoff(
+      async () => {
+        const { data: { session }, error } = await supabase.auth.getSession()
+        if (error) throw error
+        return session
+      },
+      {
+        maxRetries: 3,
+        timeout: 10000,
+        onRetry: (attempt) => {
+          console.log(`Retrying session fetch (attempt ${attempt})...`)
+        },
+      }
+    )
+      .then((session) => {
       setSession(session)
       setUser(session?.user ?? null)
       if (session?.user) {
@@ -109,7 +127,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } else {
         setLoading(false)
       }
-    }).catch(() => {
+      })
+      .catch((error) => {
+        console.error('Failed to get session:', error)
+        // Still allow app to load, user can try logging in
       setLoading(false)
     })
 
@@ -138,23 +159,151 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     fetchingRef.current = true
     
     try {
-      // Use specific columns instead of * for security
-      const { data, error } = await supabase
-        .from('users')
-        .select('id, name, email, role, status, created_at, updated_at')
-        .eq('id', userId)
-        .single()
+      // Use retry mechanism for profile fetch
+      const data = await retryWithBackoff(
+        async () => {
+          // Try to fetch from auth.users metadata first, then fallback to users table
+          try {
+            const { data: authUser } = await supabase.auth.getUser()
+            
+            if (authUser?.user?.user_metadata?.role) {
+              // User metadata exists, use it
+              return {
+                id: authUser.user.id,
+                name: authUser.user.user_metadata.name || authUser.user.email?.split('@')[0] || 'User',
+                email: authUser.user.email || '',
+                role: authUser.user.user_metadata.role,
+                status: authUser.user.user_metadata.status || 'Active',
+                created_at: authUser.user.created_at,
+                updated_at: authUser.user.updated_at || authUser.user.created_at,
+              }
+            }
+          } catch (e) {
+            // Continue to users table fallback
+          }
+          
+          // Fallback to users table - use limit(1) instead of maybeSingle() to avoid 406 errors
+          const { data, error } = await supabase
+            .from('users')
+            .select('id, name, email, role, status, created_at, updated_at')
+            .eq('id', userId)
+            .limit(1)
       
-      if (error) {
-        setProfile(null)
-      } else {
+          if (error) {
+            // If RLS error (403, permission denied), try auth metadata as fallback
+            const errorStatus = (error as any).status
+            const isPermissionError = 
+              error.code === 'PGRST116' || 
+              error.code === '42501' || 
+              error.code === 'PGRST301' ||
+              errorStatus === 403 ||
+              errorStatus === 406 || 
+              errorStatus === 500 ||
+              error.message?.includes('403') ||
+              error.message?.includes('406') || 
+              error.message?.includes('500') || 
+              error.message?.includes('permission denied') || 
+              error.message?.includes('row-level security') ||
+              error.message?.includes('internal server error')
+            
+            if (isPermissionError) {
+              console.warn('Users table query failed (RLS blocking), falling back to auth metadata:', error)
+              // Try to get user from auth metadata as last resort
+              const { data: authUser } = await supabase.auth.getUser()
+              if (authUser?.user) {
+                // Return minimal user data from auth
+                // IMPORTANT: If user_metadata.role exists, use it. Otherwise default to Owner
+                // for users who are known to be owners but missing from users table
+                const metaRole = authUser.user.user_metadata?.role
+                const email = authUser.user.email || ''
+                
+                // Known owner emails - fallback if metadata is missing
+                const knownOwnerEmails = ['saifelleuchi127@gmail.com', 'lassad.mazed@gmail.com']
+                const isKnownOwner = knownOwnerEmails.includes(email.toLowerCase())
+                
+                const role = metaRole || (isKnownOwner ? 'Owner' : 'FieldStaff')
+                
+                console.log('Using auth metadata for profile:', { email, role, hasMetaRole: !!metaRole, isKnownOwner })
+                
+                return {
+                  id: authUser.user.id,
+                  name: authUser.user.user_metadata?.name || authUser.user.email?.split('@')[0] || 'User',
+                  email: email,
+                  role: role as UserRole,
+                  status: (authUser.user.user_metadata?.status || 'Active') as 'Active' | 'Inactive',
+                  created_at: authUser.user.created_at,
+                  updated_at: authUser.user.updated_at || authUser.user.created_at,
+                }
+              }
+              throw new Error('User not found and cannot access users table')
+            }
+            throw error
+          }
+          if (!data || data.length === 0) throw new Error('User not found')
+          return data[0]
+        },
+        {
+          maxRetries: 3,
+          timeout: 10000,
+          onRetry: (attempt) => {
+            console.log(`Retrying profile fetch (attempt ${attempt})...`)
+          },
+        }
+      )
+      
         setProfile(data)
+        
+        // Fetch custom user permissions if not Owner
+        if (data.role !== 'Owner') {
+          await fetchUserPermissions(data.id)
+        } else {
+          // Owner has all permissions, no need to fetch
+          setUserPermissions({})
       }
     } catch (error) {
+      console.error('Failed to fetch profile:', error)
+      // If it's a retryable error, show a message but don't block
+      if (isRetryableError(error as Error)) {
+        console.warn('Network error fetching profile, will retry on next auth state change')
+      }
       setProfile(null)
+      setUserPermissions({})
     } finally {
       fetchingRef.current = false
       setLoading(false)
+    }
+  }
+
+  const fetchUserPermissions = async (userId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('user_permissions')
+        .select('resource_type, permission_type, granted')
+        .eq('user_id', userId)
+      
+      if (error) {
+        // If table doesn't exist yet, that's okay - use role permissions only
+        if (error.code === '42P01') {
+          console.warn('user_permissions table not found, using role permissions only')
+          setUserPermissions({})
+          return
+        }
+        throw error
+      }
+      
+      // Convert to permission map (format: "resource_permission" -> boolean)
+      const permissionsMap: Record<string, boolean> = {}
+      if (data) {
+        data.forEach((perm: any) => {
+          const key = `${perm.resource_type}_${perm.permission_type}`
+          permissionsMap[key] = perm.granted
+        })
+      }
+      
+      setUserPermissions(permissionsMap)
+    } catch (error) {
+      console.error('Failed to fetch user permissions:', error)
+      setUserPermissions({})
     }
   }
 
@@ -234,12 +383,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       
       // Log successful login
       // Fire and forget - don't await to avoid blocking
-      Promise.resolve(supabase.from('login_attempts').insert([{
-        email: email.toLowerCase(),
-        success: true,
-        attempted_at: new Date().toISOString(),
-      }])).catch(() => {
-        // Silent fail
+      // Only log if we have permission (avoid 401 errors)
+      Promise.resolve(
+        supabase.from('login_attempts').insert([{
+          email: email.toLowerCase(),
+          success: true,
+          attempted_at: new Date().toISOString(),
+        }])
+      ).catch(() => {
+        // Silent fail - table might not exist or RLS blocks it
       })
     } catch {
       // Silent fail
@@ -248,34 +400,117 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signIn = async (email: string, password: string) => {
     try {
+      // Validate inputs before attempting login
+      if (!email || !email.trim()) {
+        return { 
+          error: new Error('البريد الإلكتروني مطلوب') 
+        }
+      }
+      
+      if (!password || !password.trim()) {
+        return { 
+          error: new Error('كلمة المرور مطلوبة') 
+        }
+      }
+
+      // Normalize email
+      const normalizedEmail = email.trim().toLowerCase()
+
       // Check for account lockout (5 failed attempts in 15 minutes)
-      const failedAttempts = getFailedAttempts(email)
+      const failedAttempts = getFailedAttempts(normalizedEmail)
       if (failedAttempts >= 5) {
         return { 
           error: new Error('تم حظر الحساب مؤقتاً بسبب محاولات تسجيل دخول فاشلة متعددة. يرجى المحاولة بعد 15 دقيقة.') 
         }
       }
 
-      const { error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      })
+      // Use retry mechanism for sign in - but only for network errors, not auth errors
+      let data, error
+      try {
+        const result = await supabase.auth.signInWithPassword({
+          email: normalizedEmail,
+          password: password.trim(),
+        })
+        data = result.data
+        error = result.error
+      } catch (authError: any) {
+        // If it's a 400 error (bad request), don't retry - it's likely invalid credentials
+        if (authError.status === 400 || authError.code === 'invalid_credentials') {
+          error = authError
+        } else {
+          // For other errors (network, timeout), use retry mechanism
+          const retryResult = await retryWithBackoff(
+            async () => {
+              const result = await supabase.auth.signInWithPassword({
+                email: normalizedEmail,
+                password: password.trim(),
+              })
+              if (result.error) throw result.error
+              return result
+            },
+            {
+              maxRetries: 2,
+              timeout: 10000,
+              onRetry: (attempt) => {
+                console.log(`Retrying sign in (attempt ${attempt})...`)
+              },
+            }
+          )
+          data = retryResult.data
+          error = retryResult.error
+        }
+      }
       
       if (error) {
         // Record failed attempt
-        recordFailedAttempt(email)
+        recordFailedAttempt(normalizedEmail)
         
-        // Generic error message to avoid leaking information
-        // Don't reveal if email exists or not
-        const genericError = new Error('البريد الإلكتروني أو كلمة المرور غير صحيحة')
-        return { error: genericError }
+        // Check error type to provide appropriate message
+        const errorCode = (error as any).status || (error as any).code || ''
+        const errorMsg = error.message?.toLowerCase() || ''
+        
+        // Don't retry on 400 errors (invalid credentials) - they're not retryable
+        if (errorCode === 400 || errorMsg.includes('invalid') || errorMsg.includes('credentials')) {
+          // Generic error message to avoid leaking information
+          return { 
+            error: new Error('البريد الإلكتروني أو كلمة المرور غير صحيحة') 
+          }
+        }
+        
+        // For other errors, provide generic message
+        return { 
+          error: new Error('فشل تسجيل الدخول. يرجى المحاولة مرة أخرى.') 
+        }
       } else {
         // Clear failed attempts on successful login
-        clearFailedAttempts(email)
+        clearFailedAttempts(normalizedEmail)
+        
+        // Immediately update user and session state
+        if (data?.user) {
+          setUser(data.user)
+        }
+        if (data?.session) {
+          setSession(data.session)
+          // Immediately fetch profile after successful login
+          await fetchProfile(data.user.id)
+        }
       }
       
       return { error: null }
     } catch (error) {
+      // Record failed attempt for unexpected errors too
+      const normalizedEmail = email?.trim().toLowerCase() || ''
+      if (normalizedEmail) {
+        recordFailedAttempt(normalizedEmail)
+      }
+      
+      // Check if it's a network error
+      if (isRetryableError(error as Error)) {
+        return { 
+          error: new Error('فشل الاتصال بالخادم. يرجى التحقق من اتصالك بالإنترنت والمحاولة مرة أخرى.') 
+        }
+      }
+      
       return { error: error as Error }
     }
   }
@@ -336,11 +571,78 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null)
     setProfile(null)
     setSession(null)
+    setUserPermissions({})
   }
 
+  // Throttle hasPermission warnings to avoid console spam
+  const lastWarningTimeRef = useRef<number>(0)
+  
   const hasPermission = (permission: string): boolean => {
-    if (!profile) return false
+    if (!profile) {
+      // Only log warning once per second to avoid console spam
+      const now = Date.now()
+      if (now - lastWarningTimeRef.current > 1000) {
+        console.warn('hasPermission called but profile is null - user may need to log in again')
+        lastWarningTimeRef.current = now
+      }
+      return false
+    }
+    
+    // Owner always has all permissions
+    if (profile.role === 'Owner') {
+      return true
+    }
+    
+    // Check custom user permissions first (if exists)
+    // Format: "resource_permission" (e.g., "land_view", "sale_create")
+    const customKey = permission.includes('_') ? permission : null
+    if (customKey && userPermissions.hasOwnProperty(customKey)) {
+      return userPermissions[customKey]
+    }
+    
+    // Check legacy format in custom permissions
+    // Try reverse format (e.g., "view_land" -> "land_view")
+    const parts = permission.split('_')
+    if (parts.length === 2) {
+      const reversedKey = `${parts[1]}_${parts[0]}`
+      if (userPermissions.hasOwnProperty(reversedKey)) {
+        return userPermissions[reversedKey]
+      }
+    }
+    
+    // Fall back to role permissions (legacy format)
     return rolePermissions[profile.role]?.[permission] ?? false
+  }
+
+  const getPermissionDeniedMessage = (permission: string): string => {
+    if (!profile) return 'يجب تسجيل الدخول للوصول إلى هذه الميزة'
+    
+    const permissionNames: Record<string, string> = {
+      'view_dashboard': 'عرض لوحة التحكم',
+      'view_land': 'عرض الأراضي',
+      'edit_land': 'تعديل الأراضي',
+      'delete_land': 'حذف الأراضي',
+      'view_clients': 'عرض العملاء',
+      'edit_clients': 'تعديل العملاء',
+      'delete_clients': 'حذف العملاء',
+      'view_sales': 'عرض المبيعات',
+      'create_sales': 'إنشاء المبيعات',
+      'edit_sales': 'تعديل المبيعات',
+      'edit_prices': 'تعديل الأسعار',
+      'view_installments': 'عرض الأقساط',
+      'edit_installments': 'تعديل الأقساط',
+      'view_payments': 'عرض المدفوعات',
+      'record_payments': 'تسجيل المدفوعات',
+      'view_financial': 'عرض البيانات المالية',
+      'view_profit': 'عرض الأرباح',
+      'manage_users': 'إدارة المستخدمين',
+      'view_audit_logs': 'عرض سجلات التدقيق',
+      'view_expenses': 'عرض المصاريف',
+      'edit_expenses': 'تعديل المصاريف',
+    }
+    
+    const permissionName = permissionNames[permission] || permission
+    return `ليس لديك صلاحية للوصول إلى "${permissionName}". يرجى التواصل مع المدير للحصول على الصلاحيات المطلوبة.`
   }
 
   return (
@@ -353,6 +655,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         signIn,
         signOut,
         hasPermission,
+        getPermissionDeniedMessage,
       }}
     >
       {children}

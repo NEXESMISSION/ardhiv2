@@ -43,6 +43,27 @@ export function sanitizePhone(phone: string): string {
 }
 
 /**
+ * Validate Lebanese phone number format
+ * Lebanese numbers: 03/70/71/76/78/79/81 followed by 6 digits
+ * Or international format: +961 followed by the number
+ */
+export function validateLebanesePhone(phone: string): boolean {
+  if (!phone || !phone.trim()) return false
+  
+  const cleaned = sanitizePhone(phone)
+  
+  // Remove leading + if present for validation
+  const withoutPlus = cleaned.replace(/^\+/, '')
+  
+  // Lebanese format: 03, 70, 71, 76, 78, 79, 81 followed by 6 digits (8 digits total)
+  // Or with country code: 961 followed by the above (11 digits total)
+  const lebanesePattern = /^(03|70|71|76|78|79|81)\d{6}$/
+  const internationalPattern = /^961(03|70|71|76|78|79|81)\d{6}$/
+  
+  return lebanesePattern.test(withoutPlus) || internationalPattern.test(withoutPlus)
+}
+
+/**
  * Sanitize CIN - keep only alphanumeric
  */
 export function sanitizeCIN(cin: string): string {

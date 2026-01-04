@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
-import { Card, CardContent } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Select } from '@/components/ui/select'
 import { Input } from '@/components/ui/input'
@@ -13,7 +13,8 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Check, Clock, X, Filter, RotateCcw, Search } from 'lucide-react'
+import { Check, Clock, X, Search, MapPin, Package } from 'lucide-react'
+import { showNotification } from '@/components/ui/notification'
 
 interface PieceWithStatus {
   id: string
@@ -22,7 +23,7 @@ interface PieceWithStatus {
   purchase_cost: number
   selling_price_full: number
   selling_price_installment: number
-  land_batch?: { name: string; id: string; real_estate_tax_number?: string | null }
+  land_batch?: { name: string; id: string; real_estate_tax_number?: string | null; location?: string | null }
   status_display: 'Available' | 'Reserved' | 'Sold'
   sale?: any
   reservation?: any
@@ -36,19 +37,11 @@ export function LandAvailability() {
   // Filters
   const [statusFilter, setStatusFilter] = useState<'all' | 'Available' | 'Reserved' | 'Sold'>('all')
   const [batchFilter, setBatchFilter] = useState<string>('all')
-  const [minSize, setMinSize] = useState<string>('')
-  const [maxSize, setMaxSize] = useState<string>('')
-  const [minPrice, setMinPrice] = useState<string>('')
-  const [maxPrice, setMaxPrice] = useState<string>('')
-  const [showFilters, setShowFilters] = useState(false)
-  const [showAll, setShowAll] = useState(false) // Show all lands or only search results
+  const [pieceSearch, setPieceSearch] = useState('')
+  const [searchedPieces, setSearchedPieces] = useState<PieceWithStatus[]>([])
   
   const [selectedPiece, setSelectedPiece] = useState<PieceWithStatus | null>(null)
   const [detailsOpen, setDetailsOpen] = useState(false)
-  
-  // Search by piece number - MUST be declared before any early returns
-  const [pieceSearch, setPieceSearch] = useState('')
-  const [searchedPieces, setSearchedPieces] = useState<PieceWithStatus[]>([])
 
   // Debounced search function
   const debouncedSearch = useCallback(
@@ -99,25 +92,24 @@ export function LandAvailability() {
 
   const fetchData = async () => {
     try {
-      // Fetch all pieces with batch info including real estate tax number
-      const { data: piecesData } = await supabase
+      setLoading(true)
+      const { data: piecesData, error: piecesError } = await supabase
         .from('land_pieces')
-        .select('*, land_batch:land_batches(name, real_estate_tax_number)')
+        .select('*, land_batch:land_batches(name, real_estate_tax_number, location)')
         .order('piece_number', { ascending: true })
 
-      // Fetch all sales (including completed and active)
+      if (piecesError) throw piecesError
+
       const { data: salesData } = await supabase
         .from('sales')
         .select('*, client:clients(*)')
         .neq('status', 'Cancelled')
 
-      // Fetch all active reservations (Pending or Confirmed, not Cancelled or Expired)
       const { data: reservationsData } = await supabase
         .from('reservations')
         .select('*, client:clients(*)')
         .in('status', ['Pending', 'Confirmed'])
 
-      // Get unique batches for filter - properly deduplicate by name
       const batchMap = new Map<string, { id: string; name: string }>()
       ;(piecesData || []).forEach((p: any) => {
         if (p.land_batch && p.land_batch.name) {
@@ -133,27 +125,33 @@ export function LandAvailability() {
       setBatches(Array.from(batchMap.values()))
 
       const piecesWithStatus: PieceWithStatus[] = ((piecesData || []) as any[]).map((piece: any) => {
-        // Check if piece is sold (only if sale is completed)
-        const sale = ((salesData || []) as any[]).find((s: any) => 
-          s.land_piece_ids?.includes(piece.id) && s.status === 'Completed'
+        // Check for completed/confirmed sales first
+        const completedSale = ((salesData || []) as any[]).find((s: any) => 
+          s.land_piece_ids?.includes(piece.id) && 
+          (s.status === 'Completed' || (s as any).is_confirmed === true || (s as any).big_advance_confirmed === true)
         )
         
-        // Check if piece has an active sale (not completed)
+        // Check for active (non-completed, non-cancelled) sales
         const activeSale = ((salesData || []) as any[]).find((s: any) => 
-          s.land_piece_ids?.includes(piece.id) && s.status !== 'Completed' && s.status !== 'Cancelled'
+          s.land_piece_ids?.includes(piece.id) && 
+          s.status !== 'Completed' && 
+          s.status !== 'Cancelled' &&
+          !(s as any).is_confirmed &&
+          !(s as any).big_advance_confirmed
         )
         
-        // Check if piece is reserved (reservations use land_piece_ids array)
-        const reservation = ((reservationsData || []) as any[]).find((r: any) => 
-          r.land_piece_ids?.includes(piece.id)
-        )
+        // Check for reservations (only if no active sale)
+        const reservation = !completedSale && !activeSale ? ((reservationsData || []) as any[]).find((r: any) => 
+          r.land_piece_ids?.includes(piece.id) &&
+          r.status !== 'Cancelled' &&
+          r.status !== 'Expired'
+        ) : null
 
         let status_display: 'Available' | 'Reserved' | 'Sold' = 'Available'
-        if (sale) {
-          // Only mark as Sold if sale is actually completed
+        // Priority: Completed/Confirmed sale > Active sale > Reservation > Available
+        if (completedSale) {
           status_display = 'Sold'
         } else if (activeSale || reservation) {
-          // If there's an active sale (not completed) or reservation, mark as Reserved
           status_display = 'Reserved'
         }
 
@@ -166,50 +164,63 @@ export function LandAvailability() {
           selling_price_installment: piece.selling_price_installment || 0,
           land_batch: piece.land_batch,
           status_display,
-          sale: sale || activeSale, // Include active sale for display
-          reservation,
+          sale: completedSale || activeSale || undefined,
+          reservation: reservation || undefined,
         }
       })
 
       setPieces(piecesWithStatus)
-    } catch (error) {
-      // Error fetching data - silent fail
+    } catch (error: any) {
+      console.error('Error fetching data:', error)
+      showNotification('خطأ في تحميل البيانات: ' + (error.message || 'خطأ غير معروف'), 'error')
     } finally {
       setLoading(false)
     }
   }
 
-  // Advanced filtering with useMemo
+  // Filter pieces - MUST be before any early returns
   const filteredPieces = useMemo(() => {
-    return pieces.filter(p => {
-      // Status filter
+    const basePieces = pieceSearch.trim() && searchedPieces.length > 0 ? searchedPieces : pieces
+    
+    return basePieces.filter(p => {
       if (statusFilter !== 'all' && p.status_display !== statusFilter) return false
-      // Batch filter
       if (batchFilter !== 'all' && p.land_batch?.name !== batchFilter) return false
-      // Size filter
-      if (minSize && p.surface_area < parseFloat(minSize)) return false
-      if (maxSize && p.surface_area > parseFloat(maxSize)) return false
-      // Price filter (using full payment price)
-      if (minPrice && p.selling_price_full < parseFloat(minPrice)) return false
-      if (maxPrice && p.selling_price_full > parseFloat(maxPrice)) return false
       return true
     })
-  }, [pieces, statusFilter, batchFilter, minSize, maxSize, minPrice, maxPrice])
+  }, [pieces, searchedPieces, pieceSearch, statusFilter, batchFilter])
 
-  const stats = {
+  const stats = useMemo(() => ({
     total: pieces.length,
     available: pieces.filter(p => p.status_display === 'Available').length,
     reserved: pieces.filter(p => p.status_display === 'Reserved').length,
     sold: pieces.filter(p => p.status_display === 'Sold').length,
+  }), [pieces])
+
+  const handleSearch = () => {
+    if (!pieceSearch.trim()) {
+      setSearchedPieces([])
+      return
+    }
+    debouncedSearch(pieceSearch.trim())
+  }
+
+  const handleFilterChange = (filterType: 'status' | 'batch', value: string) => {
+    if (filterType === 'status') {
+      setStatusFilter(value as any)
+    } else {
+      setBatchFilter(value)
+    }
+    // Re-search if there's a search term
+    if (pieceSearch.trim()) {
+      handleSearch()
+    }
   }
 
   const resetFilters = () => {
     setStatusFilter('all')
     setBatchFilter('all')
-    setMinSize('')
-    setMaxSize('')
-    setMinPrice('')
-    setMaxPrice('')
+    setPieceSearch('')
+    setSearchedPieces([])
   }
 
   const openDetails = (piece: PieceWithStatus) => {
@@ -217,99 +228,62 @@ export function LandAvailability() {
     setDetailsOpen(true)
   }
 
-  const handleSearch = () => {
-    if (!pieceSearch.trim()) {
-      setSearchedPieces([])
-      return
-    }
-    
-    const searchTerm = pieceSearch.trim()
-    
-    // Filter pieces by batch first if filter is set
-    const filteredByBatch = batchFilter === 'all' 
-      ? pieces 
-      : pieces.filter(p => p.land_batch?.name === batchFilter)
-    
-    // Smart search - find ALL matching pieces, not just the first one
-    const found = filteredByBatch.filter(p => {
-      const pieceNum = String(p.piece_number)
-      const pieceNumLower = pieceNum.toLowerCase().trim()
-      const searchLower = searchTerm.toLowerCase().trim()
-      
-      // Strategy 1: Direct exact match (case insensitive)
-      if (pieceNumLower === searchLower) return true
-      
-      // Strategy 2: Extract and compare numeric values (PRIMARY - handles "88" finding "P088")
-      // Extract all digits from both strings
-      const pieceDigits = pieceNum.replace(/\D/g, '')
-      const searchDigits = searchTerm.replace(/\D/g, '')
-      
-      if (searchDigits && pieceDigits) {
-        // Compare as integers - this is the key fix
-        // "P088" -> "088" -> 88
-        // "88" -> "88" -> 88
-        // They match!
-        const pieceInt = parseInt(pieceDigits, 10)
-        const searchInt = parseInt(searchDigits, 10)
-        
-        if (!isNaN(pieceInt) && !isNaN(searchInt) && pieceInt === searchInt) {
-          return true
-        }
-      }
-      
-      // Strategy 3: Normalize (remove P/# prefix and leading zeros) and compare
-      const normalize = (str: string): string => {
-        return str.toLowerCase()
-          .replace(/^[p#]/, '')
-          .replace(/^0+/, '')
-          .trim()
-      }
-      
-      const pieceNormalized = normalize(pieceNum)
-      const searchNormalized = normalize(searchTerm)
-      
-      if (pieceNormalized && searchNormalized && pieceNormalized === searchNormalized) {
-        return true
-      }
-      
-      return false
-    })
-    
-    setSearchedPieces(found)
-  }
-
-  const handleSearchKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      handleSearch()
-    }
+  if (loading) {
+    return (
+      <div className="flex h-64 items-center justify-center">
+        <div className="text-muted-foreground">جاري التحميل...</div>
+      </div>
+    )
   }
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-bold">توفر الأراضي</h1>
-          <p className="text-sm text-muted-foreground mt-1">عرض حالة قطع الأراضي</p>
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+      {/* Header - Centered */}
+      <div className="text-center space-y-2">
+        <h1 className="text-3xl sm:text-4xl font-bold">توفر الأراضي</h1>
+        <p className="text-muted-foreground">عرض حالة قطع الأراضي</p>
         </div>
-        <div className="flex flex-wrap items-center gap-2 text-sm">
-          <span className="text-green-600 font-medium">متاح: <strong>{stats.available}</strong></span>
-          <span className="text-orange-600 font-medium">محجوز: <strong>{stats.reserved}</strong></span>
-          <span className="text-red-600 font-medium">مباع: <strong>{stats.sold}</strong></span>
-        </div>
+
+      {/* Stats Cards - Centered Grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 max-w-4xl mx-auto">
+        <Card className="text-center">
+          <CardContent className="pt-6">
+            <div className="text-3xl font-bold text-gray-700">{stats.total}</div>
+            <div className="text-sm text-muted-foreground mt-1">إجمالي القطع</div>
+          </CardContent>
+        </Card>
+        <Card className="text-center border-green-200 bg-green-50">
+          <CardContent className="pt-6">
+            <div className="text-3xl font-bold text-green-600">{stats.available}</div>
+            <div className="text-sm text-muted-foreground mt-1">متاح</div>
+          </CardContent>
+        </Card>
+        <Card className="text-center border-orange-200 bg-orange-50">
+          <CardContent className="pt-6">
+            <div className="text-3xl font-bold text-orange-600">{stats.reserved}</div>
+            <div className="text-sm text-muted-foreground mt-1">محجوز</div>
+          </CardContent>
+        </Card>
+        <Card className="text-center border-red-200 bg-red-50">
+          <CardContent className="pt-6">
+            <div className="text-3xl font-bold text-red-600">{stats.sold}</div>
+            <div className="text-sm text-muted-foreground mt-1">مباع</div>
+          </CardContent>
+        </Card>
       </div>
 
-      {/* Search Bar - Centered */}
-      <Card className="bg-gradient-to-r from-blue-50 to-purple-50 border-blue-200">
-        <CardContent className="pt-6">
-          <div className="flex flex-col items-center gap-3 max-w-2xl mx-auto">
-            <div className="flex flex-col sm:flex-row items-center gap-3 w-full">
-              <div className="flex-1 w-full sm:max-w-md">
+      {/* Search and Filters - Centered */}
+      <Card className="max-w-4xl mx-auto">
+        <CardHeader>
+          <CardTitle className="text-center">البحث والفلترة</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* Search Bar */}
+          <div className="flex gap-2">
                 <Input
                   type="text"
                   placeholder="ابحث برقم القطعة (مثال: P001 أو 88)..."
                   value={pieceSearch}
-                  maxLength={50}
                   onChange={(e) => {
                     const value = e.target.value
                     setPieceSearch(value)
@@ -319,60 +293,34 @@ export function LandAvailability() {
                       debouncedSearch(value.trim())
                     }
                   }}
-                  onKeyPress={handleSearchKeyPress}
-                  className="w-full text-center sm:text-right"
+              onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
+              className="flex-1"
                 />
-              </div>
-              <Button onClick={handleSearch} className="w-full sm:w-auto">
+            <Button onClick={handleSearch}>
                 <Search className="h-4 w-4 ml-2" />
                 بحث
               </Button>
             </div>
-            {/* Batch name search and Show All button - Centered */}
-            <div className="flex flex-col sm:flex-row items-center gap-2 w-full sm:max-w-md">
+
+          {/* Filters Row */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="text-sm font-medium mb-1 block">المنطقة</label>
               <Select
                 value={batchFilter}
-                onChange={(e) => {
-                  setBatchFilter(e.target.value)
-                  // Re-search with new batch filter
-                  if (pieceSearch.trim()) {
-                    handleSearch()
-                  } else {
-                    setSearchedPieces([])
-                  }
-                }}
-                className="flex-1 w-full"
+                onChange={(e) => handleFilterChange('batch', e.target.value)}
               >
                 <option value="all">جميع المناطق</option>
                 {batches.map(b => (
                   <option key={b.id} value={b.name}>{b.name}</option>
                 ))}
               </Select>
-              <Button 
-                variant={showAll ? "default" : "outline"}
-                onClick={() => {
-                  setShowAll(!showAll)
-                  if (!showAll) {
-                    setSearchedPieces([])
-                    setPieceSearch('')
-                  }
-                }}
-                className="w-full sm:w-auto"
-              >
-                {showAll ? 'إخفاء الكل' : 'عرض الكل'}
-              </Button>
             </div>
-            {/* Status Filter */}
-            <div className="w-full sm:max-w-md">
+            <div>
+              <label className="text-sm font-medium mb-1 block">الحالة</label>
               <Select
                 value={statusFilter}
-                onChange={(e) => {
-                  setStatusFilter(e.target.value as any)
-                  if (!showAll && pieceSearch.trim()) {
-                    handleSearch()
-                  }
-                }}
-                className="w-full"
+                onChange={(e) => handleFilterChange('status', e.target.value)}
               >
                 <option value="all">جميع الحالات</option>
                 <option value="Available">متاح</option>
@@ -381,142 +329,92 @@ export function LandAvailability() {
               </Select>
             </div>
           </div>
+
+          {/* Reset Button */}
+          {(statusFilter !== 'all' || batchFilter !== 'all' || pieceSearch.trim()) && (
+            <Button variant="outline" onClick={resetFilters} className="w-full">
+              <X className="h-4 w-4 ml-2" />
+              إعادة تعيين الفلاتر
+            </Button>
+          )}
         </CardContent>
       </Card>
 
-      {/* Search Results - Show ALL matching pieces */}
-      {searchedPieces.length > 0 && (
-        <div className="space-y-3">
-          {searchedPieces.map((searchedPiece) => (
-            <Card key={searchedPiece.id} className={`border-2 ${
-              searchedPiece.status_display === 'Available' ? 'border-green-500 bg-green-50' :
-              searchedPiece.status_display === 'Reserved' ? 'border-orange-500 bg-orange-50' :
-              'border-red-500 bg-red-50'
-            }`}>
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between mb-4">
-                  <div>
-                    <h3 className="text-xl font-bold">القطعة #{searchedPiece.piece_number}</h3>
-                    <p className="text-sm text-muted-foreground">{searchedPiece.land_batch?.name}</p>
-                    {searchedPiece.land_batch?.real_estate_tax_number && (
-                      <p className="text-xs text-muted-foreground mt-1">
-                        الرسم العقاري: {searchedPiece.land_batch.real_estate_tax_number}
-                      </p>
-                    )}
+      {/* Results Count */}
+      <div className="text-center text-sm text-muted-foreground">
+        عرض {filteredPieces.length} من {pieces.length} قطعة
                   </div>
+
+      {/* Results Grid - Centered */}
+      {filteredPieces.length === 0 ? (
+        <Card className="max-w-2xl mx-auto">
+          <CardContent className="pt-6 text-center py-12">
+            <Package className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+            <p className="text-muted-foreground">لا توجد قطع مطابقة للبحث</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 max-w-7xl mx-auto">
+          {filteredPieces.map((piece) => (
+            <Card 
+              key={piece.id} 
+              className={`cursor-pointer transition-all hover:shadow-lg ${
+                piece.status_display === 'Available' ? 'border-green-300 hover:border-green-400' :
+                piece.status_display === 'Reserved' ? 'border-orange-300 hover:border-orange-400' :
+                'border-red-300 hover:border-red-400'
+              }`}
+              onClick={() => openDetails(piece)}
+            >
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-lg">#{piece.piece_number}</CardTitle>
                   <Badge 
                     variant={
-                      searchedPiece.status_display === 'Available' ? 'success' :
-                      searchedPiece.status_display === 'Reserved' ? 'warning' : 'destructive'
+                      piece.status_display === 'Available' ? 'success' :
+                      piece.status_display === 'Reserved' ? 'warning' : 'destructive'
                     }
-                    className="text-base px-4 py-2"
                   >
-                    {searchedPiece.status_display === 'Available' ? 'متاح' :
-                     searchedPiece.status_display === 'Reserved' ? 'محجوز' : 'مباع'}
+                    {piece.status_display === 'Available' ? 'متاح' :
+                     piece.status_display === 'Reserved' ? 'محجوز' : 'مباع'}
                   </Badge>
                 </div>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                {piece.land_batch?.name && (
+                  <div className="flex items-center gap-1 text-sm text-muted-foreground mt-1">
+                    <MapPin className="h-3 w-3" />
+                    {piece.land_batch.name}
+                    {piece.land_batch.location && ` - ${piece.land_batch.location}`}
+                  </div>
+                )}
+              </CardHeader>
+              <CardContent className="space-y-2">
+                <div className="grid grid-cols-2 gap-2 text-sm">
                   <div>
-                    <p className="text-xs text-muted-foreground">المساحة</p>
-                    <p className="font-bold text-lg">{searchedPiece.surface_area} م²</p>
+                    <p className="text-muted-foreground">المساحة</p>
+                    <p className="font-bold">{piece.surface_area} م²</p>
                   </div>
                   <div>
-                    <p className="text-xs text-muted-foreground">السعر (كامل)</p>
-                    <p className="font-bold text-lg">{formatCurrency(searchedPiece.selling_price_full)}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground">السعر (أقساط)</p>
-                    <p className="font-bold text-lg">{formatCurrency(searchedPiece.selling_price_installment)}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground">الحالة</p>
-                    <p className="font-bold text-lg">
-                      {searchedPiece.status_display === 'Available' ? 'متاح للبيع' :
-                       searchedPiece.status_display === 'Reserved' ? 'محجوز' : 'مباع'}
-                    </p>
+                    <p className="text-muted-foreground">السعر (كامل)</p>
+                    <p className="font-bold">{formatCurrency(piece.selling_price_full)}</p>
                   </div>
                 </div>
-                {searchedPiece.reservation && (
-                  <div className="mt-4 p-3 bg-orange-100 rounded-lg space-y-1">
-                    <p className="text-sm"><strong>العميل:</strong> {searchedPiece.reservation.client?.name || 'غير معروف'}</p>
-                    <p className="text-sm"><strong>تاريخ الحجز:</strong> {formatDate(searchedPiece.reservation.reservation_date || searchedPiece.reservation.created_at)}</p>
-                    {searchedPiece.reservation.small_advance_amount && (
-                      <p className="text-sm"><strong>مبلغ الحجز:</strong> {formatCurrency(searchedPiece.reservation.small_advance_amount)}</p>
-                    )}
-                    {searchedPiece.reservation.reserved_until && (
-                      <p className="text-sm"><strong>صالح حتى:</strong> {formatDate(searchedPiece.reservation.reserved_until)}</p>
-                    )}
+                {piece.reservation && (
+                  <div className="p-2 bg-orange-50 rounded text-xs">
+                    <p><strong>العميل:</strong> {piece.reservation.client?.name || 'غير معروف'}</p>
                   </div>
                 )}
-                {searchedPiece.sale && (
-                  <div className={`mt-4 p-3 rounded-lg ${
-                    searchedPiece.sale.status === 'Completed' ? 'bg-red-100' : 'bg-orange-100'
+                {piece.sale && (
+                  <div className={`p-2 rounded text-xs ${
+                    piece.sale.status === 'Completed' ? 'bg-red-50' : 'bg-orange-50'
                   }`}>
-                    <p className="text-sm"><strong>العميل:</strong> {searchedPiece.sale.client?.name}</p>
-                    <p className="text-sm"><strong>تاريخ البيع:</strong> {formatDate(searchedPiece.sale.sale_date)}</p>
-                    <p className="text-sm"><strong>نوع الدفع:</strong> {searchedPiece.sale.payment_type === 'Full' ? 'كامل' : 'أقساط'}</p>
-                    <p className="text-sm"><strong>حالة البيع:</strong> {
-                      searchedPiece.sale.status === 'Completed' ? 'مكتمل' :
-                      searchedPiece.sale.status === 'Pending' ? 'معلق' :
-                      searchedPiece.sale.status === 'AwaitingPayment' ? 'قيد الدفع' :
-                      'قيد المعالجة'
-                    }</p>
-                    {searchedPiece.sale.status !== 'Completed' && (
-                      <p className="text-xs text-orange-700 mt-1">⚠️ البيع لم يكتمل بعد</p>
-                    )}
+                    <p><strong>العميل:</strong> {piece.sale.client?.name}</p>
+                    <p><strong>النوع:</strong> {piece.sale.payment_type === 'Full' ? 'بالحاضر' : 'بالتقسيط'}</p>
                   </div>
                 )}
-                <Button 
-                  variant="outline" 
-                  className="w-full mt-4"
-                  onClick={() => openDetails(searchedPiece)}
-                >
-                  عرض التفاصيل الكاملة
-                </Button>
               </CardContent>
             </Card>
           ))}
         </div>
       )}
-
-      {searchedPieces.length === 0 && pieceSearch.trim() && (
-        <Card className="border-yellow-300 bg-yellow-50">
-          <CardContent className="pt-6">
-            <div className="text-center space-y-3">
-              <p className="text-yellow-800 font-medium">لم يتم العثور على قطعة برقم: {pieceSearch}</p>
-              <div className="text-xs text-yellow-700 space-y-1">
-                <p>جرب البحث بـ:</p>
-                <div className="flex flex-wrap gap-2 justify-center">
-                  <span className="px-2 py-1 bg-yellow-100 rounded">P{pieceSearch}</span>
-                  <span className="px-2 py-1 bg-yellow-100 rounded">#{pieceSearch}</span>
-                  {!isNaN(Number(pieceSearch)) && (
-                    <>
-                      <span className="px-2 py-1 bg-yellow-100 rounded">{pieceSearch.padStart(3, '0')}</span>
-                      <span className="px-2 py-1 bg-yellow-100 rounded">P{pieceSearch.padStart(3, '0')}</span>
-                    </>
-                  )}
-                </div>
-              </div>
-              {pieces.length > 0 && (
-                <div className="mt-4 pt-3 border-t border-yellow-300">
-                  <p className="text-xs font-medium text-yellow-800 mb-2">أمثلة على أرقام القطع المتاحة:</p>
-                  <div className="flex flex-wrap gap-1 justify-center max-h-32 overflow-y-auto">
-                    {pieces.slice(0, 15).map((p, i) => (
-                      <span key={i} className="px-2 py-1 bg-yellow-100 rounded text-xs">
-                        {p.piece_number}
-                      </span>
-                    ))}
-                    {pieces.length > 15 && (
-                      <span className="px-2 py-1 text-xs text-yellow-700">... و {pieces.length - 15} أكثر</span>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
 
       {/* Details Dialog */}
       <Dialog open={detailsOpen} onOpenChange={setDetailsOpen}>
@@ -529,19 +427,20 @@ export function LandAvailability() {
           
           {selectedPiece && (
             <div className="space-y-4">
-              {/* Basic Info */}
-              <div className="bg-gray-50 p-3 rounded-lg space-y-2">
+              <div className="bg-gray-50 p-4 rounded-lg space-y-2">
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">المجموعة:</span>
                   <span className="font-medium">{selectedPiece.land_batch?.name}</span>
                 </div>
+                {selectedPiece.land_batch?.location && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">الموقع:</span>
+                    <span className="font-medium">{selectedPiece.land_batch.location}</span>
+                  </div>
+                )}
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">المساحة:</span>
                   <span className="font-medium">{selectedPiece.surface_area} م²</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">سعر الشراء:</span>
-                  <span className="font-medium">{formatCurrency(selectedPiece.purchase_cost)}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">سعر البيع (كامل):</span>
@@ -553,8 +452,7 @@ export function LandAvailability() {
                 </div>
               </div>
 
-              {/* Status */}
-              <div className={`p-3 rounded-lg ${
+              <div className={`p-4 rounded-lg ${
                 selectedPiece.status_display === 'Available' ? 'bg-green-100' :
                 selectedPiece.status_display === 'Reserved' ? 'bg-orange-100' : 'bg-red-100'
               }`}>
@@ -568,7 +466,6 @@ export function LandAvailability() {
                   </Badge>
                 </div>
 
-                {/* Reservation Details */}
                 {selectedPiece.status_display === 'Reserved' && selectedPiece.reservation && (
                   <div className="space-y-1 text-sm">
                     <p><strong>العميل:</strong> {selectedPiece.reservation.client?.name || 'غير معروف'}</p>
@@ -582,26 +479,19 @@ export function LandAvailability() {
                   </div>
                 )}
 
-                {/* Sale Details */}
                 {selectedPiece.sale && (
                   <div className="space-y-1 text-sm">
                     <p><strong>العميل:</strong> {selectedPiece.sale.client?.name}</p>
                     <p><strong>تاريخ البيع:</strong> {formatDate(selectedPiece.sale.sale_date)}</p>
-                    <p><strong>نوع الدفع:</strong> {selectedPiece.sale.payment_type === 'Full' ? 'كامل' : 'أقساط'}</p>
+                    <p><strong>نوع الدفع:</strong> {selectedPiece.sale.payment_type === 'Full' ? 'بالحاضر' : 'بالتقسيط'}</p>
                     <p><strong>السعر:</strong> {formatCurrency(selectedPiece.sale.total_selling_price)}</p>
                     <p><strong>حالة البيع:</strong> {
-                      selectedPiece.sale.status === 'Completed' ? 'مكتمل' :
-                      selectedPiece.sale.status === 'Pending' ? 'معلق' :
-                      selectedPiece.sale.status === 'AwaitingPayment' ? 'قيد الدفع' :
-                      'قيد المعالجة'
+                      selectedPiece.sale.status === 'Completed' ? 'مباع' :
+                      selectedPiece.sale.status === 'Pending' ? 'معلق' : 'قيد المعالجة'
                     }</p>
-                    {selectedPiece.sale.status !== 'Completed' && (
-                      <p className="text-xs text-orange-700 mt-1">⚠️ البيع لم يكتمل بعد - القطعة محجوزة</p>
-                    )}
                   </div>
                 )}
 
-                {/* Available */}
                 {selectedPiece.status_display === 'Available' && (
                   <p className="text-sm text-green-700">هذه القطعة متاحة للبيع أو الحجز</p>
                 )}

@@ -265,14 +265,38 @@ export function Debts() {
     return Array.from(grouped.values()).reduce((sum, amount) => sum + amount, 0)
   }
 
-  // Calculate total daily payment required (based on remaining amounts after payments)
-  const getTotalDailyPayment = (): number => {
+  // Calculate total daily payment required TODAY (per debt, accounting for today's payments)
+  const getTotalDailyPaymentRequired = (): number => {
+    const today = new Date().toISOString().split('T')[0]
+    const todayPaymentsByDebt = new Map<string, number>()
+    
+    // Group today's payments by debt
+    payments.filter(p => p.payment_date === today).forEach(p => {
+      const current = todayPaymentsByDebt.get(p.debt_id) || 0
+      todayPaymentsByDebt.set(p.debt_id, current + p.amount_paid)
+    })
+    
     const activeDebts = debts.filter(d => d.status === 'Active')
-    return activeDebts.reduce((sum, debt) => {
-      const remaining = getRemainingAmount(debt) // This already accounts for payments
-      const daily = calculateDailyPayment(debt, remaining)
-      return sum + daily
-    }, 0)
+    let totalRequired = 0
+    
+    activeDebts.forEach(debt => {
+      // Calculate remaining amount BEFORE today's payments
+      const paymentsBeforeToday = payments
+        .filter(p => p.debt_id === debt.id && p.payment_date !== today)
+      const totalPaidBeforeToday = paymentsBeforeToday.reduce((sum, p) => sum + p.amount_paid, 0)
+      const remainingBeforeToday = Math.max(0, debt.amount_owed - totalPaidBeforeToday)
+      
+      // Calculate what's required today for this debt
+      const dailyRequired = calculateDailyPayment(debt, remainingBeforeToday)
+      
+      // Subtract today's payments to this specific debt
+      const todayPaidToThisDebt = todayPaymentsByDebt.get(debt.id) || 0
+      const stillRequired = Math.max(0, dailyRequired - todayPaidToThisDebt)
+      
+      totalRequired += stillRequired
+    })
+    
+    return totalRequired
   }
 
   // Calculate debt statistics
@@ -290,10 +314,8 @@ export function Debts() {
     const overdueAmount = overdueDebts.reduce((sum, d) => sum + getRemainingAmount(d), 0)
     const todayPaid = getTodayPayments()
     
-    // Calculate daily required AFTER subtracting today's payments
-    // This ensures the requirement decreases as payments are made
-    const totalDailyRequired = getTotalDailyPayment()
-    const remainingDailyRequired = Math.max(0, totalDailyRequired - todayPaid)
+    // Calculate daily required TODAY (already accounts for today's payments per debt)
+    const remainingDailyRequired = getTotalDailyPaymentRequired()
 
     return {
       total: activeDebts.length,
@@ -301,10 +323,10 @@ export function Debts() {
       overdue: overdueDebts.length,
       overdueAmount,
       todayPaid,
-      totalDailyRequired: remainingDailyRequired, // Show remaining required after today's payments
+      totalDailyRequired: remainingDailyRequired, // Show remaining required today after today's payments
       remaining: remainingDailyRequired,
     }
-  }, [debts, payments, getRemainingAmount, getTodayPayments, getTotalDailyPayment])
+  }, [debts, payments])
 
   // Calculate progress percentage
   const calculateProgress = (debt: Debt): number => {

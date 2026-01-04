@@ -45,6 +45,8 @@ interface ClientInstallmentGroup {
     totalPaid: number
     nextDueDate: string | null
     progress: number
+    isConfirmed?: boolean
+    landPieceCount?: number
   }[]
   totalDue: number
   totalPaid: number
@@ -63,11 +65,26 @@ export function Installments() {
   const [installments, setInstallments] = useState<InstallmentWithRelations[]>([])
   const [loading, setLoading] = useState(true)
   const [filterStatus, setFilterStatus] = useState<string>('all')
-  const [viewMode, setViewMode] = useState<'clients' | 'list'>('clients')
-  const [expandedClients, setExpandedClients] = useState<Set<string>>(new Set())
-  const [expandedSales, setExpandedSales] = useState<Set<string>>(new Set()) // Track expanded sales
+  const [filterOverdue, setFilterOverdue] = useState<boolean>(false)
+  const [filterDueThisMonth, setFilterDueThisMonth] = useState<boolean>(false)
+  const [filterMinRemaining, setFilterMinRemaining] = useState<string>('')
+  const [filterProgress, setFilterProgress] = useState<string>('all') // all, low, medium, high
   const [searchTerm, setSearchTerm] = useState('') // Search by client name
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('')
+  
+  // Details drawer state
+  const [detailsDrawerOpen, setDetailsDrawerOpen] = useState(false)
+  const [selectedSaleForDetails, setSelectedSaleForDetails] = useState<{
+    saleId: string
+    clientName: string
+    clientCin?: string
+    saleDate: string
+    installments: InstallmentWithRelations[]
+    totalDue: number
+    totalPaid: number
+    totalUnpaid: number
+    landPieces: string
+  } | null>(null)
   
   // Debounced search
   const debouncedSearchFn = useCallback(
@@ -82,6 +99,89 @@ export function Installments() {
   const [monthsToPayCount, setMonthsToPayCount] = useState(1)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [paymentConfirmOpen, setPaymentConfirmOpen] = useState(false)
+  
+  // Client details dialog
+  const [clientDetailsOpen, setClientDetailsOpen] = useState(false)
+  const [selectedClientForDetails, setSelectedClientForDetails] = useState<any>(null)
+  const [clientSales, setClientSales] = useState<any[]>([])
+  
+  const openClientDetails = async (client: any) => {
+    if (!client || !client.id) return
+    setSelectedClientForDetails(client)
+    setClientDetailsOpen(true)
+    
+    // Fetch client's sales history
+    try {
+      const { data, error } = await supabase
+        .from('sales')
+        .select('*')
+        .eq('client_id', client.id)
+        .order('sale_date', { ascending: false })
+      
+      if (error) throw error
+      const sales = data || []
+      
+      // Fetch land pieces for all sales
+      const allPieceIds = new Set<string>()
+      sales.forEach((sale: any) => {
+        if (sale.land_piece_ids) {
+          sale.land_piece_ids.forEach((id: string) => allPieceIds.add(id))
+        }
+      })
+      
+      if (allPieceIds.size > 0) {
+        try {
+          const { data: piecesData, error: piecesError } = await supabase
+            .from('land_pieces')
+            .select('id, piece_number, land_batch_id')
+            .in('id', Array.from(allPieceIds))
+          
+          if (piecesError) {
+            console.error('Error fetching land pieces:', piecesError)
+          } else if (piecesData) {
+            // Fetch batch names separately if needed
+            const batchIds = new Set(piecesData.map((p: any) => p.land_batch_id).filter(Boolean))
+            let batchMap = new Map()
+            
+            if (batchIds.size > 0) {
+              const { data: batchesData } = await supabase
+                .from('land_batches')
+                .select('id, name')
+                .in('id', Array.from(batchIds))
+              
+              if (batchesData) {
+                batchMap = new Map(batchesData.map((b: any) => [b.id, b.name]))
+              }
+            }
+            
+            const piecesMap = new Map(piecesData.map((p: any) => [
+              p.id, 
+              {
+                ...p,
+                land_batch: batchMap.get(p.land_batch_id) ? { name: batchMap.get(p.land_batch_id) } : null
+              }
+            ]))
+            
+            sales.forEach((sale: any) => {
+              if (sale.land_piece_ids) {
+                sale._landPieces = sale.land_piece_ids
+                  .map((id: string) => piecesMap.get(id))
+                  .filter(Boolean)
+              }
+            })
+          }
+        } catch (err) {
+          console.error('Error processing land pieces:', err)
+          // Continue without land pieces data
+        }
+      }
+      
+      setClientSales(sales)
+    } catch (err) {
+      console.error('Error fetching client sales:', err)
+      setClientSales([])
+    }
+  }
 
   // Summary stats
   const [stats, setStats] = useState({
@@ -97,6 +197,108 @@ export function Installments() {
     fetchInstallments()
   }, [])
 
+  // Stack unpaid overdue installments onto the first unpaid installment
+  useEffect(() => {
+    const stackOverdueInstallments = async () => {
+      const now = new Date()
+      now.setHours(0, 0, 0, 0)
+      
+      // Group installments by sale
+      const installmentsBySale = new Map<string, InstallmentWithRelations[]>()
+      installments.forEach(inst => {
+        if (!installmentsBySale.has(inst.sale_id)) {
+          installmentsBySale.set(inst.sale_id, [])
+        }
+        installmentsBySale.get(inst.sale_id)!.push(inst)
+      })
+      
+      // For each sale, stack overdue installments
+      for (const [saleId, saleInstallments] of installmentsBySale.entries()) {
+        // Sort by installment number
+        saleInstallments.sort((a, b) => a.installment_number - b.installment_number)
+        
+        // Find first unpaid installment (lowest number with remaining amount)
+        const firstUnpaid = saleInstallments.find(i => {
+          const remaining = i.amount_due + (i.stacked_amount || 0) - i.amount_paid
+          return remaining > 0.01
+        })
+        
+        if (!firstUnpaid) continue
+        
+        // Find all overdue unpaid installments that come before the first unpaid
+        const overdueBeforeFirst = saleInstallments.filter(i => {
+          if (i.id === firstUnpaid.id) return false
+          const dueDate = new Date(i.due_date)
+          dueDate.setHours(0, 0, 0, 0)
+          const remaining = i.amount_due + (i.stacked_amount || 0) - i.amount_paid
+          return dueDate < now && remaining > 0.01 && i.installment_number < firstUnpaid.installment_number
+        })
+        
+        if (overdueBeforeFirst.length === 0) continue
+        
+        // Calculate total to stack from overdue installments
+        let totalToStack = 0
+        const overdueToStack: Array<{ id: string; remaining: number }> = []
+        
+        for (const overdue of overdueBeforeFirst) {
+          const remaining = overdue.amount_due + (overdue.stacked_amount || 0) - overdue.amount_paid
+          if (remaining > 0.01) {
+            totalToStack += remaining
+            overdueToStack.push({ id: overdue.id, remaining })
+          }
+        }
+        
+        if (totalToStack <= 0.01) continue
+        
+        // Check if first unpaid already has this stacked amount (avoid duplicate stacking)
+        const currentStacked = firstUnpaid.stacked_amount || 0
+        const expectedStacked = overdueToStack.reduce((sum, o) => sum + o.remaining, 0)
+        
+        // Only update if the stacked amount doesn't already include these overdue amounts
+        if (Math.abs(currentStacked - expectedStacked) > 0.01) {
+          // Add stacked amount to first unpaid installment
+          const newStackedAmount = currentStacked + totalToStack
+          
+          await supabase
+            .from('installments')
+            .update({ stacked_amount: newStackedAmount })
+            .eq('id', firstUnpaid.id)
+          
+          // Mark overdue installments as having their amounts stacked (but keep them as unpaid)
+          // We don't mark them as Paid - they remain unpaid but their amounts are stacked
+          for (const overdue of overdueToStack) {
+            // Update the overdue installment to reflect that its amount is stacked
+            // Keep it as unpaid but set amount_paid to include the amount_due so remaining is 0
+            const overdueInst = saleInstallments.find(i => i.id === overdue.id)
+            if (overdueInst) {
+              const newAmountPaid = overdueInst.amount_paid + overdueInst.amount_due + (overdueInst.stacked_amount || 0)
+              await supabase
+                .from('installments')
+                .update({ 
+                  stacked_amount: 0,
+                  amount_paid: newAmountPaid,
+                  // Keep status as Unpaid or Late, don't mark as Paid
+                  status: overdueInst.status === 'Late' ? 'Late' : 'Unpaid'
+                })
+                .eq('id', overdue.id)
+            }
+          }
+        }
+      }
+    }
+    
+    // Run stacking check when installments change (debounced to avoid too many updates)
+    if (installments.length > 0) {
+      const timeoutId = setTimeout(() => {
+        stackOverdueInstallments().catch(err => {
+          console.error('Error stacking overdue installments:', err)
+        })
+      }, 1000) // Wait 1 second after installments change
+      
+      return () => clearTimeout(timeoutId)
+    }
+  }, [installments])
+
   const fetchInstallments = async () => {
     try {
       const { data, error } = await supabase
@@ -106,13 +308,75 @@ export function Installments() {
           sale:sales (
             *,
             client:clients (*),
-            land_piece_ids
+            land_piece_ids,
+            is_confirmed,
+            big_advance_confirmed
           )
         `)
         .order('due_date', { ascending: true })
 
       if (error) throw error
       const installmentData = (data as InstallmentWithRelations[]) || []
+
+      // Fetch land pieces for all sales to get piece numbers
+      if (installmentData && installmentData.length > 0) {
+        const allPieceIds = new Set<string>()
+        installmentData.forEach((inst: any) => {
+          if (inst.sale?.land_piece_ids) {
+            inst.sale.land_piece_ids.forEach((id: string) => allPieceIds.add(id))
+          }
+        })
+        
+        if (allPieceIds.size > 0) {
+          try {
+            const { data: piecesData, error: piecesError } = await supabase
+              .from('land_pieces')
+              .select('id, piece_number, land_batch_id')
+              .in('id', Array.from(allPieceIds))
+            
+            if (piecesError) {
+              console.error('Error fetching land pieces:', piecesError)
+            } else if (piecesData) {
+              // Fetch batch names separately if needed
+              const batchIds = new Set(piecesData.map((p: any) => p.land_batch_id).filter(Boolean))
+              let batchMap = new Map()
+              
+              if (batchIds.size > 0) {
+                const { data: batchesData } = await supabase
+                  .from('land_batches')
+                  .select('id, name')
+                  .in('id', Array.from(batchIds))
+                
+                if (batchesData) {
+                  batchMap = new Map(batchesData.map((b: any) => [b.id, b.name]))
+                }
+              }
+              
+              // Attach piece info to sales
+              const piecesMap = new Map(piecesData.map((p: any) => [
+                p.id, 
+                {
+                  ...p,
+                  land_batch: batchMap.get(p.land_batch_id) ? { name: batchMap.get(p.land_batch_id) } : null
+                }
+              ]))
+              
+              installmentData.forEach((inst: any) => {
+                if (inst.sale?.land_piece_ids) {
+                  inst.sale._landPieces = inst.sale.land_piece_ids
+                    .map((id: string) => piecesMap.get(id))
+                    .filter(Boolean)
+                }
+              })
+            }
+          } catch (err) {
+            console.error('Error processing land pieces:', err)
+            // Continue without land pieces data
+          }
+        }
+      }
+      
+      // Set installments after attaching land pieces
       setInstallments(installmentData)
 
       // Calculate stats
@@ -127,7 +391,11 @@ export function Installments() {
         dueDate.setHours(0, 0, 0, 0)
         return dueDate < now
       })
-      const totalOverdue = overdue.reduce((sum, i) => sum + (i.amount_due - i.amount_paid + i.stacked_amount), 0)
+      // Calculate total overdue only for installments with actual remaining amounts
+      const totalOverdue = overdue.reduce((sum, i) => {
+        const remaining = i.amount_due + i.stacked_amount - i.amount_paid
+        return sum + Math.max(0, remaining)
+      }, 0)
       
       // Count unique clients
       const uniqueClients = new Set(installmentData.map(i => i.sale?.client_id).filter(Boolean))
@@ -160,7 +428,12 @@ export function Installments() {
   // Get all unpaid installments for a sale (for multi-month payment) - Memoized
   const getUnpaidInstallmentsForSale = useCallback((saleId: string) => {
     return installments
-      .filter((i) => i.sale_id === saleId && i.status !== 'Paid')
+      .filter((i) => {
+        if (i.sale_id !== saleId) return false
+        // Check if there's actually an amount remaining (including stacked amounts)
+        const remaining = i.amount_due + (i.stacked_amount || 0) - i.amount_paid
+        return remaining > 0.01
+      })
       .sort((a, b) => a.installment_number - b.installment_number)
   }, [installments])
 
@@ -191,13 +464,43 @@ export function Installments() {
 
   const openPaymentDialog = (installment: InstallmentWithRelations) => {
     setSelectedInstallment(installment)
-    setMonthsToPayCount(1)
-    // Auto-calculate payment amount for first month
+    
+    // Auto-calculate payment amount for ALL unpaid installments (including stacked amounts)
     const unpaid = getUnpaidInstallmentsForSale(installment.sale_id)
-    const firstMonthAmount = unpaid.length > 0 
-      ? unpaid[0].amount_due + unpaid[0].stacked_amount - unpaid[0].amount_paid
-      : 0
-    setPaymentAmount(String(firstMonthAmount))
+    
+    // Check if this is an installment sale or full payment sale
+    const isInstallmentSale = installment.sale?.payment_type !== 'Full'
+    
+    if (isInstallmentSale) {
+      // For installment sales: auto-select all overdue installments (accumulated)
+      const overdueInstallments = unpaid.filter(inst => isInstallmentOverdue(inst))
+      
+      if (overdueInstallments.length > 0) {
+        // Auto-select all overdue installments
+        setMonthsToPayCount(overdueInstallments.length)
+        // Calculate total of overdue installments (all stacked amounts should be on the first unpaid)
+        const overdueTotal = overdueInstallments.reduce((sum, inst) => {
+          return sum + getRemainingAmount(inst)
+        }, 0)
+        const roundedAmount = Math.round(overdueTotal * 100) / 100
+        setPaymentAmount(String(roundedAmount))
+      } else {
+        // No overdue, default to first installment
+        setMonthsToPayCount(1)
+        const firstAmount = unpaid.length > 0 ? getRemainingAmount(unpaid[0]) : 0
+        const roundedAmount = Math.round(firstAmount * 100) / 100
+        setPaymentAmount(String(roundedAmount))
+      }
+    } else {
+      // For full payment sales: show total remaining
+      setMonthsToPayCount(1)
+      const totalUnpaidAmount = unpaid.reduce((sum, inst) => {
+        return sum + getRemainingAmount(inst)
+      }, 0)
+      const roundedAmount = Math.round(totalUnpaidAmount * 100) / 100
+      setPaymentAmount(String(roundedAmount))
+    }
+    
     setPaymentDialogOpen(true)
   }
 
@@ -218,37 +521,56 @@ export function Installments() {
 
     setErrorMessage(null)
     try {
-      // Get installments to pay (for multi-month payment)
+      // CRITICAL: Only get installments for THIS specific sale (per-client isolation)
+      // This ensures overpayments only affect the same client's installments
+      const clientId = selectedInstallment.sale?.client_id
+      if (!clientId) {
+        setErrorMessage('خطأ: لا يمكن تحديد العميل')
+        return
+      }
+
+      // Get installments to pay (for multi-month payment) - ONLY for this sale
       const unpaidInstallments = getUnpaidInstallmentsForSale(selectedInstallment.sale_id)
       const installmentsToPay = unpaidInstallments.slice(0, monthsToPayCount)
       
       let remainingPayment = amount
       const today = new Date().toISOString().split('T')[0]
 
-      // Process each installment
+      // Process each installment for THIS sale only
       for (const inst of installmentsToPay) {
         if (remainingPayment <= 0) break
 
-        const totalDue = inst.amount_due + inst.stacked_amount - inst.amount_paid
+        // Calculate remaining amount for this specific installment (per-client calculation)
+        const totalDue = getRemainingAmount(inst)
+        
+        // If this installment is already fully paid, skip to next
+        if (totalDue <= 0.01) continue
+        
         const paymentForThis = Math.min(remainingPayment, totalDue)
         const newPaid = inst.amount_paid + paymentForThis
-        const isFullyPaid = newPaid >= inst.amount_due + inst.stacked_amount
+        const totalRequired = inst.amount_due + inst.stacked_amount
+        const isFullyPaid = newPaid >= totalRequired - 0.01 // Use threshold for floating point
 
-        // Update installment
+        // Calculate new stacked_amount correctly
+        // If fully paid, stacked_amount should be 0
+        // Otherwise, it's the remaining amount after payment
+        const newStackedAmount = isFullyPaid ? 0 : Math.max(0, totalRequired - newPaid)
+
+        // Update installment - per-client, isolated calculation
         await supabase
           .from('installments')
           .update({
             amount_paid: newPaid,
-            status: isFullyPaid ? 'Paid' : newPaid > 0 ? 'Partial' : inst.status,
+            status: isFullyPaid ? 'Paid' : newPaid > 0.01 ? 'Partial' : inst.status,
             paid_date: isFullyPaid ? today : null,
-            stacked_amount: isFullyPaid ? 0 : Math.max(0, inst.amount_due + inst.stacked_amount - newPaid),
+            stacked_amount: newStackedAmount,
           })
           .eq('id', inst.id)
 
-        // Record individual payment
+        // Record individual payment - linked to this specific client and sale
         await supabase.from('payments').insert([{
-          client_id: selectedInstallment.sale?.client_id,
-          sale_id: selectedInstallment.sale_id,
+          client_id: clientId, // Ensure payment is linked to correct client
+          sale_id: selectedInstallment.sale_id, // Ensure payment is linked to correct sale
           installment_id: inst.id,
           amount_paid: paymentForThis,
           payment_type: 'Installment',
@@ -258,7 +580,15 @@ export function Installments() {
         remainingPayment -= paymentForThis
       }
 
-      // Recalculate sale status after payment
+      // If there's remaining payment after paying all installments for this sale,
+      // it should be stored as credit for this client's future installments
+      // For now, we'll just log it - future enhancement could add a credit system
+      if (remainingPayment > 0.01) {
+        console.log(`Overpayment of ${remainingPayment} for sale ${selectedInstallment.sale_id} - could be applied to future installments`)
+        // TODO: Implement credit system for overpayments
+      }
+
+      // Recalculate sale status after payment - only affects this sale
       await recalculateSaleStatus(selectedInstallment.sale_id)
 
       setPaymentDialogOpen(false)
@@ -268,18 +598,34 @@ export function Installments() {
       fetchInstallments()
       setErrorMessage(null)
     } catch (error) {
+      console.error('Payment recording error:', error)
       setErrorMessage('خطأ في تسجيل الدفع')
     }
   }
 
   // Helper function to check if installment is overdue
+  // Only returns true if: due date passed AND there's actually an amount remaining
   const isInstallmentOverdue = (inst: InstallmentWithRelations): boolean => {
     if (inst.status === 'Paid') return false
+    
+    // Calculate remaining amount for this specific installment
+    const remainingAmount = inst.amount_due + inst.stacked_amount - inst.amount_paid
+    
+    // If fully paid, not overdue
+    if (remainingAmount <= 0.01) return false // Use small threshold for floating point
+    
     const dueDate = new Date(inst.due_date)
     const now = new Date()
     now.setHours(0, 0, 0, 0)
     dueDate.setHours(0, 0, 0, 0)
-    return dueDate < now
+    
+    // Only overdue if date passed AND there's amount due
+    return dueDate < now && remainingAmount > 0.01
+  }
+  
+  // Helper function to get remaining amount for an installment (per-client calculation)
+  const getRemainingAmount = (inst: InstallmentWithRelations): number => {
+    return Math.max(0, inst.amount_due + inst.stacked_amount - inst.amount_paid)
   }
 
   // Helper function to get days until due or overdue
@@ -301,16 +647,6 @@ export function Installments() {
     return inst.status === filterStatus
   })
 
-  // Toggle sale expansion
-  const toggleSale = (saleId: string) => {
-    const newExpanded = new Set(expandedSales)
-    if (newExpanded.has(saleId)) {
-      newExpanded.delete(saleId)
-    } else {
-      newExpanded.add(saleId)
-    }
-    setExpandedSales(newExpanded)
-  }
 
   // Smart installment grouping - group consecutive installments with same amount and date pattern
   const groupInstallments = (installments: InstallmentWithRelations[]) => {
@@ -421,15 +757,19 @@ export function Installments() {
       // Group by sale
       let saleGroup = group.sales.find(s => s.saleId === inst.sale_id)
       if (!saleGroup) {
+        const sale = inst.sale
+        const isConfirmed = (sale as any)?.is_confirmed || (sale as any)?.big_advance_confirmed || false
         saleGroup = {
           saleId: inst.sale_id,
-          saleDate: inst.sale?.sale_date || '',
-          totalPrice: inst.sale?.total_selling_price || 0,
+          saleDate: sale?.sale_date || '',
+          totalPrice: sale?.total_selling_price || 0,
           installments: [],
           totalDue: 0,
           totalPaid: 0,
           nextDueDate: null,
           progress: 0,
+          isConfirmed,
+          landPieceCount: sale?.land_piece_ids?.length || 0,
         }
         group.sales.push(saleGroup)
       }
@@ -452,20 +792,157 @@ export function Installments() {
       })
     })
     
-    return Array.from(groups.values()).sort((a, b) => b.overdueCount - a.overdueCount)
+    return Array.from(groups.values())
   }, [filteredInstallments])
-
-  // Toggle client expansion
-  const toggleClient = (clientId: string) => {
-    setExpandedClients(prev => {
-      const next = new Set(prev)
-      if (next.has(clientId)) {
-        next.delete(clientId)
-      } else {
-        next.add(clientId)
-      }
-      return next
+  
+  // Create deals table data - one row per sale/deal
+  const dealsTableData = useMemo(() => {
+    const deals: Array<{
+      saleId: string
+      clientId: string
+      clientName: string
+      clientCin?: string
+      saleDate: string
+      landPieces: string
+      totalInstallments: number
+      paidInstallments: number
+      totalDue: number
+      totalPaid: number
+      totalUnpaid: number
+      progress: number
+      nextDueDate: string | null
+      daysUntilDue: number
+      isOverdue: boolean
+      overdueAmount: number
+      installments: InstallmentWithRelations[]
+    }> = []
+    
+    clientGroups.forEach(group => {
+      group.sales.forEach(sale => {
+        const unpaidInstallments = sale.installments.filter(i => getRemainingAmount(i) > 0.01)
+        const nextInst = unpaidInstallments[0]
+        
+        if (!nextInst) return // Skip fully paid deals
+        
+        const totalUnpaid = unpaidInstallments.reduce((sum, inst) => sum + getRemainingAmount(inst), 0)
+        const daysUntilDue = nextInst ? getDaysUntilDue(nextInst) : 999
+        const isOverdue = nextInst ? isInstallmentOverdue(nextInst) : false
+        
+        // Calculate overdue amount: sum only installments that are actually overdue (past due date)
+        const overdueInstallments = sale.installments.filter(inst => {
+          const remaining = getRemainingAmount(inst)
+          return remaining > 0.01 && isInstallmentOverdue(inst)
+        })
+        const overdueAmount = overdueInstallments.reduce((sum, inst) => sum + getRemainingAmount(inst), 0)
+        
+        // Get land pieces
+        const landPieces = (nextInst.sale as any)?._landPieces || []
+        const pieceNumbers = landPieces.map((p: any) => p?.piece_number).filter(Boolean).join('، ')
+        
+        deals.push({
+          saleId: sale.saleId,
+          clientId: group.clientId,
+          clientName: group.clientName,
+          clientCin: group.sales[0]?.installments[0]?.sale?.client?.cin,
+          saleDate: sale.saleDate,
+          landPieces: pieceNumbers || '-',
+          totalInstallments: sale.installments.length,
+          paidInstallments: sale.installments.filter(i => getRemainingAmount(i) <= 0.01).length,
+          totalDue: sale.totalDue,
+          totalPaid: sale.totalPaid,
+          totalUnpaid,
+          progress: sale.progress,
+          nextDueDate: sale.nextDueDate,
+          daysUntilDue,
+          isOverdue,
+          overdueAmount,
+          installments: sale.installments
+        })
+      })
     })
+    
+    // Apply filters
+    let filtered = deals
+    
+    // Search filter
+    if (debouncedSearchTerm.trim()) {
+      const search = debouncedSearchTerm.toLowerCase().trim()
+      filtered = filtered.filter(deal => 
+        deal.clientName.toLowerCase().includes(search) ||
+        deal.clientCin?.toLowerCase().includes(search) ||
+        deal.landPieces.toLowerCase().includes(search)
+      )
+    }
+    
+    // Overdue filter
+    if (filterOverdue) {
+      filtered = filtered.filter(deal => deal.isOverdue)
+    }
+    
+    // Due this month filter
+    if (filterDueThisMonth) {
+      const now = new Date()
+      const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0)
+      filtered = filtered.filter(deal => {
+        if (!deal.nextDueDate) return false
+        const dueDate = new Date(deal.nextDueDate)
+        return dueDate >= now && dueDate <= endOfMonth
+      })
+    }
+    
+    // Minimum remaining amount filter
+    if (filterMinRemaining) {
+      const minAmount = parseFloat(filterMinRemaining) || 0
+      filtered = filtered.filter(deal => deal.totalUnpaid >= minAmount)
+    }
+    
+    // Progress filter
+    if (filterProgress !== 'all') {
+      if (filterProgress === 'low') {
+        filtered = filtered.filter(deal => deal.progress < 33)
+      } else if (filterProgress === 'medium') {
+        filtered = filtered.filter(deal => deal.progress >= 33 && deal.progress < 66)
+      } else if (filterProgress === 'high') {
+        filtered = filtered.filter(deal => deal.progress >= 66)
+      }
+    }
+    
+    // Default sorting: Overdue first, then closest due dates, then others
+    filtered.sort((a, b) => {
+      // Overdue deals first
+      if (a.isOverdue && !b.isOverdue) return -1
+      if (!a.isOverdue && b.isOverdue) return 1
+      
+      // If both overdue, sort by overdue amount (highest first)
+      if (a.isOverdue && b.isOverdue) {
+        return b.overdueAmount - a.overdueAmount
+      }
+      
+      // Then by days until due (closest first)
+      if (a.daysUntilDue !== b.daysUntilDue) {
+        return a.daysUntilDue - b.daysUntilDue
+      }
+      
+      // Finally by total unpaid (highest first)
+      return b.totalUnpaid - a.totalUnpaid
+    })
+    
+    return filtered
+  }, [clientGroups, debouncedSearchTerm, filterOverdue, filterDueThisMonth, filterMinRemaining, filterProgress])
+  
+  const openSaleDetails = (deal: typeof dealsTableData[0]) => {
+    setSelectedSaleForDetails({
+      saleId: deal.saleId,
+      clientName: deal.clientName,
+      clientCin: deal.clientCin,
+      saleDate: deal.saleDate,
+      installments: deal.installments,
+      totalDue: deal.totalDue,
+      totalPaid: deal.totalPaid,
+      totalUnpaid: deal.totalUnpaid,
+      landPieces: deal.landPieces
+    })
+    setDetailsDrawerOpen(true)
   }
 
   // Monthly summary - uses ALL installments (not filtered) so it always shows
@@ -570,45 +1047,220 @@ export function Installments() {
         </div>
       )}
 
-      {/* Search and Filter */}
-      <div className="flex flex-col sm:flex-row gap-2 items-center">
-        <Input
-          type="text"
-          placeholder="🔍 ابحث عن عميل..."
-          value={searchTerm}
-          maxLength={255}
-          onChange={(e) => {
-            setSearchTerm(e.target.value)
-            debouncedSearchFn(e.target.value)
-          }}
-          className="flex-1"
-        />
-        <Select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="w-40">
-          <option value="all">الكل</option>
-          <option value="Unpaid">غير مدفوع</option>
-          <option value="Paid">مدفوع</option>
-          <option value="Late">متأخر</option>
-        </Select>
-        <div className="flex gap-2">
-          <Button 
-            variant={viewMode === 'clients' ? 'default' : 'outline'} 
-            size="sm"
-            onClick={() => setViewMode('clients')}
-          >
-            حسب العميل
-          </Button>
-          <Button 
-            variant={viewMode === 'list' ? 'default' : 'outline'} 
-            size="sm"
-            onClick={() => setViewMode('list')}
-          >
-            قائمة
-          </Button>
-        </div>
-      </div>
+      {/* Search and Advanced Filters */}
+      <Card>
+        <CardContent className="p-4">
+          <div className="space-y-3">
+            <div className="flex flex-col sm:flex-row gap-2">
+              <Input
+                type="text"
+                placeholder="🔍 ابحث عن عميل أو رقم قطعة..."
+                value={searchTerm}
+                maxLength={255}
+                onChange={(e) => {
+                  setSearchTerm(e.target.value)
+                  debouncedSearchFn(e.target.value)
+                }}
+                className="flex-1"
+              />
+            </div>
+            <div className="flex flex-wrap gap-2 items-center">
+              <Button
+                variant={filterOverdue ? 'destructive' : 'outline'}
+                size="sm"
+                onClick={() => setFilterOverdue(!filterOverdue)}
+              >
+                {filterOverdue ? '✓ ' : ''}متأخر فقط
+              </Button>
+              <Button
+                variant={filterDueThisMonth ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setFilterDueThisMonth(!filterDueThisMonth)}
+              >
+                {filterDueThisMonth ? '✓ ' : ''}مستحق هذا الشهر
+              </Button>
+              <div className="flex items-center gap-2">
+                <Label htmlFor="minRemaining" className="text-sm whitespace-nowrap">الحد الأدنى:</Label>
+                <Input
+                  id="minRemaining"
+                  type="number"
+                  placeholder="0"
+                  value={filterMinRemaining}
+                  onChange={(e) => setFilterMinRemaining(e.target.value)}
+                  className="w-24"
+                />
+              </div>
+              <Select 
+                value={filterProgress} 
+                onChange={(e) => setFilterProgress(e.target.value)} 
+                className="w-32"
+              >
+                <option value="all">كل التقدم</option>
+                <option value="low">منخفض (&lt;33%)</option>
+                <option value="medium">متوسط (33-66%)</option>
+                <option value="high">عالي (&gt;66%)</option>
+              </Select>
+              {(filterOverdue || filterDueThisMonth || filterMinRemaining || filterProgress !== 'all') && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setFilterOverdue(false)
+                    setFilterDueThisMonth(false)
+                    setFilterMinRemaining('')
+                    setFilterProgress('all')
+                  }}
+                >
+                  مسح الفلاتر
+                </Button>
+              )}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
-      {/* Client-based View - Grouped by Client and Sale */}
-      {viewMode === 'clients' && (
+      {/* Main Table View - One Row Per Deal */}
+      <Card>
+        <CardContent className="p-0">
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-gray-50">
+                  <TableHead className="font-semibold">العميل</TableHead>
+                  <TableHead className="font-semibold">الصفقة</TableHead>
+                  <TableHead className="font-semibold">القطع</TableHead>
+                  <TableHead className="font-semibold">الأقساط</TableHead>
+                  <TableHead className="font-semibold">المدفوع</TableHead>
+                  <TableHead className="font-semibold">المتبقي</TableHead>
+                  <TableHead className="font-semibold">المتأخر</TableHead>
+                  <TableHead className="font-semibold">تاريخ الاستحقاق</TableHead>
+                  <TableHead className="font-semibold">الحالة</TableHead>
+                  <TableHead className="font-semibold">إجراء</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {dealsTableData.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
+                      لا توجد صفقات
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  dealsTableData.map((deal) => {
+                    // Status indicator
+                    let statusIndicator = '🟢'
+                    let statusText = 'على المسار'
+                    let statusColor = 'text-green-600'
+                    
+                    if (deal.isOverdue) {
+                      statusIndicator = '🔴'
+                      statusText = 'متأخر'
+                      statusColor = 'text-red-600'
+                    } else if (deal.daysUntilDue <= 7) {
+                      statusIndicator = '🟡'
+                      statusText = 'قريب الاستحقاق'
+                      statusColor = 'text-orange-600'
+                    }
+                    
+                    return (
+                      <TableRow 
+                        key={deal.saleId}
+                        className={`cursor-pointer hover:bg-blue-50/50 transition-colors ${
+                          deal.isOverdue ? 'bg-red-50/30' : deal.daysUntilDue <= 7 ? 'bg-orange-50/20' : ''
+                        }`}
+                        onClick={() => openSaleDetails(deal)}
+                      >
+                        <TableCell>
+                          <div>
+                            <div className="font-medium">{deal.clientName}</div>
+                            {deal.clientCin && (
+                              <div className="text-xs text-muted-foreground">{deal.clientCin}</div>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div className="text-sm">{formatDate(deal.saleDate)}</div>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className="text-xs">
+                            {deal.landPieces}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <div className="text-sm">
+                            {deal.paidInstallments}/{deal.totalInstallments}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div className="text-sm font-medium text-green-600">
+                            {formatCurrency(deal.totalPaid)}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div className="text-sm font-medium">
+                            {formatCurrency(deal.totalUnpaid)}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          {deal.isOverdue ? (
+                            <div className="text-sm font-semibold text-red-600">
+                              {formatCurrency(deal.overdueAmount)}
+                            </div>
+                          ) : (
+                            <div className="text-sm text-muted-foreground">-</div>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {deal.nextDueDate ? (
+                            <div className="text-sm">
+                              {formatDate(deal.nextDueDate)}
+                              {deal.daysUntilDue >= 0 && (
+                                <div className="text-xs text-muted-foreground">
+                                  ({deal.daysUntilDue} يوم)
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="text-sm text-muted-foreground">-</div>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-1">
+                            <span>{statusIndicator}</span>
+                            <span className={`text-sm font-medium ${statusColor}`}>
+                              {statusText}
+                            </span>
+                          </div>
+                        </TableCell>
+                        <TableCell onClick={(e) => e.stopPropagation()}>
+                          {hasPermission('record_payments') && deal.totalUnpaid > 0.01 && (
+                            <Button
+                              size="sm"
+                              variant={deal.isOverdue ? 'destructive' : 'default'}
+                              onClick={() => {
+                                const nextInst = deal.installments.find(i => getRemainingAmount(i) > 0.01)
+                                if (nextInst) {
+                                  openPaymentDialog(nextInst)
+                                }
+                              }}
+                            >
+                              دفع
+                            </Button>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Old views removed - using table view only */}
+      {/* Commented out old card-based views to avoid errors */}
+      {false && false && (
         <div className="space-y-4">
           {clientGroups.length === 0 ? (
             <Card>
@@ -623,131 +1275,194 @@ export function Installments() {
               }, 0)
               
               return (
-              <Card key={group.clientId} className="overflow-hidden">
-                <CardHeader className="bg-blue-50 border-b">
-                  <div className="flex items-center gap-2">
-                    <CardTitle className="text-lg">{group.clientName}</CardTitle>
-                    {clientCin && (
-                      <span className="text-xs text-muted-foreground">({clientCin})</span>
-                    )}
-                    {totalPieces > 0 && (
-                      <Badge variant="secondary" className="text-xs">{totalPieces} قطعة</Badge>
-                    )}
+                <Card key={group.clientId} className="overflow-hidden">
+                <CardHeader 
+                  className="bg-gradient-to-r from-blue-50 to-indigo-50 border-b cursor-pointer hover:from-blue-100 hover:to-indigo-100 transition-colors"
+                  onClick={() => {
+                    // Old expansion logic - disabled
+                    const newExpanded = new Set<string>()
+                    if (newExpanded.has(group.clientId)) {
+                      newExpanded.delete(group.clientId)
+                    } else {
+                      newExpanded.add(group.clientId)
+                    }
+                  }}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1">
+                      <CardTitle className="text-lg flex items-center gap-2">
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            const firstInst = group.sales[0]?.installments[0]
+                            if (firstInst?.sale?.client) {
+                              openClientDetails(firstInst.sale.client)
+                            }
+                          }}
+                          className="hover:underline text-primary font-semibold"
+                        >
+                          {group.clientName}
+                        </button>
+                        {clientCin && (
+                          <span className="text-sm text-muted-foreground font-normal">
+                            ({clientCin})
+                          </span>
+                        )}
+                      </CardTitle>
+                      <div className="text-sm text-muted-foreground mt-1">
+                        {totalPieces} قطعة • {group.sales.length} صفقة • {group.sales.reduce((sum, s) => sum + s.installments.length, 0)} قسط
+                        {group.overdueCount > 0 && (
+                          <span className="text-red-600 font-semibold mr-2">
+                            • {group.overdueCount} متأخر
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <button className="p-1 hover:bg-white/50 rounded transition-colors">
+                      <ChevronDown className="h-5 w-5 text-muted-foreground" />
+                    </button>
                   </div>
-                  <p className="text-sm text-muted-foreground">
-                    {group.sales.length} صفقة • {group.sales.reduce((sum, s) => sum + s.installments.length, 0)} قسط
-                    {group.overdueCount > 0 && (
-                      <Badge variant="destructive" className="text-xs mr-2">{group.overdueCount} متأخر</Badge>
-                    )}
-                  </p>
                 </CardHeader>
-                <CardContent className="p-0">
-                  {group.sales.map(sale => {
-                    const nextInst = sale.installments.find(i => i.status !== 'Paid')
+                {false && (
+                  <CardContent className="p-0">
+                    {group.sales.map(sale => {
+                    const unpaidInstallments = sale.installments.filter(i => getRemainingAmount(i) > 0.01)
+                    const nextInst = unpaidInstallments[0] // First unpaid installment (with all stacked amounts)
                     if (!nextInst) return null
+                    
+                    // Calculate TOTAL unpaid amount for this sale (including all stacked amounts)
+                    const totalUnpaidAmount = unpaidInstallments.reduce((sum, inst) => {
+                      return sum + getRemainingAmount(inst)
+                    }, 0)
                     
                     const daysLeft = getDaysUntilDue(nextInst)
                     const isOverdue = isInstallmentOverdue(nextInst)
-                    const paidCount = sale.installments.filter(i => i.status === 'Paid').length
+                    const paidCount = sale.installments.filter(i => i.status === 'Paid' || getRemainingAmount(i) <= 0.01).length
                     const totalCount = sale.installments.length
                     
-                    // Determine urgency level
+                    // Get land piece numbers
+                    const landPieces = (nextInst.sale as any)?._landPieces || []
+                    const pieceNumbers = landPieces.map((p: any) => p?.piece_number).filter(Boolean).join('، ')
+                    
+                    // Determine urgency level - show FULL amount due
                     let actionText = 'دفع'
                     let actionVariant: 'destructive' | 'default' | 'outline' = 'default'
                     
-                    if (isOverdue) {
-                      actionText = `دفع (متأخر ${Math.abs(daysLeft)} يوم)`
+                    if (totalUnpaidAmount <= 0.01) {
+                      actionText = 'مدفوع بالكامل'
+                      actionVariant = 'outline'
+                    } else if (isOverdue) {
+                      actionText = `${formatCurrency(totalUnpaidAmount)} • متأخر ${Math.abs(daysLeft)} يوم`
                       actionVariant = 'destructive'
-                    } else if (daysLeft <= 3) {
-                      actionText = daysLeft === 0 ? 'دفع (مستحق اليوم)' : `دفع (متبقي ${daysLeft} يوم)`
-                      actionVariant = 'default'
                     } else if (daysLeft <= 7) {
-                      actionText = `دفع (متبقي ${daysLeft} أيام)`
+                      actionText = `${formatCurrency(totalUnpaidAmount)} • متبقي ${daysLeft} ${daysLeft === 1 ? 'يوم' : 'أيام'}`
+                      actionVariant = daysLeft <= 3 ? 'default' : 'outline'
+                    } else {
+                      actionText = `${formatCurrency(totalUnpaidAmount)} • متبقي ${daysLeft} يوم`
                       actionVariant = 'outline'
                     }
                     
                     return (
                       <div 
                         key={sale.saleId} 
-                        className={`border-b last:border-b-0 p-4 ${
-                          isOverdue ? 'bg-red-50/30' : daysLeft <= 3 ? 'bg-yellow-50/20' : ''
+                        className={`border-b last:border-b-0 p-4 hover:bg-gray-50/50 transition-colors ${
+                          isOverdue && totalUnpaidAmount > 0.01 ? 'bg-red-50/30 border-red-200' : 
+                          daysLeft <= 7 && daysLeft > 3 && totalUnpaidAmount > 0.01 ? 'bg-orange-50/20 border-orange-200' :
+                          daysLeft <= 3 && totalUnpaidAmount > 0.01 ? 'bg-red-50/20 border-red-200' : ''
                         }`}
                       >
-                        <div className="grid grid-cols-1 sm:grid-cols-5 gap-2 sm:gap-4 items-center">
-                          <div className="flex items-center gap-2">
-                            <button
-                              onClick={() => toggleSale(sale.saleId)}
-                              className="p-1 hover:bg-gray-100 rounded transition-colors"
-                            >
-                              {expandedSales.has(sale.saleId) ? (
-                                <ChevronUp className="h-4 w-4 text-muted-foreground" />
-                              ) : (
-                                <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                              )}
-                            </button>
-                            <div>
-                              <p className="font-medium text-sm text-muted-foreground mb-1">
-                                تاريخ البيع: {formatDate(sale.saleDate)}
-                              </p>
-                              <p className="text-xs text-muted-foreground">
-                                {sale.installments.length} قسط مستحق
-                              </p>
+                        <div className="space-y-3">
+                          {/* Header Row */}
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2 mb-2">
+                                <button
+                                  onClick={() => {}}
+                                  className="p-1 hover:bg-gray-200 rounded transition-colors"
+                                >
+                                  <ChevronDown className="h-5 w-5 text-muted-foreground" />
+                                </button>
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <p className="font-semibold text-base">
+                                      {formatDate(sale.saleDate)}
+                                    </p>
+                                    {pieceNumbers && (
+                                      <Badge variant="outline" className="text-xs">
+                                        القطع: {pieceNumbers}
+                                      </Badge>
+                                    )}
+                                  </div>
+                                  <p className="text-sm text-muted-foreground mt-1">
+                                    {totalCount} قسط • {paidCount} مدفوع • {unpaidInstallments.length} متبقي
+                                  </p>
+                                </div>
+                              </div>
+                              
+                              {/* Progress Bar */}
+                              <div className="mt-2">
+                                <div className="flex items-center justify-between text-xs text-muted-foreground mb-1">
+                                  <span>التقدم: {paidCount}/{totalCount}</span>
+                                  <span>{Math.round((paidCount / totalCount) * 100)}%</span>
+                                </div>
+                                <div className="w-full bg-gray-200 rounded-full h-2">
+                                  <div 
+                                    className="bg-green-500 h-2 rounded-full transition-all" 
+                                    style={{ width: `${totalCount > 0 ? (paidCount / totalCount) * 100 : 0}%` }}
+                                  />
+                                </div>
+                              </div>
                             </div>
-                          </div>
-                          <div>
-                            <div className="text-sm">
-                              <div className="font-bold">{paidCount}/{totalCount}</div>
-                              <div className="w-full bg-gray-200 rounded-full h-1.5 mt-1">
-                                <div 
-                                  className="bg-green-500 h-1.5 rounded-full" 
-                                  style={{ width: `${totalCount > 0 ? (paidCount / totalCount) * 100 : 0}%` }}
-                                />
+                            
+                            {/* Amount Info */}
+                            <div className="text-right space-y-1">
+                              <div className="text-sm">
+                                <span className="text-muted-foreground">المدفوع: </span>
+                                <span className="text-green-600 font-bold">{formatCurrency(sale.totalPaid)}</span>
+                              </div>
+                              <div className="text-sm">
+                                <span className="text-muted-foreground">الإجمالي: </span>
+                                <span className="font-bold">{formatCurrency(sale.totalDue)}</span>
+                              </div>
+                              <div className="text-base font-bold text-primary border-t pt-1 mt-1">
+                                <span className="text-muted-foreground text-sm">المتبقي: </span>
+                                {formatCurrency(totalUnpaidAmount)}
                               </div>
                             </div>
                           </div>
-                          <div className="text-right">
-                            <div className="text-sm">
-                              <span className="text-green-600 font-bold">{formatCurrency(sale.totalPaid)}</span>
-                              <span className="text-muted-foreground mx-1">/</span>
-                              <span className="font-bold">{formatCurrency(sale.totalDue)}</span>
-                            </div>
-                          </div>
-                          <div>
-                            <div className="text-sm">
-                              <div className="font-bold">{formatCurrency(nextInst.amount_due + nextInst.stacked_amount - nextInst.amount_paid)}</div>
-                              <div className={`text-xs font-medium ${
-                                isOverdue ? 'text-red-600' : 
-                                daysLeft <= 3 ? 'text-orange-600' :
-                                daysLeft <= 7 ? 'text-yellow-600' : 
-                                'text-muted-foreground'
-                              }`}>
-                                {isOverdue ? `⚠️ متأخر ${Math.abs(daysLeft)} يوم` : 
-                                 daysLeft === 0 ? '⏰ مستحق اليوم' :
-                                 daysLeft <= 3 ? `⏳ متبقي ${daysLeft} أيام` :
-                                 daysLeft <= 7 ? `📅 متبقي ${daysLeft} أيام` : 
-                                 `📅 ${formatDate(nextInst.due_date)}`}
+                          
+                          {/* Action Button */}
+                          {hasPermission('record_payments') && totalUnpaidAmount > 0.01 && (
+                            <div className="flex items-center justify-between pt-2 border-t">
+                              <div className="text-sm text-muted-foreground">
+                                {isOverdue ? (
+                                  <span className="text-red-600 font-medium">⚠️ متأخر {Math.abs(daysLeft)} يوم</span>
+                                ) : daysLeft <= 3 ? (
+                                  <span className="text-orange-600 font-medium">⏳ متبقي {daysLeft} أيام</span>
+                                ) : daysLeft <= 7 ? (
+                                  <span className="text-yellow-600 font-medium">📅 متبقي {daysLeft} أيام</span>
+                                ) : (
+                                  <span className="text-muted-foreground">📅 {formatDate(nextInst.due_date)}</span>
+                                )}
                               </div>
-                            </div>
-                          </div>
-                          <div>
-                            {hasPermission('record_payments') && (
                               <Button 
                                 size="sm" 
                                 variant={actionVariant}
                                 onClick={() => openPaymentDialog(nextInst)}
-                                className={`w-full ${
+                                className={`${
                                   isOverdue ? 'bg-red-600 hover:bg-red-700 text-white' :
-                                  daysLeft <= 3 ? 'bg-orange-500 hover:bg-orange-600 text-white' :
+                                  daysLeft <= 7 && daysLeft > 3 ? 'bg-orange-500 hover:bg-orange-600 text-white' :
+                                  daysLeft <= 3 ? 'bg-red-500 hover:bg-red-600 text-white' :
                                   ''
                                 }`}
                               >
                                 {actionText}
                               </Button>
-                            )}
-                          </div>
+                            </div>
+                          )}
                         </div>
-                        {expandedSales.has(sale.saleId) && (
-                          <div className="overflow-x-auto mt-3">
+                         {false && (
+                          <div className="overflow-x-auto mt-3 -mx-4 sm:mx-0 px-4 sm:px-0" style={{ WebkitOverflowScrolling: 'touch' }}>
                             {(() => {
                               const grouped = groupInstallments(sale.installments)
                               return (
@@ -758,29 +1473,63 @@ export function Installments() {
                                       const lastInst = group.installments[group.installments.length - 1]
                                       const instDaysLeft = getDaysUntilDue(firstInst)
                                       const instIsOverdue = isInstallmentOverdue(firstInst)
+                                      const totalGroupAmount = group.amount! * group.installments.length
+                                      const totalGroupPaid = group.installments.reduce((sum, inst) => sum + inst.amount_paid, 0)
+                                      const totalGroupRemaining = totalGroupAmount - totalGroupPaid
+                                      
+                                      // Get land piece numbers
+                                      const landPieces = (firstInst.sale as any)?._landPieces || []
+                                      const pieceNumbers = landPieces.map((p: any) => p?.piece_number).filter(Boolean).join('، ')
                                       
                                       return (
-                                        <div key={idx} className="bg-gray-50 p-3 rounded-lg border">
-                                          <div className="flex items-center justify-between">
-                                            <div>
-                                              <p className="font-medium text-sm">
-                                                أقساط #{group.startNumber} - #{group.endNumber} ({group.installments.length} قسط)
-                                              </p>
-                                              <p className="text-xs text-muted-foreground">
-                                                {formatCurrency(group.amount!)} × {group.installments.length} = {formatCurrency(group.amount! * group.installments.length)}
-                                              </p>
-                                              <p className="text-xs text-muted-foreground mt-1">
-                                                من {formatDate(firstInst.due_date)} إلى {formatDate(lastInst.due_date)}
-                                              </p>
-                                            </div>
-                                            <div className="text-right">
+                                        <div key={idx} className={`p-4 rounded-lg border shadow-sm ${
+                                          instIsOverdue && totalGroupRemaining > 0.01 ? 'bg-red-50/50 border-red-300' : 
+                                          totalGroupRemaining <= 0.01 ? 'bg-green-50/50 border-green-300' :
+                                          'bg-white border-gray-200'
+                                        }`}>
+                                          <div className="space-y-2">
+                                            <div className="flex items-center justify-between">
+                                              <div className="flex items-center gap-2">
+                                                <p className="font-semibold text-sm">
+                                                  أقساط #{group.startNumber} - #{group.endNumber}
+                                                </p>
+                                                <Badge variant="outline" className="text-xs">
+                                                  {group.installments.length} قسط
+                                                </Badge>
+                                                {pieceNumbers && (
+                                                  <Badge variant="secondary" className="text-xs">
+                                                    القطع: {pieceNumbers}
+                                                  </Badge>
+                                                )}
+                                              </div>
                                               <Badge 
-                                                variant={instIsOverdue ? 'destructive' : 'secondary'} 
+                                                variant={instIsOverdue && totalGroupRemaining > 0.01 ? 'destructive' : 
+                                                        totalGroupRemaining <= 0.01 ? 'success' : 'secondary'} 
                                                 className="text-xs"
                                               >
-                                                {instIsOverdue ? 'متأخر' : 'مستحق'}
+                                                {instIsOverdue && totalGroupRemaining > 0.01 ? 'متأخر' : 
+                                                 totalGroupRemaining <= 0.01 ? 'مدفوع' : 'مستحق'}
                                               </Badge>
                                             </div>
+                                            <div className="flex items-center justify-between text-sm">
+                                              <span className="text-muted-foreground">
+                                                {formatCurrency(group.amount!)} × {group.installments.length}
+                                              </span>
+                                              <span className="font-bold text-primary">
+                                                {formatCurrency(totalGroupAmount)}
+                                              </span>
+                                            </div>
+                                            {totalGroupRemaining > 0.01 && (
+                                              <div className="flex items-center justify-between text-xs pt-1 border-t">
+                                                <span className="text-muted-foreground">المتبقي:</span>
+                                                <span className="font-semibold text-red-600">
+                                                  {formatCurrency(totalGroupRemaining)}
+                                                </span>
+                                              </div>
+                                            )}
+                                            <p className="text-xs text-muted-foreground">
+                                              {formatDate(firstInst.due_date)} → {formatDate(lastInst.due_date)}
+                                            </p>
                                           </div>
                                         </div>
                                       )
@@ -788,12 +1537,16 @@ export function Installments() {
                                       const inst = group.installments[0]
                                       const instDaysLeft = getDaysUntilDue(inst)
                                       const instIsOverdue = isInstallmentOverdue(inst)
-                                      const instRemainingAmount = inst.amount_due + inst.stacked_amount - inst.amount_paid
+                                      const instRemainingAmount = getRemainingAmount(inst)
                                       
                                       let instActionText = 'دفع'
                                       let instActionVariant: 'destructive' | 'default' | 'outline' = 'default'
                                       
-                                      if (instIsOverdue) {
+                                      // Only show action if there's actually an amount due
+                                      if (instRemainingAmount <= 0.01) {
+                                        instActionText = 'مدفوع'
+                                        instActionVariant = 'outline'
+                                      } else if (instIsOverdue) {
                                         instActionText = `دفع (متأخر ${Math.abs(instDaysLeft)} يوم)`
                                         instActionVariant = 'destructive'
                                       } else if (instDaysLeft <= 3) {
@@ -804,18 +1557,29 @@ export function Installments() {
                                         instActionVariant = 'outline'
                                       }
                                       
+                                      // Get land piece numbers for this sale
+                                      const landPieces = (inst.sale as any)?._landPieces || []
+                                      const pieceNumbers = landPieces.map((p: any) => p?.piece_number).filter(Boolean).join('، ')
+                                      
                                       return (
-                                        <div key={idx} className={`p-3 rounded-lg border ${
-                                          instIsOverdue ? 'bg-red-50/30 border-red-200' : 
-                                          instDaysLeft <= 3 ? 'bg-yellow-50/20 border-yellow-200' : 
-                                          'bg-gray-50'
+                                        <div key={idx} className={`p-4 rounded-lg border shadow-sm ${
+                                          instIsOverdue ? 'bg-red-50/50 border-red-300' : 
+                                          instDaysLeft <= 3 ? 'bg-yellow-50/50 border-yellow-300' : 
+                                          'bg-white border-gray-200'
                                         }`}>
-                                          <div className="flex items-center justify-between">
-                                            <div>
-                                              <p className="font-medium text-sm">
-                                                قسط #{inst.installment_number}
-                                              </p>
-                                              <p className="text-sm font-bold">{formatCurrency(instRemainingAmount)}</p>
+                                          <div className="flex items-start justify-between gap-3">
+                                            <div className="flex-1">
+                                              <div className="flex items-center gap-2 mb-1">
+                                                <p className="font-semibold text-sm">
+                                                  قسط #{inst.installment_number}
+                                                </p>
+                                                {pieceNumbers && (
+                                                  <Badge variant="outline" className="text-xs">
+                                                    القطع: {pieceNumbers}
+                                                  </Badge>
+                                                )}
+                                              </div>
+                                              <p className="text-lg font-bold text-primary mb-1">{formatCurrency(instRemainingAmount)}</p>
                                               <p className="text-xs text-muted-foreground">
                                                 {formatDate(inst.due_date)}
                                               </p>
@@ -825,9 +1589,9 @@ export function Installments() {
                                                 variant={instIsOverdue ? 'destructive' : statusColors[inst.status]} 
                                                 className="text-xs"
                                               >
-                                                {inst.status === 'Paid' ? 'مدفوع' :
-                                                 instIsOverdue ? 'متأخر' :
-                                                 inst.status === 'Late' ? 'متأخر' :
+                                                {inst.status === 'Paid' || getRemainingAmount(inst) <= 0.01 ? 'مدفوع' :
+                                                 instIsOverdue && getRemainingAmount(inst) > 0.01 ? 'متأخر' :
+                                                 inst.status === 'Late' && getRemainingAmount(inst) > 0.01 ? 'متأخر' :
                                                  inst.status === 'Partial' ? 'جزئي' : 'غير مدفوع'}
                                               </Badge>
                                               {hasPermission('record_payments') && inst.status !== 'Paid' && (
@@ -855,7 +1619,7 @@ export function Installments() {
                             })()}
                           </div>
                         )}
-                        {!expandedSales.has(sale.saleId) && sale.installments.length > 0 && (
+                         {false && sale.installments.length > 0 && (
                           <div className="mt-2 text-xs text-muted-foreground text-center">
                             اضغط على السهم لعرض {sale.installments.length} قسط
                           </div>
@@ -864,15 +1628,16 @@ export function Installments() {
                     )
                   })}
                 </CardContent>
-              </Card>
+                )}
+                </Card>
               )
             })
           )}
         </div>
       )}
 
-      {/* List View - Grouped by Client and Sale */}
-      {viewMode === 'list' && (() => {
+      {/* Old views removed - using table view only */}
+      {false && false && (() => {
         // Group installments by client, then by sale
         const groupedByClient = new Map<string, {
           clientId: string
@@ -881,10 +1646,17 @@ export function Installments() {
             saleId: string
             saleDate: string
             installments: InstallmentWithRelations[]
+            isConfirmed?: boolean
+            landPieceCount?: number
           }>
+          overdueCount?: number
         }>()
         
-        let filtered = filteredInstallments.filter(i => i.status !== 'Paid')
+        // Filter out fully paid installments (but keep partially paid if they still have amount due)
+        let filtered = filteredInstallments.filter(i => {
+          const remaining = i.amount_due + i.stacked_amount - i.amount_paid
+          return remaining > 0.01 // Only show if there's actually an amount due
+        })
         
         // Filter by search term
         if (debouncedSearchTerm.trim()) {
@@ -903,20 +1675,30 @@ export function Installments() {
               groupedByClient.set(clientId, {
                 clientId,
                 clientName,
-                sales: new Map()
+                sales: new Map(),
+                overdueCount: 0
               })
             }
             
             const clientGroup = groupedByClient.get(clientId)!
             if (!clientGroup.sales.has(saleId)) {
+              const sale = inst.sale
+              const isConfirmed = (sale as any)?.is_confirmed || (sale as any)?.big_advance_confirmed || false
               clientGroup.sales.set(saleId, {
                 saleId,
-                saleDate: inst.sale?.sale_date || '',
-                installments: []
+                saleDate: sale?.sale_date || '',
+                installments: [],
+                isConfirmed,
+                landPieceCount: sale?.land_piece_ids?.length || 0,
               })
             }
             
             clientGroup.sales.get(saleId)!.installments.push(inst)
+            
+            // Count overdue installments
+            if (isInstallmentOverdue(inst)) {
+              clientGroup.overdueCount = (clientGroup.overdueCount || 0) + 1
+            }
           })
         
         // Sort installments within each sale by due date
@@ -941,11 +1723,48 @@ export function Installments() {
             ) : (
               Array.from(groupedByClient.values()).map(clientGroup => (
                 <Card key={clientGroup.clientId} className="overflow-hidden">
-                  <CardHeader className="bg-blue-50 border-b">
-                    <CardTitle className="text-lg">{clientGroup.clientName}</CardTitle>
-                    <p className="text-sm text-muted-foreground">
-                      {clientGroup.sales.size} صفقة • {Array.from(clientGroup.sales.values()).reduce((sum, s) => sum + s.installments.length, 0)} قسط مستحق
-                    </p>
+                  <CardHeader className="bg-gradient-to-r from-blue-50 to-indigo-50 border-b">
+                    <CardTitle className="text-lg">
+                      <button 
+                        onClick={() => {
+                          const firstInst = Array.from(clientGroup.sales.values())[0]?.installments[0]
+                          if (firstInst?.sale?.client) {
+                            openClientDetails(firstInst.sale.client)
+                          }
+                        }}
+                        className="hover:underline text-primary font-semibold"
+                      >
+                        {clientGroup.clientName}
+                      </button>
+                      {(() => {
+                        const firstInst = Array.from(clientGroup.sales.values())[0]?.installments[0]
+                        const clientCin = firstInst?.sale?.client?.cin
+                        return clientCin ? (
+                          <span className="text-sm text-muted-foreground font-normal mr-2">
+                            ({clientCin})
+                          </span>
+                        ) : null
+                      })()}
+                    </CardTitle>
+                    <div className="text-sm text-muted-foreground mt-1">
+                      {(() => {
+                        const totalPieces = Array.from(clientGroup.sales.values()).reduce((sum, sale) => {
+                          return sum + (sale.landPieceCount || 0)
+                        }, 0)
+                        const totalInstallments = Array.from(clientGroup.sales.values()).reduce((sum, s) => sum + s.installments.length, 0)
+                        const overdueCount = clientGroup.overdueCount || 0
+                        return (
+                          <>
+                            {totalPieces} قطعة • {clientGroup.sales.size} صفقة • {totalInstallments} قسط
+                            {overdueCount > 0 && (
+                              <span className="text-red-600 font-semibold mr-2">
+                                • {overdueCount} متأخر
+                              </span>
+                            )}
+                          </>
+                        )
+                      })()}
+                    </div>
                   </CardHeader>
                   <CardContent className="p-0">
                     {Array.from(clientGroup.sales.values()).map(sale => {
@@ -954,20 +1773,23 @@ export function Installments() {
                       
                       const daysLeft = getDaysUntilDue(nextInst)
                       const isOverdue = isInstallmentOverdue(nextInst)
-                      const remainingAmount = nextInst.amount_due + nextInst.stacked_amount - nextInst.amount_paid
+                      const remainingAmount = getRemainingAmount(nextInst)
                       
-                      // Determine urgency level
+                      // Determine urgency level - only show if there's actually an amount due
                       let actionText = 'دفع'
                       let actionVariant: 'destructive' | 'default' | 'outline' = 'default'
                       
-                      if (isOverdue) {
-                        actionText = `دفع (متأخر ${Math.abs(daysLeft)} يوم)`
+                      if (remainingAmount <= 0.01) {
+                        actionText = 'مدفوع'
+                        actionVariant = 'outline'
+                      } else if (isOverdue) {
+                        actionText = `${formatCurrency(remainingAmount)} • متأخر ${Math.abs(daysLeft)} يوم`
                         actionVariant = 'destructive'
-                      } else if (daysLeft <= 3) {
-                        actionText = daysLeft === 0 ? 'دفع (مستحق اليوم)' : `دفع (متبقي ${daysLeft} يوم)`
-                        actionVariant = 'default'
                       } else if (daysLeft <= 7) {
-                        actionText = `دفع (متبقي ${daysLeft} أيام)`
+                        actionText = `${formatCurrency(remainingAmount)} • متبقي ${daysLeft} ${daysLeft === 1 ? 'يوم' : 'أيام'}`
+                        actionVariant = daysLeft <= 3 ? 'default' : 'outline'
+                      } else {
+                        actionText = `${formatCurrency(remainingAmount)} • متبقي ${daysLeft} يوم`
                         actionVariant = 'outline'
                       }
                       
@@ -981,10 +1803,10 @@ export function Installments() {
                           <div className="flex items-center justify-between mb-3">
                             <div className="flex items-center gap-2">
                               <button
-                                onClick={() => toggleSale(sale.saleId)}
+                                onClick={() => {}}
                                 className="p-1 hover:bg-gray-100 rounded transition-colors"
                               >
-                                {expandedSales.has(sale.saleId) ? (
+                                 {false ? (
                                   <ChevronUp className="h-4 w-4 text-muted-foreground" />
                                 ) : (
                                   <ChevronDown className="h-4 w-4 text-muted-foreground" />
@@ -994,19 +1816,23 @@ export function Installments() {
                                 <p className="font-medium text-sm text-muted-foreground">
                                   تاريخ البيع: {formatDate(sale.saleDate)}
                                 </p>
-                                <p className="text-xs text-muted-foreground">
-                                  {sale.installments.length} قسط مستحق
-                                </p>
+                                <div className="text-xs text-muted-foreground">
+                                  {sale.landPieceCount || 0} قطعة • {sale.installments.length} قسط مستحق
+                                  {!sale.isConfirmed && (
+                                    <Badge variant="outline" className="text-xs mr-2">غير مؤكد</Badge>
+                                  )}
+                                </div>
                               </div>
                             </div>
-                            {hasPermission('record_payments') && (
+                            {hasPermission('record_payments') && remainingAmount > 0.01 && (
                               <Button 
                                 size="sm" 
                                 variant={actionVariant}
                                 onClick={() => openPaymentDialog(nextInst)}
                                 className={`${
-                                  isOverdue ? 'bg-red-600 hover:bg-red-700 text-white' :
-                                  daysLeft <= 3 ? 'bg-orange-500 hover:bg-orange-600 text-white' :
+                                  isOverdue ? 'bg-red-700 hover:bg-red-800 text-white' :
+                                  daysLeft <= 7 && daysLeft > 3 ? 'bg-orange-500 hover:bg-orange-600 text-white' :
+                                  daysLeft <= 3 ? 'bg-red-500 hover:bg-red-600 text-white' :
                                   ''
                                 }`}
                               >
@@ -1014,8 +1840,8 @@ export function Installments() {
                               </Button>
                             )}
                           </div>
-                          {expandedSales.has(sale.saleId) && (
-                            <div className="overflow-x-auto mt-3">
+                          {false && (
+                            <div className="overflow-x-auto mt-3 -mx-4 sm:mx-0 px-4 sm:px-0" style={{ WebkitOverflowScrolling: 'touch' }}>
                               {(() => {
                                 const grouped = groupInstallments(sale.installments)
                                 return (
@@ -1046,7 +1872,8 @@ export function Installments() {
                                                   variant={instIsOverdue ? 'destructive' : 'secondary'} 
                                                   className="text-xs"
                                                 >
-                                                  {instIsOverdue ? 'متأخر' : 'مستحق'}
+                                                {instIsOverdue && getRemainingAmount(firstInst) > 0.01 ? 'متأخر' : 
+                                                 getRemainingAmount(firstInst) <= 0.01 ? 'مدفوع' : 'مستحق'}
                                                 </Badge>
                                               </div>
                                             </div>
@@ -1061,21 +1888,25 @@ export function Installments() {
                                         let instActionText = 'دفع'
                                         let instActionVariant: 'destructive' | 'default' | 'outline' = 'default'
                                         
-                                        if (instIsOverdue) {
-                                          instActionText = `دفع (متأخر ${Math.abs(instDaysLeft)} يوم)`
+                                        if (instRemainingAmount <= 0.01) {
+                                          instActionText = 'مدفوع'
+                                          instActionVariant = 'outline'
+                                        } else if (instIsOverdue) {
+                                          instActionText = `${formatCurrency(instRemainingAmount)} • متأخر ${Math.abs(instDaysLeft)} يوم`
                                           instActionVariant = 'destructive'
-                                        } else if (instDaysLeft <= 3) {
-                                          instActionText = instDaysLeft === 0 ? 'دفع (مستحق اليوم)' : `دفع (متبقي ${instDaysLeft} يوم)`
-                                          instActionVariant = 'default'
                                         } else if (instDaysLeft <= 7) {
-                                          instActionText = `دفع (متبقي ${instDaysLeft} أيام)`
+                                          instActionText = `${formatCurrency(instRemainingAmount)} • متبقي ${instDaysLeft} ${instDaysLeft === 1 ? 'يوم' : 'أيام'}`
+                                          instActionVariant = instDaysLeft <= 3 ? 'default' : 'outline'
+                                        } else {
+                                          instActionText = `${formatCurrency(instRemainingAmount)} • متبقي ${instDaysLeft} يوم`
                                           instActionVariant = 'outline'
                                         }
                                         
                                         return (
                                           <div key={idx} className={`p-3 rounded-lg border ${
-                                            instIsOverdue ? 'bg-red-50/30 border-red-200' : 
-                                            instDaysLeft <= 3 ? 'bg-yellow-50/20 border-yellow-200' : 
+                                            instIsOverdue ? 'bg-red-50/50 border-red-300' : 
+                                            instDaysLeft <= 7 && instDaysLeft > 3 ? 'bg-orange-50/30 border-orange-200' :
+                                            instDaysLeft <= 3 ? 'bg-red-50/30 border-red-200' : 
                                             'bg-gray-50'
                                           }`}>
                                             <div className="flex items-center justify-between">
@@ -1098,14 +1929,15 @@ export function Installments() {
                                                    inst.status === 'Late' ? 'متأخر' :
                                                    inst.status === 'Partial' ? 'جزئي' : 'غير مدفوع'}
                                                 </Badge>
-                                                {hasPermission('record_payments') && inst.status !== 'Paid' && (
+                                                {hasPermission('record_payments') && instRemainingAmount > 0.01 && (
                                                   <Button 
                                                     size="sm" 
                                                     variant={instActionVariant}
                                                     onClick={() => openPaymentDialog(inst)}
                                                     className={`${
-                                                      instIsOverdue ? 'bg-red-600 hover:bg-red-700 text-white' :
-                                                      instDaysLeft <= 3 ? 'bg-orange-500 hover:bg-orange-600 text-white' :
+                                                      instIsOverdue ? 'bg-red-700 hover:bg-red-800 text-white' :
+                                                      instDaysLeft <= 7 && instDaysLeft > 3 ? 'bg-orange-500 hover:bg-orange-600 text-white' :
+                                                      instDaysLeft <= 3 ? 'bg-red-500 hover:bg-red-600 text-white' :
                                                       ''
                                                     }`}
                                                   >
@@ -1123,7 +1955,7 @@ export function Installments() {
                               })()}
                             </div>
                           )}
-                          {!expandedSales.has(sale.saleId) && sale.installments.length > 0 && (
+                          {false && sale.installments.length > 0 && (
                             <div className="mt-2 text-xs text-muted-foreground text-center">
                               اضغط على السهم لعرض {sale.installments.length} قسط
                             </div>
@@ -1147,93 +1979,180 @@ export function Installments() {
           </DialogHeader>
           {selectedInstallment && (
             <div className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
-                <div>
-                  <p className="text-muted-foreground">العميل</p>
-                  <p className="font-medium">
-                    {selectedInstallment.sale?.client?.name}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">رقم القسط</p>
-                  <p className="font-medium">#{selectedInstallment.installment_number}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">المبلغ المستحق</p>
-                  <p className="font-medium">
-                    {formatCurrency(selectedInstallment.amount_due)}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">المدفوع مسبقاً</p>
-                  <p className="font-medium text-green-600">
-                    {formatCurrency(selectedInstallment.amount_paid)}
-                  </p>
-                </div>
-                {selectedInstallment.stacked_amount > 0 && (
-                  <div className="col-span-2">
-                    <p className="text-muted-foreground">المبلغ المتراكم</p>
-                    <p className="font-medium text-destructive">
-                      +{formatCurrency(selectedInstallment.stacked_amount)}
-                    </p>
-                  </div>
-                )}
-              </div>
-
-              {/* Multi-month payment selector - Optimized */}
-              {selectedInstallment && (() => {
+              {(() => {
+                // Calculate total unpaid amount for the entire sale
                 const unpaid = getUnpaidInstallmentsForSale(selectedInstallment.sale_id)
+                const totalUnpaidAmount = unpaid.reduce((sum, inst) => {
+                  return sum + getRemainingAmount(inst)
+                }, 0)
                 
-                // Pre-calculate all month totals once
-                const monthTotals: number[] = []
-                for (let i = 0; i < unpaid.length; i++) {
-                  const prevTotal = i > 0 ? monthTotals[i - 1] : 0
-                  monthTotals.push(prevTotal + unpaid[i].amount_due + unpaid[i].stacked_amount - unpaid[i].amount_paid)
-                }
+                // Get all installments for this sale to calculate actual paid amount
+                const allSaleInstallments = installments.filter(i => i.sale_id === selectedInstallment.sale_id)
+                const actualTotalPaid = allSaleInstallments.reduce((sum, inst) => {
+                  return sum + (inst.amount_paid || 0)
+                }, 0)
                 
-                const totalAmount = monthTotals[monthsToPayCount - 1] || 0
+                // Get sale totals
+                const saleTotalDue = selectedInstallment.sale?.total_selling_price || 0
+                
+                // Check if this is an installment sale or full payment sale
+                const isInstallmentSale = selectedInstallment.sale?.payment_type !== 'Full'
+                
+                // Round amounts to avoid floating point precision issues
+                const roundedUnpaid = Math.round(totalUnpaidAmount * 100) / 100
+                const roundedPaid = Math.round(actualTotalPaid * 100) / 100
+                const roundedTotal = Math.round(saleTotalDue * 100) / 100
                 
                 return (
-                  <div className="space-y-2 bg-blue-50 p-3 rounded-md">
-                    <Label>دفع عدة أشهر معاً</Label>
-                    <Select
-                      value={String(monthsToPayCount)}
-                      onChange={(e) => {
-                        const count = parseInt(e.target.value)
-                        setMonthsToPayCount(count)
-                        setPaymentAmount(String(monthTotals[count - 1] || 0))
-                      }}
-                    >
-                      {unpaid.map((_, idx) => (
-                        <option key={idx + 1} value={idx + 1}>
-                          {idx + 1} شهر ({formatCurrency(monthTotals[idx] || 0)})
-                        </option>
-                      ))}
-                    </Select>
-                    <p className="text-xs text-blue-600">
-                      الأقساط: {unpaid.slice(0, monthsToPayCount).map(i => `#${i.installment_number}`).join('، ')}
+                  <>
+                    <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-4 rounded-lg border">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+                        <div>
+                          <p className="text-muted-foreground mb-1">العميل</p>
+                          <p className="font-semibold text-base">
+                            {selectedInstallment.sale?.client?.name}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-muted-foreground mb-1">رقم القسط</p>
+                          <p className="font-semibold text-base">#{selectedInstallment.installment_number}</p>
+                        </div>
+                        {isInstallmentSale && (
+                          <div className="sm:col-span-2">
+                            <Badge variant="secondary" className="text-xs">
+                              {selectedInstallment.sale?.payment_type === 'Installment' ? 'بالتقسيط' : 'بالحاضر'}
+                            </Badge>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    
+                    <div className="space-y-3">
+                      <div className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
+                        <span className="text-muted-foreground">المدفوع:</span>
+                        <span className="font-bold text-green-600">{formatCurrency(roundedPaid)}</span>
+                      </div>
+                      <div className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
+                        <span className="text-muted-foreground">الإجمالي:</span>
+                        <span className="font-bold">{formatCurrency(roundedTotal)}</span>
+                      </div>
+                      {!isInstallmentSale && (
+                        // Only show "المتبقي" for full payment sales
+                        <div className="flex justify-between items-center p-3 bg-primary/10 rounded-lg border-2 border-primary">
+                          <span className="text-muted-foreground font-medium">المتبقي:</span>
+                          <span className="font-bold text-lg text-primary">{formatCurrency(roundedUnpaid)}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Multi-month payment selector - Only for installment sales */}
+                    {isInstallmentSale && (() => {
+                      // Pre-calculate all month totals once - use getRemainingAmount to include stacked amounts
+                      const monthTotals: number[] = []
+                      for (let i = 0; i < unpaid.length; i++) {
+                        const prevTotal = i > 0 ? monthTotals[i - 1] : 0
+                        const remaining = getRemainingAmount(unpaid[i])
+                        // Round to avoid floating point issues
+                        const roundedRemaining = Math.round(remaining * 100) / 100
+                        monthTotals.push(Math.round((prevTotal + roundedRemaining) * 100) / 100)
+                      }
+                      
+                      // Find overdue installments count
+                      const overdueInstallments = unpaid.filter(inst => isInstallmentOverdue(inst))
+                      const overdueCount = overdueInstallments.length
+                      
+                      // Calculate total amount for selected months
+                      const totalAmount = monthTotals[monthsToPayCount - 1] || 0
+                      
+                      return (
+                        <div className="space-y-2 bg-blue-50 p-3 rounded-md border border-blue-200">
+                          <Label className="font-semibold">دفع عدة أشهر معاً</Label>
+                          {overdueCount > 0 && (
+                            <div className="bg-red-50 border border-red-200 rounded p-2 mb-2">
+                              <p className="text-xs text-red-700 font-medium">
+                                ⚠️ يوجد {overdueCount} قسط متأخر - تم تحديدها تلقائياً
+                              </p>
+                            </div>
+                          )}
+                          <Select
+                            value={String(monthsToPayCount)}
+                            onChange={(e) => {
+                              const count = parseInt(e.target.value)
+                              setMonthsToPayCount(count)
+                              const amount = monthTotals[count - 1] || 0
+                              setPaymentAmount(String(Math.round(amount * 100) / 100))
+                            }}
+                          >
+                            {unpaid.map((inst, idx) => {
+                              const amount = monthTotals[idx] || Math.round(getRemainingAmount(inst) * 100) / 100
+                              const isOverdue = isInstallmentOverdue(inst)
+                              return (
+                                <option key={idx + 1} value={idx + 1}>
+                                  {idx + 1} شهر ({formatCurrency(amount)}) {isOverdue ? '⚠️ متأخر' : ''}
+                                </option>
+                              )
+                            })}
+                          </Select>
+                          <p className="text-xs text-blue-600">
+                            الأقساط: {unpaid.slice(0, monthsToPayCount).map(i => `#${i.installment_number}`).join('، ')}
+                          </p>
+                          <p className="text-sm font-bold text-blue-800 mt-2">
+                            المبلغ الإجمالي: {formatCurrency(Math.round(totalAmount * 100) / 100)}
+                          </p>
+                        </div>
+                      )
+                    })()}
+
+                    <div className="space-y-2">
+                      <Label htmlFor="paymentAmount">المبلغ *</Label>
+                      <Input
+                        id="paymentAmount"
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={paymentAmount}
+                        onChange={(e) => {
+                          const value = e.target.value
+                          // Allow empty string for user input
+                          if (value === '') {
+                            setPaymentAmount('')
+                            return
+                          }
+                          const numValue = parseFloat(value)
+                          if (!isNaN(numValue) && numValue >= 0) {
+                            // Round to 2 decimal places
+                            const rounded = Math.round(numValue * 100) / 100
+                            setPaymentAmount(String(rounded))
+                          }
+                        }}
+                        placeholder="أدخل المبلغ"
+                        className="text-lg font-semibold"
+                      />
+                      {isInstallmentSale ? (
+                        <p className="text-xs text-muted-foreground">
+                          المبلغ المحدد: {formatCurrency(Math.round((parseFloat(paymentAmount) || 0) * 100) / 100)}
+                        </p>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">
+                          المبلغ المطلوب: {formatCurrency(Math.round(roundedUnpaid * 100) / 100)}
+                        </p>
+                      )}
+                    </div>
+
+                    <p className="text-sm text-muted-foreground">
+                      المتبقي بعد الدفع:{' '}
+                      <span className="font-medium">
+                        {formatCurrency(
+                          Math.max(
+                            0,
+                            Math.round((roundedUnpaid - (parseFloat(paymentAmount) || 0)) * 100) / 100
+                          )
+                        )}
+                      </span>
                     </p>
-                    <p className="text-sm font-bold text-blue-800 mt-2">
-                      المبلغ الإجمالي: {formatCurrency(totalAmount)}
-                    </p>
-                  </div>
+                  </>
                 )
               })()}
-
-              <p className="text-sm text-muted-foreground">
-                المتبقي بعد الدفع:{' '}
-                <span className="font-medium">
-                  {formatCurrency(
-                    Math.max(
-                      0,
-                      selectedInstallment.amount_due +
-                        selectedInstallment.stacked_amount -
-                        selectedInstallment.amount_paid -
-                        (parseFloat(paymentAmount) || 0)
-                    )
-                  )}
-                </span>
-              </p>
             </div>
           )}
           <DialogFooter className="flex-col sm:flex-row gap-2">
@@ -1272,6 +2191,294 @@ export function Installments() {
           </CardContent>
         </Card>
       )}
+
+      {/* Client Details Dialog */}
+      <Dialog open={clientDetailsOpen} onOpenChange={setClientDetailsOpen}>
+        <DialogContent className="w-[95vw] sm:w-full max-w-2xl max-h-[95vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>تفاصيل العميل</DialogTitle>
+          </DialogHeader>
+          {selectedClientForDetails && (
+            <div className="space-y-6">
+              <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-4 rounded-lg border">
+                <h3 className="font-semibold text-lg mb-4">معلومات العميل</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-sm text-muted-foreground mb-1">الاسم الكامل</p>
+                    <p className="font-semibold text-base">{selectedClientForDetails.name}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground mb-1">رقم CIN</p>
+                    <p className="font-semibold text-base">{selectedClientForDetails.cin || '-'}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground mb-1">رقم الهاتف</p>
+                    <p className="font-semibold text-base">{selectedClientForDetails.phone || '-'}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground mb-1">البريد الإلكتروني</p>
+                    <p className="font-semibold text-base">{selectedClientForDetails.email || '-'}</p>
+                  </div>
+                  {selectedClientForDetails.address && (
+                    <div className="sm:col-span-2">
+                      <p className="text-sm text-muted-foreground mb-1">العنوان</p>
+                      <p className="font-semibold text-base">{selectedClientForDetails.address}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* All Land Pieces Summary */}
+              {clientSales.length > 0 && (() => {
+                // Collect all unique land pieces from all sales
+                const allLandPieces = new Map<string, { piece_number: string | number; batch_name: string }>()
+                clientSales.forEach((sale: any) => {
+                  const landPieces = sale._landPieces || []
+                  landPieces.forEach((p: any) => {
+                    if (p && p.piece_number) {
+                      const key = `${p.land_batch?.name || 'غير معروف'}-${p.piece_number}`
+                      if (!allLandPieces.has(key)) {
+                        allLandPieces.set(key, {
+                          piece_number: p.piece_number,
+                          batch_name: p.land_batch?.name || 'غير معروف'
+                        })
+                      }
+                    }
+                  })
+                })
+                
+                const uniquePieces = Array.from(allLandPieces.values())
+                
+                if (uniquePieces.length > 0) {
+                  return (
+                    <div className="bg-green-50 p-4 rounded-lg border border-green-200">
+                      <h4 className="font-semibold mb-3 text-lg text-green-800">القطع المملوكة</h4>
+                      <div className="flex flex-wrap gap-2">
+                        {uniquePieces.map((piece, idx) => (
+                          <Badge key={idx} variant="success" className="text-sm py-1 px-3">
+                            {piece.batch_name} - #{piece.piece_number}
+                          </Badge>
+                        ))}
+                      </div>
+                      <p className="text-sm text-muted-foreground mt-2">
+                        إجمالي القطع: <strong className="text-green-700">{uniquePieces.length}</strong>
+                      </p>
+                    </div>
+                  )
+                }
+                return null
+              })()}
+
+              {clientSales.length > 0 && (
+                <div>
+                  <h4 className="font-semibold mb-3 text-lg">سجل المبيعات</h4>
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="bg-gray-100">
+                          <TableHead className="font-semibold">التاريخ</TableHead>
+                          <TableHead className="font-semibold">النوع</TableHead>
+                          <TableHead className="font-semibold">القطع</TableHead>
+                          <TableHead className="font-semibold">السعر</TableHead>
+                          <TableHead className="font-semibold">الحالة</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {clientSales
+                          .sort((a, b) => new Date(b.sale_date).getTime() - new Date(a.sale_date).getTime()) // Sort by date descending (newest first)
+                          .map((sale) => {
+                            const landPieces = sale._landPieces || []
+                            const pieceNumbers = landPieces.map((p: any) => p?.piece_number).filter(Boolean).join('، ')
+                            
+                            return (
+                              <TableRow key={sale.id} className="hover:bg-blue-50/50 transition-colors">
+                                <TableCell className="font-medium">{formatDate(sale.sale_date)}</TableCell>
+                                <TableCell>
+                                  <Badge variant={sale.payment_type === 'Full' ? 'success' : 'secondary'} className="text-xs">
+                                    {sale.payment_type === 'Full' ? 'بالحاضر' : 'بالتقسيط'}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell>
+                                  {pieceNumbers ? (
+                                    <Badge variant="outline" className="text-xs">
+                                      {pieceNumbers}
+                                    </Badge>
+                                  ) : (
+                                    <span className="text-muted-foreground text-xs">-</span>
+                                  )}
+                                </TableCell>
+                                <TableCell className="font-semibold">{formatCurrency(sale.total_selling_price)}</TableCell>
+                                <TableCell>
+                                  <Badge
+                                    variant={
+                                      sale.status === 'Completed'
+                                        ? 'success'
+                                        : sale.status === 'Cancelled'
+                                        ? 'destructive'
+                                        : 'warning'
+                                    }
+                                    className="text-xs"
+                                  >
+                                    {sale.status === 'Completed' ? 'مباع' :
+                                     sale.status === 'Cancelled' ? 'ملغي' :
+                                     sale.is_confirmed || sale.big_advance_confirmed ? 'قيد الدفع' :
+                                     'غير مؤكد'}
+                                  </Badge>
+                                </TableCell>
+                              </TableRow>
+                            )
+                          })}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Sale Details Drawer - Progressive Disclosure */}
+      <Dialog open={detailsDrawerOpen} onOpenChange={setDetailsDrawerOpen}>
+        <DialogContent className="w-[95vw] sm:w-full max-w-4xl max-h-[95vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>تفاصيل الصفقة</DialogTitle>
+          </DialogHeader>
+          {selectedSaleForDetails && (
+            <div className="space-y-6">
+              {/* Sale Summary */}
+              <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-4 rounded-lg border">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-sm text-muted-foreground mb-1">العميل</p>
+                    <p className="font-semibold text-base">{selectedSaleForDetails.clientName}</p>
+                    {selectedSaleForDetails.clientCin && (
+                      <p className="text-xs text-muted-foreground mt-1">CIN: {selectedSaleForDetails.clientCin}</p>
+                    )}
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground mb-1">تاريخ البيع</p>
+                    <p className="font-semibold text-base">{formatDate(selectedSaleForDetails.saleDate)}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground mb-1">القطع</p>
+                    <Badge variant="outline" className="text-sm">
+                      {selectedSaleForDetails.landPieces}
+                    </Badge>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground mb-1">إجمالي المبلغ</p>
+                    <p className="font-semibold text-base text-primary">{formatCurrency(selectedSaleForDetails.totalDue)}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground mb-1">المدفوع</p>
+                    <p className="font-semibold text-base text-green-600">{formatCurrency(selectedSaleForDetails.totalPaid)}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground mb-1">المتبقي</p>
+                    <p className="font-semibold text-base text-red-600">{formatCurrency(selectedSaleForDetails.totalUnpaid)}</p>
+                  </div>
+                </div>
+                <div className="mt-4 pt-4 border-t">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">التقدم</span>
+                    <span className="text-sm font-semibold">
+                      {Math.round((selectedSaleForDetails.totalPaid / selectedSaleForDetails.totalDue) * 100)}%
+                    </span>
+                  </div>
+                  <div className="w-full bg-gray-200 rounded-full h-2 mt-2">
+                    <div 
+                      className="bg-green-500 h-2 rounded-full transition-all" 
+                      style={{ width: `${(selectedSaleForDetails.totalPaid / selectedSaleForDetails.totalDue) * 100}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Installments Schedule */}
+              <div>
+                <h4 className="font-semibold mb-3 text-lg">جدول الأقساط</h4>
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-gray-50">
+                        <TableHead className="font-semibold">#</TableHead>
+                        <TableHead className="font-semibold">المبلغ المستحق</TableHead>
+                        <TableHead className="font-semibold">المدفوع</TableHead>
+                        <TableHead className="font-semibold">المتبقي</TableHead>
+                        <TableHead className="font-semibold">تاريخ الاستحقاق</TableHead>
+                        <TableHead className="font-semibold">الحالة</TableHead>
+                        <TableHead className="font-semibold">إجراء</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {selectedSaleForDetails.installments
+                        .sort((a, b) => a.installment_number - b.installment_number)
+                        .map((inst) => {
+                          const remaining = getRemainingAmount(inst)
+                          const daysLeft = getDaysUntilDue(inst)
+                          const isOverdue = isInstallmentOverdue(inst)
+                          
+                          return (
+                            <TableRow 
+                              key={inst.id}
+                              className={isOverdue && remaining > 0.01 ? 'bg-red-50/30' : ''}
+                            >
+                              <TableCell className="font-medium">#{inst.installment_number}</TableCell>
+                              <TableCell>{formatCurrency(inst.amount_due + inst.stacked_amount)}</TableCell>
+                              <TableCell className="text-green-600 font-medium">
+                                {formatCurrency(inst.amount_paid)}
+                              </TableCell>
+                              <TableCell className={remaining > 0.01 ? 'text-red-600 font-semibold' : 'text-muted-foreground'}>
+                                {formatCurrency(remaining)}
+                              </TableCell>
+                              <TableCell>
+                                {formatDate(inst.due_date)}
+                                {daysLeft >= 0 && (
+                                  <div className="text-xs text-muted-foreground">
+                                    ({daysLeft} يوم)
+                                  </div>
+                                )}
+                              </TableCell>
+                              <TableCell>
+                                <Badge
+                                  variant={
+                                    remaining <= 0.01 ? 'success' :
+                                    isOverdue ? 'destructive' :
+                                    'warning'
+                                  }
+                                  className="text-xs"
+                                >
+                                  {remaining <= 0.01 ? 'مدفوع' :
+                                   isOverdue ? 'متأخر' :
+                                   'مستحق'}
+                                </Badge>
+                              </TableCell>
+                              <TableCell>
+                                {hasPermission('record_payments') && remaining > 0.01 && (
+                                  <Button
+                                    size="sm"
+                                    variant={isOverdue ? 'destructive' : 'default'}
+                                    onClick={() => {
+                                      setDetailsDrawerOpen(false)
+                                      openPaymentDialog(inst)
+                                    }}
+                                  >
+                                    دفع
+                                  </Button>
+                                )}
+                              </TableCell>
+                            </TableRow>
+                          )
+                        })}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

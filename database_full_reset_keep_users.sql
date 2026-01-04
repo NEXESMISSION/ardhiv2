@@ -21,6 +21,12 @@
 -- ✗ audit_logs - All audit history deleted
 -- ✗ debts - All debts deleted (if table exists)
 -- ✗ debt_payments - All debt payments deleted (if table exists)
+-- ✗ expenses - All expenses deleted (if table exists)
+-- ✗ cancellation_requests - All cancellation requests deleted (if table exists)
+-- ✗ user_permissions - All user permissions deleted (if table exists)
+-- 
+-- WHAT IS KEPT:
+-- ✓ permission_templates - Permission templates preserved
 -- ============================================
 
 -- Step 1: Delete all debt payments (if table exists)
@@ -63,6 +69,30 @@ DELETE FROM clients;
 -- Step 10: Delete audit logs
 DELETE FROM audit_logs;
 
+-- Step 11: Delete all expenses (if table exists)
+DO $$ 
+BEGIN
+    IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'expenses') THEN
+        DELETE FROM expenses;
+    END IF;
+END $$;
+
+-- Step 12: Delete all cancellation requests (if table exists)
+DO $$ 
+BEGIN
+    IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'cancellation_requests') THEN
+        DELETE FROM cancellation_requests;
+    END IF;
+END $$;
+
+-- Step 13: Delete all user permissions (if table exists) - Keep templates
+DO $$ 
+BEGIN
+    IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'user_permissions') THEN
+        DELETE FROM user_permissions;
+    END IF;
+END $$;
+
 -- =====================================================
 -- RESET SEQUENCES (if any)
 -- =====================================================
@@ -80,7 +110,10 @@ UNION ALL SELECT 'sales', COUNT(*) FROM sales
 UNION ALL SELECT 'payments', COUNT(*) FROM payments
 UNION ALL SELECT 'installments', COUNT(*) FROM installments
 UNION ALL SELECT 'reservations', COUNT(*) FROM reservations
-UNION ALL SELECT 'audit_logs', COUNT(*) FROM audit_logs;
+UNION ALL SELECT 'audit_logs', COUNT(*) FROM audit_logs
+UNION ALL SELECT 'expenses', COALESCE((SELECT COUNT(*) FROM expenses), 0) WHERE EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'expenses')
+UNION ALL SELECT 'cancellation_requests', COALESCE((SELECT COUNT(*) FROM cancellation_requests), 0) WHERE EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'cancellation_requests')
+UNION ALL SELECT 'user_permissions', COALESCE((SELECT COUNT(*) FROM user_permissions), 0) WHERE EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'user_permissions');
 
 -- =====================================================
 -- WHAT IS KEPT:
@@ -98,5 +131,11 @@ UNION ALL SELECT 'audit_logs', COUNT(*) FROM audit_logs;
 -- ✗ audit_logs - All audit history deleted
 -- ✗ debts - All debts deleted (if table exists)
 -- ✗ debt_payments - All debt payments deleted (if table exists)
+-- ✗ expenses - All expenses deleted (if table exists)
+-- ✗ cancellation_requests - All cancellation requests deleted (if table exists)
+-- ✗ user_permissions - All user permissions deleted (if table exists)
+-- 
+-- WHAT IS KEPT:
+-- ✓ permission_templates - Permission templates preserved
 -- =====================================================
 

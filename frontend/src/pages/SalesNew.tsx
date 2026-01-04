@@ -23,10 +23,11 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
-import { sanitizeText, sanitizePhone, sanitizeCIN } from '@/lib/sanitize'
+import { sanitizeText, sanitizePhone, sanitizeCIN, validateLebanesePhone } from '@/lib/sanitize'
 import { debounce } from '@/lib/throttle'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Plus, Search, Filter, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react'
+import { retryWithBackoff, isRetryableError } from '@/lib/retry'
+import { Plus, Search, Filter, ArrowUpDown, ArrowUp, ArrowDown, X } from 'lucide-react'
 import type { Sale, Client, LandPiece, Installment } from '@/types/database'
 
 // Types for per-piece tracking
@@ -44,8 +45,13 @@ interface PieceSale {
   cost: number
   profit: number
   saleDate: string
+  createdAt: string // For secondary sorting (newest first)
+  deadlineDate: string | null // Deadline for completing procedures
   // Reservation (عربون) - paid on spot
   reservationAmount: number
+  // Company fee
+  companyFeePercentage: number | null
+  companyFeeAmount: number | null
   // Remaining amount after payments
   remainingAmount?: number
   // Full payment fields
@@ -71,12 +77,13 @@ interface ClientMonthlySummary {
 }
 
 export function SalesNew() {
-  const { hasPermission } = useAuth()
+  const { hasPermission, user } = useAuth()
   const [sales, setSales] = useState<Sale[]>([])
   const [clients, setClients] = useState<Client[]>([])
   const [pieces, setPieces] = useState<LandPiece[]>([])
   const [installments, setInstallments] = useState<Installment[]>([])
   const [payments, setPayments] = useState<any[]>([])
+  const [users, setUsers] = useState<any[]>([]) // For user tracking
   const [loading, setLoading] = useState(true)
   
   // View state
@@ -87,9 +94,13 @@ export function SalesNew() {
   const [clientSearch, setClientSearch] = useState('') // Search for clients by ID, phone, name
   const [selectedPieces, setSelectedPieces] = useState<string[]>([])
   const [pieceSearch, setPieceSearch] = useState('') // Search for land pieces by number
+  const [pieceBatchFilter, setPieceBatchFilter] = useState<string>('all') // Filter by batch in new sale dialog
   const [paymentType, setPaymentType] = useState<'Full' | 'Installment'>('Full')
   const [numberOfInstallments, setNumberOfInstallments] = useState('12')
   const [reservationAmount, setReservationAmount] = useState('')
+  const [applyCompanyFee, setApplyCompanyFee] = useState(false)
+  const [companyFeePercentage, setCompanyFeePercentage] = useState('2') // Default 2%, configurable
+  const [deadlineDate, setDeadlineDate] = useState('') // Deadline for completing sale procedures
   
   // New Client Dialog (from sale popup)
   const [newClientOpen, setNewClientOpen] = useState(false)
@@ -108,11 +119,38 @@ export function SalesNew() {
   
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  
+  // Client details dialog
+  const [clientDetailsOpen, setClientDetailsOpen] = useState(false)
+  const [selectedClientForDetails, setSelectedClientForDetails] = useState<Client | null>(null)
+  const [clientSales, setClientSales] = useState<Sale[]>([])
+  
+  const openClientDetails = async (client: Client) => {
+    setSelectedClientForDetails(client)
+    setClientDetailsOpen(true)
+    
+    // Fetch client's sales history
+    try {
+      const { data, error } = await supabase
+        .from('sales')
+        .select('*')
+        .eq('client_id', client.id)
+        .order('sale_date', { ascending: false })
+      
+      if (error) throw error
+      setClientSales(data || [])
+    } catch (err) {
+      console.error('Error fetching client sales:', err)
+      setClientSales([])
+    }
+  }
 
   // UI/UX: Filter and sort states
   const [statusFilter, setStatusFilter] = useState<'all' | 'Pending' | 'AwaitingPayment' | 'InstallmentsOngoing' | 'Completed'>('all')
   const [paymentTypeFilter, setPaymentTypeFilter] = useState<'all' | 'Full' | 'Installment'>('all')
   const [clientFilter, setClientFilter] = useState('')
+  const [landBatchFilter, setLandBatchFilter] = useState<string>('all')
+  const [landPieceSearch, setLandPieceSearch] = useState('')
   const [sortBy, setSortBy] = useState<'date' | 'client' | 'price' | 'status'>('date')
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
 
@@ -121,22 +159,47 @@ export function SalesNew() {
   }, [])
 
   const fetchData = async () => {
+    setLoading(true)
+    setErrorMessage(null)
+    
     try {
-      const [salesRes, clientsRes, piecesRes, installmentsRes, paymentsRes] = await Promise.all([
+      const [salesRes, clientsRes, piecesRes, installmentsRes, paymentsRes, usersRes] = await retryWithBackoff(
+        async () => {
+          return await Promise.all([
         supabase.from('sales').select('*').order('sale_date', { ascending: false }),
         supabase.from('clients').select('*').order('name'),
         supabase.from('land_pieces').select('*, land_batch:land_batches(name)'),
         supabase.from('installments').select('*').order('due_date'),
         supabase.from('payments').select('*').order('payment_date', { ascending: false }),
+        supabase.from('users').select('id, name, email').order('name'), // Fetch users for tracking
       ])
+        },
+        {
+          maxRetries: 3,
+          timeout: 10000,
+          onRetry: (attempt) => {
+            console.log(`Retrying sales data fetch (attempt ${attempt})...`)
+          },
+        }
+      )
 
       setSales((salesRes.data || []) as Sale[])
       setClients((clientsRes.data || []) as Client[])
       setPieces((piecesRes.data || []) as any[])
       setInstallments((installmentsRes.data || []) as Installment[])
       setPayments((paymentsRes.data || []) as any[])
+      setUsers((usersRes.data || []) as any[])
     } catch (error) {
-      setErrorMessage('خطأ في تحميل البيانات')
+      const err = error as Error
+      console.error('Sales fetch error:', err)
+      
+      if (isRetryableError(err)) {
+        setErrorMessage('فشل الاتصال بالخادم. يرجى التحقق من اتصالك بالإنترنت والمحاولة مرة أخرى.')
+      } else if (err.message.includes('timeout')) {
+        setErrorMessage('انتهت مهلة الاتصال. يرجى المحاولة مرة أخرى.')
+      } else {
+        setErrorMessage('خطأ في تحميل البيانات. يرجى المحاولة مرة أخرى.')
+      }
     } finally {
       setLoading(false)
     }
@@ -151,8 +214,20 @@ export function SalesNew() {
       const saleInstallments = installments.filter(i => i.sale_id === sale.id)
       const salePayments = payments.filter(p => p.sale_id === sale.id)
       
-      // Calculate total paid for this sale
-      const totalPaid = salePayments.reduce((sum, p) => sum + (p.amount_paid || 0), 0)
+      // Calculate total paid for this sale (exclude refunds)
+      const totalPaid = salePayments
+        .filter(p => p.payment_type !== 'Refund')
+        .reduce((sum, p) => sum + (p.amount_paid || 0), 0)
+      
+      // Calculate big advance paid (BigAdvance payment type only)
+      const bigAdvancePaid = salePayments
+        .filter(p => p.payment_type === 'BigAdvance')
+        .reduce((sum, p) => sum + (p.amount_paid || 0), 0)
+      
+      // Calculate reservation paid (SmallAdvance payment type only)
+      const reservationPaid = salePayments
+        .filter(p => p.payment_type === 'SmallAdvance')
+        .reduce((sum, p) => sum + (p.amount_paid || 0), 0)
       
       // For each piece in the sale, create a separate entry
       sale.land_piece_ids.forEach((pieceId) => {
@@ -162,8 +237,15 @@ export function SalesNew() {
         const isInstallment = sale.payment_type === 'Installment'
         const pricePerPiece = sale.total_selling_price / sale.land_piece_ids.length
         const costPerPiece = sale.total_purchase_cost / sale.land_piece_ids.length
-        const paidPerPiece = totalPaid / sale.land_piece_ids.length
-        const remainingPerPiece = Math.max(0, pricePerPiece - paidPerPiece)
+        const pieceCount = sale.land_piece_ids.length
+        const paidPerPiece = totalPaid / pieceCount
+        const bigAdvancePaidPerPiece = bigAdvancePaid / pieceCount
+        const reservationPaidPerPiece = reservationPaid / pieceCount
+        
+        // Calculate remaining: total price - reservation - big advance - other payments
+        const companyFeePerPiece = sale.company_fee_amount ? sale.company_fee_amount / sale.land_piece_ids.length : 0
+        const totalPayablePerPiece = pricePerPiece + companyFeePerPiece
+        const remainingPerPiece = Math.max(0, totalPayablePerPiece - reservationPaidPerPiece - bigAdvancePaidPerPiece - (paidPerPiece - reservationPaidPerPiece - bigAdvancePaidPerPiece))
         
         // Determine status based on payment state
         let status: PieceSale['status'] = 'Pending'
@@ -173,8 +255,10 @@ export function SalesNew() {
           status = 'Cancelled'
         } else if (isInstallment) {
           // Installment sale: check big advance and installments
-          if (!isConfirmed) {
-            status = 'AwaitingPayment' // قيد الدفع - waiting for big advance
+          if (!isConfirmed && !bigAdvancePaidPerPiece) {
+            status = 'Pending' // معلق - not confirmed yet
+          } else if (!isConfirmed) {
+            status = 'AwaitingPayment' // قيد الدفع - waiting for big advance confirmation
           } else {
             // Big advance paid - check if all installments are paid
             const allPaid = saleInstallments.length > 0 && 
@@ -200,12 +284,16 @@ export function SalesNew() {
           cost: costPerPiece,
           profit: pricePerPiece - costPerPiece,
           saleDate: sale.sale_date,
-          reservationAmount: (sale.small_advance_amount || 0) / sale.land_piece_ids.length,
+          createdAt: sale.created_at,
+          deadlineDate: sale.deadline_date || null,
+          reservationAmount: reservationPaidPerPiece > 0 ? reservationPaidPerPiece : (sale.small_advance_amount || 0) / sale.land_piece_ids.length,
+          companyFeePercentage: sale.company_fee_percentage,
+          companyFeeAmount: sale.company_fee_amount ? sale.company_fee_amount / sale.land_piece_ids.length : null,
           remainingAmount: remainingPerPiece, // Add remaining amount
           fullPaymentConfirmed: sale.status === 'Completed',
           numberOfInstallments: sale.number_of_installments,
-          bigAdvanceAmount: (sale.big_advance_amount || 0) / sale.land_piece_ids.length,
-          bigAdvanceConfirmed: (sale as any).is_confirmed || false,
+          bigAdvanceAmount: bigAdvancePaidPerPiece > 0 ? bigAdvancePaidPerPiece : (sale.big_advance_amount || 0) / sale.land_piece_ids.length,
+          bigAdvanceConfirmed: bigAdvancePaidPerPiece > 0 || (sale as any).big_advance_confirmed || false,
           bigAdvanceDueDate: (sale as any).big_advance_due_date,
           monthlyInstallmentAmount: sale.monthly_installment_amount 
             ? sale.monthly_installment_amount / sale.land_piece_ids.length 
@@ -248,12 +336,38 @@ export function SalesNew() {
       )
     }
 
-    // Sort
+    // Apply land batch filter
+    if (landBatchFilter !== 'all') {
+      filtered = filtered.filter(s => s.batchName === landBatchFilter)
+    }
+
+    // Apply land piece number search
+    if (landPieceSearch) {
+      const search = landPieceSearch.toLowerCase().trim()
+      filtered = filtered.filter(s => {
+        // Search in piece name (e.g., "#123")
+        const pieceName = s.pieceName.toLowerCase()
+        // Remove # and compare
+        const pieceNumber = pieceName.replace('#', '').replace(/\D/g, '')
+        const searchNumber = search.replace('#', '').replace(/\D/g, '')
+        
+        return pieceName.includes(search) || 
+               pieceNumber.includes(searchNumber) ||
+               s.batchName.toLowerCase().includes(search)
+      })
+    }
+
+    // Sort - default to newest first (DESC by sale_date, then created_at)
     filtered = [...filtered].sort((a, b) => {
       let comparison = 0
       switch (sortBy) {
         case 'date':
+          // Primary sort by sale_date
           comparison = new Date(a.saleDate).getTime() - new Date(b.saleDate).getTime()
+          // If sale dates are equal, sort by created_at (newest first)
+          if (comparison === 0 && a.createdAt && b.createdAt) {
+            comparison = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+          }
           break
         case 'client':
           comparison = a.clientName.localeCompare(b.clientName)
@@ -269,7 +383,29 @@ export function SalesNew() {
     })
 
     return filtered
-  }, [pieceSales, statusFilter, paymentTypeFilter, clientFilter, sortBy, sortOrder])
+  }, [pieceSales, statusFilter, paymentTypeFilter, clientFilter, landBatchFilter, landPieceSearch, sortBy, sortOrder])
+
+  // Get unique land batch names for filter dropdown
+  const uniqueLandBatches = useMemo(() => {
+    const batches = new Set(pieceSales.map(s => s.batchName).filter(Boolean))
+    return Array.from(batches).sort()
+  }, [pieceSales])
+
+  // Clear all filters
+  const clearFilters = () => {
+    setStatusFilter('all')
+    setPaymentTypeFilter('all')
+    setClientFilter('')
+    setLandBatchFilter('all')
+    setLandPieceSearch('')
+  }
+
+  // Check if any filters are active
+  const hasActiveFilters = statusFilter !== 'all' || 
+                           paymentTypeFilter !== 'all' || 
+                           clientFilter !== '' || 
+                           landBatchFilter !== 'all' || 
+                           landPieceSearch !== ''
 
   // Calculate monthly summary per client
   const clientMonthlySummary = useMemo((): ClientMonthlySummary[] => {
@@ -361,27 +497,35 @@ export function SalesNew() {
 
       // Calculate totals from selected pieces using m² pricing
       const selectedPieceObjects = pieces.filter(p => selectedPieces.includes(p.id)) as any[]
-      const totalCost = selectedPieceObjects.reduce((sum, p) => sum + (p.purchase_cost || 0), 0)
-      const totalSurface = selectedPieceObjects.reduce((sum, p) => sum + (p.surface_area || 0), 0)
+      
+      // Validate pieces exist
+      if (selectedPieceObjects.length === 0) {
+        setErrorMessage('يرجى اختيار قطع أرض صحيحة')
+        setIsSubmitting(false)
+        return
+      }
+      
+      const totalCost = parseFloat(selectedPieceObjects.reduce((sum, p) => sum + (parseFloat(p.purchase_cost) || 0), 0).toFixed(2))
+      const totalSurface = selectedPieceObjects.reduce((sum, p) => sum + (parseFloat(p.surface_area) || 0), 0)
       
       // Calculate total price based on payment type and pre-set prices
-      const totalPrice = selectedPieceObjects.reduce((sum, p) => {
+      const totalPrice = parseFloat(selectedPieceObjects.reduce((sum, p) => {
         if (paymentType === 'Full') {
-          return sum + (p.selling_price_full || 0)
+          return sum + (parseFloat(p.selling_price_full) || 0)
         } else {
-          return sum + (p.selling_price_installment || 0)
+          return sum + (parseFloat(p.selling_price_installment) || 0)
         }
-      }, 0)
+      }, 0).toFixed(2))
       
-      if (totalPrice <= 0) {
+      if (totalPrice <= 0 || isNaN(totalPrice)) {
         setErrorMessage('يرجى التأكد من أن القطع المختارة لها أسعار محددة. يمكنك تحديد الأسعار من صفحة إدارة الأراضي عند إنشاء الدفعة.')
         setIsSubmitting(false)
         return
       }
       
       // Validate calculation
-      if (isNaN(totalPrice) || totalPrice <= 0) {
-        setErrorMessage('خطأ في حساب السعر الإجمالي. يرجى التحقق من البيانات')
+      if (isNaN(totalCost) || totalCost < 0) {
+        setErrorMessage('خطأ في حساب التكلفة الإجمالية. يرجى التحقق من البيانات')
         setIsSubmitting(false)
         return
       }
@@ -395,22 +539,69 @@ export function SalesNew() {
         return
       }
       
+      // Company fee will be set at confirmation, not during sale creation
+      
+      // Validate land_piece_ids is an array and not empty
+      if (!Array.isArray(selectedPieces) || selectedPieces.length === 0) {
+        setErrorMessage('يرجى اختيار قطعة أرض واحدة على الأقل')
+        setIsSubmitting(false)
+        return
+      }
+      
+      // Validate client_id exists
+      if (!selectedClient || selectedClient.trim() === '') {
+        setErrorMessage('يرجى اختيار عميل')
+        setIsSubmitting(false)
+        return
+      }
+      
+      // Build saleData with proper types - only include fields that definitely exist
       const saleData: any = {
         client_id: selectedClient,
-        land_piece_ids: selectedPieces, // Multiple pieces
-        payment_type: paymentType,
-        total_purchase_cost: totalCost,
-        total_selling_price: totalPrice, // Calculated from m² price
-        profit_margin: totalPrice - totalCost,
-        small_advance_amount: reservation, // عربون - reservation amount
-        big_advance_amount: 0, // Will be set at confirmation
-        number_of_installments: paymentType === 'Installment' ? (numberOfInstallments ? parseInt(numberOfInstallments) || null : null) : null,
-        status: 'Pending',
-        sale_date: new Date().toISOString().split('T')[0], // Auto-default to current date
+        land_piece_ids: selectedPieces, // Array of UUIDs - REQUIRED
+        payment_type: paymentType, // 'Full' or 'Installment' - REQUIRED
+        total_purchase_cost: totalCost, // DECIMAL - REQUIRED
+        total_selling_price: totalPrice, // DECIMAL - REQUIRED
+        profit_margin: parseFloat((totalPrice - totalCost).toFixed(2)), // DECIMAL - REQUIRED
+        small_advance_amount: reservation, // DECIMAL - has DEFAULT 0
+        big_advance_amount: 0, // DECIMAL - has DEFAULT 0
+        status: 'Pending', // sale_status enum - has DEFAULT 'Pending'
+        sale_date: new Date().toISOString().split('T')[0], // DATE - has DEFAULT CURRENT_DATE
+        created_by: user?.id || null, // Track who created this sale
       }
+      
+      // Add optional fields (these columns might not exist if migrations haven't been run)
+      if (deadlineDate && deadlineDate.trim() !== '') {
+        saleData.deadline_date = deadlineDate
+      }
+      
+      // Company fee and number_of_installments will be set at confirmation, not during sale creation
 
-      const { data: newSale, error } = await supabase.from('sales').insert([saleData] as any).select().single()
-      if (error) throw error
+      const { data: newSale, error } = await supabase
+        .from('sales')
+        .insert(saleData)
+        .select()
+        .single()
+      
+      if (error) {
+        console.error('Error creating sale:', error)
+        console.error('Sale data sent:', JSON.stringify(saleData, null, 2))
+        
+        // Provide more specific error messages
+        if (error.code === '23503') {
+          setErrorMessage('العميل أو القطع المحددة غير موجودة. يرجى تحديث الصفحة والمحاولة مرة أخرى.')
+        } else if (error.code === '23505') {
+          setErrorMessage('هذا البيع موجود بالفعل')
+        } else if (error.code === 'PGRST116' || error.message?.includes('column') || error.message?.includes('does not exist')) {
+          setErrorMessage('بعض الأعمدة غير موجودة في قاعدة البيانات. يرجى تشغيل ملف fix_sales_table_columns.sql في Supabase SQL Editor.')
+        } else if (error.message?.includes('null value') || error.message?.includes('NOT NULL')) {
+          setErrorMessage('يرجى ملء جميع الحقول المطلوبة')
+        } else {
+          setErrorMessage(`خطأ في إنشاء البيع: ${error.message || 'خطأ غير معروف'}. يرجى التحقق من البيانات والمحاولة مرة أخرى.`)
+        }
+        setIsSubmitting(false)
+        return
+      }
 
       // Create SmallAdvance payment if reservation amount > 0
       if (reservation > 0 && newSale) {
@@ -447,9 +638,13 @@ export function SalesNew() {
     setClientSearch('')
     setSelectedPieces([])
     setPieceSearch('')
+    setPieceBatchFilter('all')
     setPaymentType('Full')
     setNumberOfInstallments('12')
     setReservationAmount('')
+    setApplyCompanyFee(false)
+    setCompanyFeePercentage('2')
+    setDeadlineDate('')
     setNewClientName('')
     setNewClientPhone('')
     setNewClientAddress('')
@@ -496,6 +691,13 @@ export function SalesNew() {
       return
     }
     
+    // Validate phone is required (no format check, just required)
+    if (!newClientPhone || !newClientPhone.trim()) {
+      setErrorMessage('رقم الهاتف مطلوب')
+      setCreatingClient(false)
+      return
+    }
+    
     try {
       // Check for duplicate CIN
       const { data: existingClients, error: checkError } = await supabase
@@ -522,7 +724,7 @@ export function SalesNew() {
         .insert([{
           name: sanitizedName,
           cin: sanitizedCIN,
-          phone: sanitizedPhone,
+          phone: sanitizedPhone, // Now required
           address: sanitizedAddress,
           client_type: 'Individual',
         }])
@@ -576,14 +778,51 @@ export function SalesNew() {
     )
   }, [clients, debouncedClientSearch])
 
-  // Filter pieces by land number
+  // Filter pieces by land number and batch
   const filteredAvailablePieces = useMemo(() => {
-    if (!debouncedPieceSearch) return availablePieces
+    let filtered = availablePieces
+    
+    // Filter by batch
+    if (pieceBatchFilter !== 'all') {
+      filtered = filtered.filter((piece: any) => 
+        piece.land_batch?.name === pieceBatchFilter
+      )
+    }
+    
+    // Filter by piece number search
+    if (debouncedPieceSearch) {
     const search = debouncedPieceSearch.toLowerCase()
-    return availablePieces.filter((piece: any) => 
-      piece.piece_number?.toString().toLowerCase().includes(search)
+      filtered = filtered.filter((piece: any) => 
+        piece.piece_number?.toString().toLowerCase().includes(search) ||
+        piece.land_batch?.name?.toLowerCase().includes(search)
+      )
+    }
+    
+    // Sort by batch name first, then by piece number (to show lands grouped by batch)
+    filtered = filtered.sort((a: any, b: any) => {
+      const batchA = a.land_batch?.name || ''
+      const batchB = b.land_batch?.name || ''
+      if (batchA !== batchB) {
+        return batchA.localeCompare(batchB, 'ar')
+      }
+      // If same batch, sort by piece number
+      const numA = parseInt(a.piece_number?.toString().replace(/\D/g, '')) || 0
+      const numB = parseInt(b.piece_number?.toString().replace(/\D/g, '')) || 0
+      return numA - numB
+    })
+    
+    return filtered
+  }, [availablePieces, debouncedPieceSearch, pieceBatchFilter])
+
+  // Get unique batch names from available pieces for filter dropdown
+  const availableBatchNames = useMemo(() => {
+    const batches = new Set(
+      availablePieces
+        .map((p: any) => p.land_batch?.name)
+        .filter(Boolean)
     )
-  }, [availablePieces, debouncedPieceSearch])
+    return Array.from(batches).sort()
+  }, [availablePieces])
 
   // Confirm full payment - for a single piece only
   const confirmFullPayment = async () => {
@@ -700,9 +939,17 @@ export function SalesNew() {
         }
       } else {
         // Single piece sale - update sale and piece
+        // Calculate company fee if enabled
+        const feePercentage = applyCompanyFee ? parseFloat(companyFeePercentage) || 2 : 0
+        const companyFee = applyCompanyFee ? parseFloat(((selectedSale.price * feePercentage) / 100).toFixed(2)) : 0
+        
         await supabase
           .from('sales')
-          .update({ status: 'Completed' } as any)
+          .update({
+            status: 'Completed',
+            company_fee_percentage: applyCompanyFee ? feePercentage : null,
+            company_fee_amount: applyCompanyFee ? companyFee : null,
+          } as any)
           .eq('id', selectedSale.saleId)
 
         await supabase
@@ -732,8 +979,8 @@ export function SalesNew() {
 
   // Confirm big advance - for a single piece only
   const confirmBigAdvance = async () => {
-    if (!selectedSale || !installmentStartDate || !bigAdvancePaidAmount) {
-      setErrorMessage('يرجى ملء جميع الحقول المطلوبة')
+    if (!selectedSale || !installmentStartDate || !bigAdvancePaidAmount || !numberOfInstallments) {
+      setErrorMessage('يرجى ملء جميع الحقول المطلوبة (عدد الأشهر، مبلغ الدفعة، تاريخ أول قسط)')
       return
     }
     
@@ -755,7 +1002,7 @@ export function SalesNew() {
       if (!saleData) throw new Error('Sale not found')
 
       const sale = saleData as Sale
-      const numInstallments = selectedSale.numberOfInstallments || 12
+      const numInstallments = parseInt(numberOfInstallments) || 12
       const bigAdvPaid = parseFloat(bigAdvancePaidAmount)
       
       const pieceCount = sale.land_piece_ids.length
@@ -870,14 +1117,20 @@ export function SalesNew() {
         }
       } else {
         // Single piece sale - standard flow
+        // Calculate company fee if enabled
+        const feePercentage = applyCompanyFee ? parseFloat(companyFeePercentage) || 2 : 0
+        const companyFee = applyCompanyFee ? parseFloat(((selectedSale.price * feePercentage) / 100).toFixed(2)) : 0
+        
         await supabase
           .from('sales')
           .update({
-            is_confirmed: true,
-            big_advance_amount: totalAdvance, // Include reservation in big advance
+            big_advance_amount: bigAdvPaid, // Only the first payment amount, not including reservation
+            company_fee_percentage: applyCompanyFee ? feePercentage : null,
+            company_fee_amount: applyCompanyFee ? companyFee : null,
+            number_of_installments: numInstallments,
             monthly_installment_amount: monthlyAmount,
             installment_start_date: installmentStartDate,
-            status: 'Pending', // Use 'Pending' for ongoing installments (database enum doesn't have 'InstallmentsOngoing')
+            status: 'AwaitingPayment', // Use 'AwaitingPayment' for ongoing installments
           } as any)
           .eq('id', selectedSale.saleId)
 
@@ -1171,27 +1424,67 @@ export function SalesNew() {
       {/* Compact Stats - Inline */}
       <div className="flex flex-wrap items-center gap-2 sm:gap-4 text-xs sm:text-sm">
         <span className="text-muted-foreground">إجمالي: <strong className="text-blue-600">{filteredAndSortedSales.length}</strong></span>
-        <span className="text-muted-foreground">مكتمل: <strong className="text-green-600">{filteredAndSortedSales.filter(s => s.status === 'Completed').length}</strong></span>
+        <span className="text-muted-foreground">مباع: <strong className="text-green-600">{filteredAndSortedSales.filter(s => s.status === 'Completed').length}</strong></span>
         <span className="text-muted-foreground">قيد الدفع: <strong className="text-yellow-600">{filteredAndSortedSales.filter(s => s.status === 'AwaitingPayment').length}</strong></span>
-        <span className="text-muted-foreground">أقساط: <strong className="text-purple-600">{filteredAndSortedSales.filter(s => s.status === 'InstallmentsOngoing').length}</strong></span>
+        <span className="text-muted-foreground">بالتقسيط: <strong className="text-purple-600">{filteredAndSortedSales.filter(s => s.status === 'InstallmentsOngoing').length}</strong></span>
       </div>
 
-      {/* Compact Search */}
+      {/* Compact Search and Filters */}
+      <div className="space-y-2">
       <div className="flex flex-col sm:flex-row gap-2">
         <Input
           type="text"
-          placeholder="بحث..."
+            placeholder="بحث عن العميل..."
           value={clientFilter}
           onChange={e => setClientFilter(e.target.value)}
           className="flex-1"
         />
+          <Input
+            type="text"
+            placeholder="بحث عن رقم القطعة..."
+            value={landPieceSearch}
+            onChange={e => setLandPieceSearch(e.target.value)}
+            className="flex-1"
+          />
+          <Select 
+            value={landBatchFilter} 
+            onChange={e => setLandBatchFilter(e.target.value)} 
+            className="w-full sm:w-48"
+          >
+            <option value="all">كل الدفعات</option>
+            {uniqueLandBatches.map(batch => (
+              <option key={batch} value={batch}>{batch}</option>
+            ))}
+          </Select>
         <Select value={statusFilter} onChange={e => setStatusFilter(e.target.value as any)} className="w-full sm:w-40">
-          <option value="all">الكل</option>
+            <option value="all">كل الحالات</option>
           <option value="Pending">معلق</option>
           <option value="AwaitingPayment">قيد الدفع</option>
-          <option value="InstallmentsOngoing">أقساط</option>
-          <option value="Completed">مكتمل</option>
+          <option value="InstallmentsOngoing">بالتقسيط</option>
+          <option value="Completed">مباع</option>
         </Select>
+          <Select value={paymentTypeFilter} onChange={e => setPaymentTypeFilter(e.target.value as any)} className="w-full sm:w-40">
+            <option value="all">كل الأنواع</option>
+            <option value="Full">بالحاضر</option>
+            <option value="Installment">بالتقسيط</option>
+        </Select>
+        </div>
+        {hasActiveFilters && (
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-muted-foreground">
+              {filteredAndSortedSales.length} نتيجة من {pieceSales.filter(s => s.status !== 'Cancelled').length}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={clearFilters}
+              className="text-xs"
+            >
+              <X className="h-3 w-3 ml-1" />
+              مسح الفلاتر
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Compact Sales Table */}
@@ -1204,8 +1497,8 @@ export function SalesNew() {
       ) : (
         <Card>
           <CardContent className="p-0">
-            <div className="overflow-x-auto">
-              <Table>
+            <div className="overflow-x-auto -mx-4 sm:mx-0 px-4 sm:px-0" style={{ WebkitOverflowScrolling: 'touch' }}>
+              <Table className="min-w-full">
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-[150px]">العميل</TableHead>
@@ -1213,28 +1506,81 @@ export function SalesNew() {
                     <TableHead className="w-[80px]">النوع</TableHead>
                     <TableHead className="w-[100px] text-right">السعر</TableHead>
                     <TableHead className="w-[100px] text-right">عربون</TableHead>
+                    <TableHead className="w-[120px] text-right">الدفعة الأولى</TableHead>
                     <TableHead className="w-[100px] text-right">المتبقي</TableHead>
                     <TableHead className="w-[100px]">الحالة</TableHead>
-                    <TableHead className="w-[120px] text-center">إجراء</TableHead>
+                    {user?.role === 'Owner' && (
+                      <TableHead className="w-[120px]">المستخدم</TableHead>
+                    )}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {filteredAndSortedSales.map(sale => (
                     <TableRow key={sale.id}>
-                      <TableCell className="font-medium">{sale.clientName}</TableCell>
+                      <TableCell className="font-medium">
+                        <button 
+                          onClick={() => {
+                            const client = clients.find(c => c.id === sale.clientId)
+                            if (client) openClientDetails(client)
+                          }}
+                          className="hover:underline text-primary font-medium"
+                        >
+                          {sale.clientName}
+                        </button>
+                      </TableCell>
                       <TableCell>
                         <div className="text-sm">
                           <div>{sale.batchName} - {sale.pieceName}</div>
                           <div className="text-xs text-muted-foreground">{sale.surfaceArea} م²</div>
+                          {sale.deadlineDate && sale.status !== 'Completed' && !sale.bigAdvanceConfirmed && (() => {
+                            const deadline = new Date(sale.deadlineDate)
+                            const today = new Date()
+                            today.setHours(0, 0, 0, 0)
+                            deadline.setHours(0, 0, 0, 0)
+                            const daysUntil = Math.ceil((deadline.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
+                            const isExpired = daysUntil <= 0
+                            const isApproaching = daysUntil > 0 && daysUntil <= 3
+                            
+                            return (
+                              <div className={`text-xs mt-1 font-medium ${
+                                isExpired ? 'text-red-600' : 
+                                isApproaching ? 'text-orange-600' : 
+                                'text-blue-600'
+                              }`}>
+                                {isExpired ? `⚠ انتهى الموعد النهائي (${daysUntil === 0 ? 'اليوم' : Math.abs(daysUntil) + ' يوم مضى'})` :
+                                 isApproaching ? `⚠ الموعد النهائي قريب (${daysUntil} يوم)` :
+                                 `آخر أجل: ${formatDate(sale.deadlineDate)}`}
+                              </div>
+                            )
+                          })()}
                         </div>
                       </TableCell>
                       <TableCell>
                         <Badge variant={sale.paymentType === 'Full' ? 'success' : 'secondary'} className="text-xs">
-                          {sale.paymentType === 'Full' ? 'كامل' : 'أقساط'}
+                          {sale.paymentType === 'Full' ? 'بالحاضر' : 'بالتقسيط'}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-right font-medium">{formatCurrency(sale.price)}</TableCell>
+                      <TableCell className="text-right font-medium">
+                        {formatCurrency(sale.price)}
+                        {sale.companyFeeAmount && sale.companyFeeAmount > 0 && (
+                          <div className="text-xs text-blue-600 mt-1">
+                            + عمولة: {formatCurrency(sale.companyFeeAmount)}
+                          </div>
+                        )}
+                      </TableCell>
                       <TableCell className="text-right text-green-600">{formatCurrency(sale.reservationAmount)}</TableCell>
+                      <TableCell className="text-right font-medium text-blue-600">
+                        {(() => {
+                          // Show actual big advance paid (from payments), not just the amount
+                          if (sale.paymentType === 'Installment') {
+                            // Get the actual big advance payment for this piece
+                            const salePayments = payments.filter(p => p.sale_id === sale.saleId && p.payment_type === 'BigAdvance')
+                            const bigAdvancePaid = salePayments.reduce((sum, p) => sum + (p.amount_paid || 0), 0) / (sales.find(s => s.id === sale.saleId)?.land_piece_ids.length || 1)
+                            return formatCurrency(bigAdvancePaid > 0 ? bigAdvancePaid : 0)
+                          }
+                          return formatCurrency(0)
+                        })()}
+                      </TableCell>
                       <TableCell className="text-right font-medium">
                         {formatCurrency((sale as any).remainingAmount ?? sale.price)}
                       </TableCell>
@@ -1247,44 +1593,36 @@ export function SalesNew() {
                           }
                           className="text-xs"
                         >
-                          {sale.status === 'Completed' ? 'مكتمل' :
-                           sale.status === 'InstallmentsOngoing' ? 'أقساط' :
+                          {sale.status === 'Completed' ? 'مباع' :
+                           sale.status === 'InstallmentsOngoing' ? 'بالتقسيط' :
+                           sale.status === 'Pending' && !sale.bigAdvanceConfirmed && !(sale as any).is_confirmed ? 'غير مؤكد' :
                            sale.status === 'AwaitingPayment' ? 'قيد الدفع' :
                            sale.status === 'Pending' ? 'معلق' : 'ملغي'}
                         </Badge>
                       </TableCell>
-                      <TableCell>
-                        <div className="flex gap-1 justify-center">
-                          {sale.paymentType === 'Full' && !sale.fullPaymentConfirmed && hasPermission('edit_sales') && (
-                            <Button 
-                              size="sm" 
-                              onClick={() => { setSelectedSale(sale); setConfirmFullOpen(true) }} 
-                              className="bg-green-600 hover:bg-green-700 text-xs px-2"
-                            >
-                              تأكيد
-                            </Button>
-                          )}
-                          {sale.paymentType === 'Installment' && !sale.bigAdvanceConfirmed && hasPermission('edit_sales') && (
-                            <Button 
-                              size="sm" 
-                              onClick={() => { setSelectedSale(sale); setConfirmBigAdvanceOpen(true) }} 
-                              className="bg-blue-600 hover:bg-blue-700 text-xs px-2"
-                            >
-                              تأكيد
-                            </Button>
-                          )}
-                          {hasPermission('edit_sales') && (
-                            <Button 
-                              size="sm" 
-                              variant="outline" 
-                              onClick={() => openCancelDialog(sale)}
-                              className="text-destructive hover:bg-destructive/10 text-xs px-2"
-                            >
-                              إلغاء
-                            </Button>
-                          )}
-                        </div>
-                      </TableCell>
+                      {user?.role === 'Owner' && (() => {
+                        const saleData = sales.find(s => s.id === sale.saleId)
+                        const createdByUser = saleData?.created_by ? users.find(u => u.id === saleData.created_by) : null
+                        const confirmedByUser = (saleData as any)?.confirmed_by ? users.find(u => u.id === (saleData as any).confirmed_by) : null
+                        
+                        return (
+                          <TableCell className="text-xs">
+                            {createdByUser && (
+                              <div className="text-muted-foreground mb-1">
+                                أنشأ: {createdByUser.name}
+                              </div>
+                            )}
+                            {confirmedByUser && (
+                              <div className="text-green-600 font-medium">
+                                أكد: {confirmedByUser.name}
+                              </div>
+                            )}
+                            {!createdByUser && !confirmedByUser && (
+                              <span className="text-muted-foreground">-</span>
+                            )}
+                          </TableCell>
+                        )
+                      })()}
                     </TableRow>
                   ))}
                 </TableBody>
@@ -1360,6 +1698,17 @@ export function SalesNew() {
 
             <div className="space-y-2">
               <Label>قطع الأرض ({selectedPieces.length} محددة)</Label>
+              <div className="flex flex-col sm:flex-row gap-2 mb-2">
+                <Select 
+                  value={pieceBatchFilter} 
+                  onChange={e => setPieceBatchFilter(e.target.value)} 
+                  className="w-full sm:w-48"
+                >
+                  <option value="all">كل الدفعات</option>
+                  {availableBatchNames.map(batch => (
+                    <option key={batch} value={batch}>{batch}</option>
+                  ))}
+                </Select>
               <Input
                 type="text"
                 placeholder="بحث عن قطعة برقم القطعة..."
@@ -1369,8 +1718,9 @@ export function SalesNew() {
                   setPieceSearch(e.target.value)
                   debouncedPieceSearchFn(e.target.value)
                 }}
-                className="mb-2"
+                  className="flex-1"
               />
+              </div>
               <div className="max-h-40 overflow-y-auto border rounded-md p-2 space-y-1">
                 {filteredAvailablePieces.length === 0 ? (
                   <p className="text-sm text-muted-foreground">لا توجد قطع متاحة</p>
@@ -1406,8 +1756,8 @@ export function SalesNew() {
             <div className="space-y-2">
               <Label>نوع الدفع</Label>
               <Select value={paymentType} onChange={e => setPaymentType(e.target.value as any)}>
-                <option value="Full">دفع كامل</option>
-                <option value="Installment">أقساط</option>
+                <option value="Full">بالحاضر</option>
+                <option value="Installment">بالتقسيط</option>
               </Select>
             </div>
 
@@ -1427,21 +1777,21 @@ export function SalesNew() {
               )}
             </div>
 
-            {paymentType === 'Installment' && (
+
               <div className="space-y-2">
-                <Label>عدد الأشهر</Label>
+              <Label htmlFor="deadlineDate">آخر أجل لإتمام الإجراءات (اختياري)</Label>
                 <Input
-                  type="text"
-                  value={numberOfInstallments}
-                  onChange={e => setNumberOfInstallments(e.target.value)}
-                  placeholder="أدخل عدد الأشهر"
-                  maxLength={10}
+                id="deadlineDate"
+                type="date"
+                value={deadlineDate}
+                onChange={e => setDeadlineDate(e.target.value)}
+                min={new Date().toISOString().split('T')[0]}
                 />
                 <p className="text-xs text-muted-foreground">
-                  * الدفعة الأولى وتاريخ استحقاقها سيتم تحديدها عند التأكيد
+                تاريخ آخر أجل لإتمام إجراءات البيع. سيتم عرض تحذيرات عند اقتراب الموعد النهائي.
                 </p>
               </div>
-            )}
+
 
           </div>
           <DialogFooter className="flex-col sm:flex-row gap-2">
@@ -1496,9 +1846,75 @@ export function SalesNew() {
                 <p><strong>العميل:</strong> {selectedSale.clientName}</p>
                 <p><strong>القطعة:</strong> {selectedSale.batchName} - {selectedSale.pieceName}</p>
                 <p><strong>السعر الإجمالي:</strong> {formatCurrency(selectedSale.price)}</p>
-                <p><strong>عدد الأشهر:</strong> {selectedSale.numberOfInstallments}</p>
                 {selectedSale.bigAdvanceDueDate && (
                   <p><strong>تاريخ استحقاق الدفعة:</strong> {formatDate(selectedSale.bigAdvanceDueDate)}</p>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <Label>عدد الأشهر</Label>
+                <Input
+                  type="number"
+                  value={numberOfInstallments}
+                  onChange={e => setNumberOfInstallments(e.target.value)}
+                  placeholder="أدخل عدد الأشهر (مثال: 12)"
+                  min="1"
+                  max="120"
+                />
+                <p className="text-xs text-muted-foreground">
+                  عدد الأشهر لسداد المبلغ المتبقي
+                </p>
+              </div>
+
+              {/* Company Fee Section */}
+              <div className="space-y-3 bg-gray-50 border border-gray-200 rounded-lg p-4">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="applyCompanyFeeInstallment"
+                    checked={applyCompanyFee}
+                    onChange={(e) => setApplyCompanyFee(e.target.checked)}
+                    className="rounded"
+                  />
+                  <Label htmlFor="applyCompanyFeeInstallment" className="font-medium cursor-pointer">
+                    تطبيق عمولة الشركة
+                  </Label>
+                </div>
+                {applyCompanyFee && (
+                  <div className="space-y-2 pr-6">
+                    <div className="flex items-center gap-2">
+                      <Label htmlFor="companyFeePercentageInstallment" className="text-sm">النسبة المئوية:</Label>
+                      <Input
+                        id="companyFeePercentageInstallment"
+                        type="number"
+                        step="0.1"
+                        min="0"
+                        max="100"
+                        value={companyFeePercentage}
+                        onChange={e => setCompanyFeePercentage(e.target.value)}
+                        className="w-20"
+                      />
+                      <span className="text-sm">%</span>
+                    </div>
+                    <div className="space-y-1 text-sm border-t pt-2 mt-2">
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">سعر البيع:</span>
+                        <span className="font-medium">{formatCurrency(selectedSale.price)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">عمولة الشركة ({companyFeePercentage}%):</span>
+                        <span className="font-medium text-blue-600">
+                          {formatCurrency((selectedSale.price * parseFloat(companyFeePercentage || '2')) / 100)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between font-bold text-lg pt-1 border-t">
+                        <span>المبلغ الإجمالي المستحق:</span>
+                        <span className="text-green-600">
+                          {formatCurrency(selectedSale.price + (selectedSale.price * parseFloat(companyFeePercentage || '2')) / 100)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
                 )}
               </div>
 
@@ -1510,6 +1926,9 @@ export function SalesNew() {
                   onChange={e => setBigAdvancePaidAmount(e.target.value)}
                   placeholder="أدخل المبلغ المستلم"
                 />
+                <p className="text-xs text-muted-foreground">
+                  مبلغ الدفعة الأولى فقط (بدون العربون وبدون عمولة الشركة)
+                </p>
               </div>
 
               <div className="space-y-2">
@@ -1524,22 +1943,48 @@ export function SalesNew() {
                 </p>
               </div>
 
-              {installmentStartDate && selectedSale.numberOfInstallments && bigAdvancePaidAmount && (
+              {installmentStartDate && numberOfInstallments && bigAdvancePaidAmount && (
                 <div className="bg-blue-50 p-3 rounded-lg space-y-1">
-                  <p className="text-sm text-blue-800">
-                    <strong>الدفعة الأولى (تشمل العربون):</strong>{' '}
-                    {formatCurrency(parseFloat(bigAdvancePaidAmount) + selectedSale.reservationAmount)}
+                  <div className="space-y-1 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-blue-800">العربون:</span>
+                      <span className="font-medium text-blue-800">{formatCurrency(selectedSale.reservationAmount)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-blue-800">مبلغ الدفعة الأولى:</span>
+                      <span className="font-medium text-blue-800">{formatCurrency(parseFloat(bigAdvancePaidAmount))}</span>
+                    </div>
+                    {applyCompanyFee && (
+                      <div className="flex justify-between">
+                        <span className="text-blue-800">عمولة الشركة ({companyFeePercentage}%):</span>
+                        <span className="font-medium text-blue-800">
+                          {formatCurrency((selectedSale.price * parseFloat(companyFeePercentage || '2')) / 100)}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="border-t pt-2 mt-2">
+                    <p className="text-sm text-blue-800 font-bold">
+                      <strong>الدفعة الأولى الإجمالية (تشمل العربون + الدفعة الأولى + عمولة الشركة):</strong>{' '}
+                      {formatCurrency(
+                        parseFloat(bigAdvancePaidAmount) + 
+                        selectedSale.reservationAmount + 
+                        (applyCompanyFee ? (selectedSale.price * parseFloat(companyFeePercentage || '2')) / 100 : 0)
+                      )}
                   </p>
+                  </div>
+                  <div className="border-t pt-2 mt-2 space-y-1">
                   <p className="text-sm text-blue-800">
-                    <strong>المبلغ المتبقي:</strong>{' '}
+                      <strong>المبلغ المتبقي (بعد الدفعة الأولى والعربون):</strong>{' '}
                     {formatCurrency(selectedSale.price - parseFloat(bigAdvancePaidAmount) - selectedSale.reservationAmount)}
                   </p>
                   <p className="text-sm text-blue-800">
                     <strong>القسط الشهري:</strong>{' '}
                     {formatCurrency(
-                      (selectedSale.price - parseFloat(bigAdvancePaidAmount) - selectedSale.reservationAmount) / selectedSale.numberOfInstallments
+                        (selectedSale.price - parseFloat(bigAdvancePaidAmount) - selectedSale.reservationAmount) / parseInt(numberOfInstallments || '12')
                     )}
                   </p>
+                  </div>
                 </div>
               )}
             </div>
@@ -1548,7 +1993,7 @@ export function SalesNew() {
             <Button variant="outline" onClick={() => setConfirmBigAdvanceOpen(false)}>
               إلغاء
             </Button>
-            <Button onClick={confirmBigAdvance} disabled={isSubmitting || !installmentStartDate || !bigAdvancePaidAmount}>
+            <Button onClick={confirmBigAdvance} disabled={isSubmitting || !installmentStartDate || !bigAdvancePaidAmount || !numberOfInstallments}>
               {isSubmitting ? 'جاري التأكيد...' : 'تأكيد وإنشاء الأقساط'}
             </Button>
           </DialogFooter>
@@ -1653,12 +2098,13 @@ export function SalesNew() {
               />
             </div>
             <div className="space-y-2">
-              <Label>رقم الهاتف</Label>
+              <Label>رقم الهاتف <span className="text-destructive">*</span></Label>
               <Input
                 value={newClientPhone}
                 onChange={e => setNewClientPhone(e.target.value)}
-                placeholder="رقم الهاتف (اختياري)"
+                placeholder="03123456 أو 70123456"
                 maxLength={20}
+                required
               />
             </div>
             <div className="space-y-2">
@@ -1685,6 +2131,86 @@ export function SalesNew() {
               إضافة واختيار
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Client Details Dialog */}
+      <Dialog open={clientDetailsOpen} onOpenChange={setClientDetailsOpen}>
+        <DialogContent className="w-[95vw] sm:w-full max-w-2xl max-h-[95vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>تفاصيل العميل</DialogTitle>
+          </DialogHeader>
+          {selectedClientForDetails && (
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <p className="text-sm text-muted-foreground">الاسم</p>
+                  <p className="font-medium">{selectedClientForDetails.name}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">رقم CIN</p>
+                  <p className="font-medium">{selectedClientForDetails.cin}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">رقم الهاتف</p>
+                  <p className="font-medium">{selectedClientForDetails.phone || '-'}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">البريد الإلكتروني</p>
+                  <p className="font-medium">{selectedClientForDetails.email || '-'}</p>
+                </div>
+                {selectedClientForDetails.address && (
+                  <div className="sm:col-span-2">
+                    <p className="text-sm text-muted-foreground">العنوان</p>
+                    <p className="font-medium">{selectedClientForDetails.address}</p>
+                  </div>
+                )}
+              </div>
+
+              {clientSales.length > 0 && (
+                <div>
+                  <h4 className="font-semibold mb-2">سجل المبيعات</h4>
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>التاريخ</TableHead>
+                          <TableHead>النوع</TableHead>
+                          <TableHead>السعر</TableHead>
+                          <TableHead>الحالة</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {clientSales.map((sale) => (
+                          <TableRow key={sale.id}>
+                            <TableCell>{formatDate(sale.sale_date)}</TableCell>
+                            <TableCell>{sale.payment_type === 'Full' ? 'بالحاضر' : 'بالتقسيط'}</TableCell>
+                            <TableCell>{formatCurrency(sale.total_selling_price)}</TableCell>
+                            <TableCell>
+                              <Badge
+                                variant={
+                                  sale.status === 'Completed'
+                                    ? 'success'
+                                    : sale.status === 'Cancelled'
+                                    ? 'destructive'
+                                    : 'warning'
+                                }
+                              >
+                                {sale.status === 'Completed' ? 'مباع' :
+                                 sale.status === 'Cancelled' ? 'ملغي' :
+                                 (sale as any).is_confirmed || (sale as any).big_advance_confirmed ? 'قيد الدفع' :
+                                 'غير مؤكد'}
+                              </Badge>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

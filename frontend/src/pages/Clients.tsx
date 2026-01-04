@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Textarea } from '@/components/ui/textarea'
-import { sanitizeText, sanitizeEmail, sanitizePhone, sanitizeCIN, sanitizeNotes } from '@/lib/sanitize'
+import { sanitizeText, sanitizeEmail, sanitizePhone, sanitizeCIN, sanitizeNotes, validateLebanesePhone } from '@/lib/sanitize'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { debounce } from '@/lib/throttle'
 import {
@@ -144,6 +144,13 @@ export function Clients() {
         return
       }
 
+      // Validate phone is not empty (required only, no format check)
+      if (!form.phone.trim()) {
+        setErrorMessage('رقم الهاتف مطلوب')
+        setSaving(false)
+        return
+      }
+
       // Sanitize all inputs
       const sanitizedCIN = sanitizeCIN(form.cin)
       if (!sanitizedCIN) {
@@ -151,6 +158,9 @@ export function Clients() {
         setSaving(false)
         return
       }
+
+      // Sanitize phone (no format validation, just required)
+      const sanitizedPhone = sanitizePhone(form.phone)
 
       // Check for duplicate CIN (only for new clients or if CIN changed)
       if (!editingClient || editingClient.cin !== sanitizedCIN) {
@@ -170,7 +180,7 @@ export function Clients() {
       const clientData = {
         name: sanitizeText(form.name),
         cin: sanitizedCIN,
-        phone: form.phone ? sanitizePhone(form.phone) : null,
+        phone: sanitizedPhone, // Now required, so always set
         email: form.email ? sanitizeEmail(form.email) : null,
         address: form.address ? sanitizeText(form.address) : null,
         client_type: form.client_type,
@@ -223,9 +233,74 @@ export function Clients() {
     }
   }
 
-  const viewDetails = (client: ClientWithRelations) => {
+  const viewDetails = async (client: ClientWithRelations) => {
     setSelectedClient(client)
     setDetailsOpen(true)
+    
+    // Fetch land pieces for all sales
+    if (client.sales && client.sales.length > 0) {
+      try {
+        const allPieceIds = new Set<string>()
+        client.sales.forEach((sale: any) => {
+          if (sale.land_piece_ids) {
+            sale.land_piece_ids.forEach((id: string) => allPieceIds.add(id))
+          }
+        })
+        
+        if (allPieceIds.size > 0) {
+          const { data: piecesData, error: piecesError } = await supabase
+            .from('land_pieces')
+            .select('id, piece_number, land_batch_id')
+            .in('id', Array.from(allPieceIds))
+          
+          if (piecesError) {
+            console.error('Error fetching land pieces:', piecesError)
+          } else if (piecesData) {
+            // Fetch batch names separately if needed
+            const batchIds = new Set(piecesData.map((p: any) => p.land_batch_id).filter(Boolean))
+            let batchMap = new Map()
+            
+            if (batchIds.size > 0) {
+              const { data: batchesData } = await supabase
+                .from('land_batches')
+                .select('id, name')
+                .in('id', Array.from(batchIds))
+              
+              if (batchesData) {
+                batchMap = new Map(batchesData.map((b: any) => [b.id, b.name]))
+              }
+            }
+            
+            const piecesMap = new Map(piecesData.map((p: any) => [
+              p.id, 
+              {
+                ...p,
+                land_batch: batchMap.get(p.land_batch_id) ? { name: batchMap.get(p.land_batch_id) } : null
+              }
+            ]))
+            
+            // Attach piece info to sales
+            const updatedSales = client.sales.map((sale: any) => {
+              if (sale.land_piece_ids) {
+                sale._landPieces = sale.land_piece_ids
+                  .map((id: string) => piecesMap.get(id))
+                  .filter(Boolean)
+              }
+              return sale
+            })
+            
+            // Update selected client with land pieces
+            setSelectedClient({
+              ...client,
+              sales: updatedSales
+            })
+          }
+        }
+      } catch (err) {
+        console.error('Error processing land pieces:', err)
+        // Continue without land pieces data
+      }
+    }
   }
 
   const filteredClients = useMemo(() => {
@@ -282,8 +357,8 @@ export function Clients() {
           {filteredClients.length === 0 ? (
             <p className="text-center text-muted-foreground py-8">لا توجد عملاء</p>
           ) : (
-            <div className="overflow-x-auto">
-            <Table>
+            <div className="overflow-x-auto -mx-4 sm:mx-0 px-4 sm:px-0" style={{ WebkitOverflowScrolling: 'touch' }}>
+            <Table className="min-w-full">
               <TableHeader>
                 <TableRow>
                   <TableHead>الاسم</TableHead>
@@ -454,63 +529,94 @@ export function Clients() {
       <Dialog open={detailsOpen} onOpenChange={setDetailsOpen}>
         <DialogContent className="w-[95vw] sm:w-full max-w-2xl max-h-[95vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Client Details</DialogTitle>
+            <DialogTitle>تفاصيل العميل</DialogTitle>
           </DialogHeader>
           {selectedClient && (
             <div className="space-y-6">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <p className="text-sm text-muted-foreground">Name</p>
+                  <p className="text-sm text-muted-foreground">الاسم</p>
                   <p className="font-medium">{selectedClient.name}</p>
                 </div>
                 <div>
-                  <p className="text-sm text-muted-foreground">CIN</p>
+                  <p className="text-sm text-muted-foreground">رقم CIN</p>
                   <p className="font-medium">{selectedClient.cin}</p>
                 </div>
                 <div>
-                  <p className="text-sm text-muted-foreground">Phone</p>
+                  <p className="text-sm text-muted-foreground">رقم الهاتف</p>
                   <p className="font-medium">{selectedClient.phone || '-'}</p>
                 </div>
                 <div>
-                  <p className="text-sm text-muted-foreground">Email</p>
+                  <p className="text-sm text-muted-foreground">البريد الإلكتروني</p>
                   <p className="font-medium">{selectedClient.email || '-'}</p>
                 </div>
+                {selectedClient.address && (
+                  <div className="sm:col-span-2">
+                    <p className="text-sm text-muted-foreground">العنوان</p>
+                    <p className="font-medium">{selectedClient.address}</p>
+                  </div>
+                )}
               </div>
 
               {selectedClient.sales && selectedClient.sales.length > 0 && (
                 <div>
-                  <h4 className="font-semibold mb-2">Sales History</h4>
+                  <h4 className="font-semibold mb-3 text-lg">سجل المبيعات</h4>
                   <div className="overflow-x-auto">
                   <Table>
                     <TableHeader>
-                      <TableRow>
-                        <TableHead>Date</TableHead>
-                        <TableHead>Type</TableHead>
-                        <TableHead>Price</TableHead>
-                        <TableHead>Status</TableHead>
+                      <TableRow className="bg-gray-100">
+                        <TableHead className="font-semibold">التاريخ</TableHead>
+                        <TableHead className="font-semibold">النوع</TableHead>
+                        <TableHead className="font-semibold">القطع</TableHead>
+                        <TableHead className="font-semibold">السعر</TableHead>
+                        <TableHead className="font-semibold">الحالة</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {selectedClient.sales.map((sale) => (
-                        <TableRow key={sale.id}>
-                          <TableCell>{formatDate(sale.sale_date)}</TableCell>
-                          <TableCell>{sale.payment_type}</TableCell>
-                          <TableCell>{formatCurrency(sale.total_selling_price)}</TableCell>
-                          <TableCell>
-                            <Badge
-                              variant={
-                                sale.status === 'Completed'
-                                  ? 'success'
-                                  : sale.status === 'Cancelled'
-                                  ? 'destructive'
-                                  : 'warning'
-                              }
-                            >
-                              {sale.status}
-                            </Badge>
-                          </TableCell>
-                        </TableRow>
-                      ))}
+                      {selectedClient.sales
+                        .sort((a, b) => new Date(b.sale_date).getTime() - new Date(a.sale_date).getTime()) // Sort by date descending (newest first)
+                        .map((sale) => {
+                          const landPieces = (sale as any)._landPieces || []
+                          const pieceNumbers = landPieces.map((p: any) => p?.piece_number).filter(Boolean).join('، ')
+                          
+                          return (
+                            <TableRow key={sale.id} className="hover:bg-blue-50/50 transition-colors">
+                              <TableCell className="font-medium">{formatDate(sale.sale_date)}</TableCell>
+                              <TableCell>
+                                <Badge variant={sale.payment_type === 'Full' ? 'success' : 'secondary'} className="text-xs">
+                                  {sale.payment_type === 'Full' ? 'بالحاضر' : 'بالتقسيط'}
+                                </Badge>
+                              </TableCell>
+                              <TableCell>
+                                {pieceNumbers ? (
+                                  <Badge variant="outline" className="text-xs">
+                                    {pieceNumbers}
+                                  </Badge>
+                                ) : (
+                                  <span className="text-muted-foreground text-xs">-</span>
+                                )}
+                              </TableCell>
+                              <TableCell className="font-semibold">{formatCurrency(sale.total_selling_price)}</TableCell>
+                              <TableCell>
+                                <Badge
+                                  variant={
+                                    sale.status === 'Completed'
+                                      ? 'success'
+                                      : sale.status === 'Cancelled'
+                                      ? 'destructive'
+                                      : 'warning'
+                                  }
+                                  className="text-xs"
+                                >
+                                  {sale.status === 'Completed' ? 'مباع' :
+                                   sale.status === 'Cancelled' ? 'ملغي' :
+                                   (sale as any).is_confirmed || (sale as any).big_advance_confirmed ? 'قيد الدفع' :
+                                   'غير مؤكد'}
+                                </Badge>
+                              </TableCell>
+                            </TableRow>
+                          )
+                        })}
                     </TableBody>
                   </Table>
                   </div>

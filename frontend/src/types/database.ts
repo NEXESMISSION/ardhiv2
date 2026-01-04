@@ -2,6 +2,8 @@ export type LandStatus = 'Available' | 'Reserved' | 'Sold' | 'Cancelled'
 export type PaymentType = 'Full' | 'Installment'
 export type SaleStatus = 'Pending' | 'AwaitingPayment' | 'InstallmentsOngoing' | 'Completed' | 'Cancelled'
 export type ReservationStatus = 'Pending' | 'Confirmed' | 'Cancelled' | 'Expired'
+export type ExpenseStatus = 'Pending' | 'Approved' | 'Rejected'
+export type PaymentMethod = 'Cash' | 'BankTransfer' | 'Check' | 'CreditCard' | 'Other'
 export type InstallmentStatus = 'Unpaid' | 'Paid' | 'Late' | 'Partial'
 export type PaymentRecordType = 'BigAdvance' | 'SmallAdvance' | 'Installment' | 'Full' | 'Partial' | 'Field' | 'Refund'
 export type UserRole = 'Owner' | 'Manager' | 'FieldStaff'
@@ -25,14 +27,37 @@ export interface User {
   updated_at: string
 }
 
+export interface PermissionTemplate {
+  id: string
+  name: string
+  description: string | null
+  permissions: Record<string, boolean>
+  created_at: string
+  updated_at: string
+}
+
+export interface UserPermission {
+  id: string
+  user_id: string
+  resource_type: 'land' | 'client' | 'sale' | 'payment' | 'report' | 'user' | 'expense'
+  permission_type: 'view' | 'create' | 'edit' | 'delete' | 'export'
+  granted: boolean
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
 export interface LandBatch {
   id: string
   name: string
+  location: string | null
   total_surface: number
   total_cost: number
   date_acquired: string
   notes: string | null
   real_estate_tax_number: string | null
+  price_per_m2_full?: number | null
+  price_per_m2_installment?: number | null
   created_by: string | null
   created_at: string
   updated_at: string
@@ -93,14 +118,18 @@ export interface Sale {
   profit_margin: number
   small_advance_amount: number
   big_advance_amount: number
+  company_fee_percentage: number | null
+  company_fee_amount: number | null
   installment_start_date: string | null
   installment_end_date: string | null
   number_of_installments: number | null
   monthly_installment_amount: number | null
   status: SaleStatus
   sale_date: string
+  deadline_date: string | null
   notes: string | null
   created_by: string | null
+  confirmed_by: string | null
   created_at: string
   updated_at: string
 }
@@ -216,6 +245,45 @@ export interface Database {
         Insert: Omit<AuditLog, 'id' | 'created_at'>
         Update: never
       }
+      expense_categories: {
+        Row: ExpenseCategory
+        Insert: Omit<ExpenseCategory, 'id' | 'created_at' | 'updated_at'>
+        Update: Partial<Omit<ExpenseCategory, 'id'>>
+      }
+      expenses: {
+        Row: Expense
+        Insert: Omit<Expense, 'id' | 'created_at' | 'updated_at'>
+        Update: Partial<Omit<Expense, 'id'>>
+      }
     }
   }
+}
+
+export interface ExpenseCategory {
+  id: string
+  name: string
+  description: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface Expense {
+  id: string
+  category_id: string
+  amount: number
+  expense_date: string
+  description: string | null
+  payment_method: PaymentMethod
+  receipt_url: string | null
+  related_batch_id: string | null
+  related_sale_id: string | null
+  tags: string[] | null
+  status: ExpenseStatus
+  submitted_by: string
+  approved_by: string | null
+  approved_at: string | null
+  rejection_reason: string | null
+  notes: string | null
+  created_at: string
+  updated_at: string
 }

@@ -75,6 +75,30 @@
     margin-right: 0;
     margin-left: auto;
   }
+  
+  /* Mobile Optimizations */
+  @media (max-width: 640px) {
+    /* Prevent horizontal scrolling */
+    body {
+      overflow-x: hidden;
+    }
+    
+    /* Ensure touch-friendly targets */
+    button, a, input[type="button"], input[type="submit"], select {
+      min-height: 44px;
+      min-width: 44px;
+    }
+    
+    /* Better table scrolling on mobile */
+    .overflow-x-auto {
+      -webkit-overflow-scrolling: touch;
+    }
+    
+    /* Prevent text size adjustment on iOS */
+    input, select, textarea {
+      font-size: 16px !important;
+    }
+  }
 }
 
 @theme inline {

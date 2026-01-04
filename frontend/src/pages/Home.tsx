@@ -1,64 +1,177 @@
 import { useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
-import { Map, TrendingDown } from 'lucide-react'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Map, TrendingDown, Building2, Users, ShoppingCart, DollarSign, Settings, Shield } from 'lucide-react'
+import { useAuth } from '@/contexts/AuthContext'
 
 export function Home() {
   const navigate = useNavigate()
+  const { hasPermission } = useAuth()
+
+  const mainSystems = [
+    {
+      title: 'نظام الأراضي',
+      description: 'إدارة قطع الأراضي والمبيعات والعملاء',
+      icon: Map,
+      color: 'blue',
+      route: '/land',
+      permission: 'view_land',
+    },
+    {
+      title: 'التطوير والبناء',
+      description: 'إدارة المشاريع العقارية والمباني',
+      icon: Building2,
+      color: 'teal',
+      route: '/real-estate-buildings',
+      permission: null,
+    },
+    {
+      title: 'الديون',
+      description: 'تتبع الديون وإدارة سدادها',
+      icon: TrendingDown,
+      color: 'red',
+      route: '/debts',
+      permission: null,
+    },
+  ]
+
+  const quickAccess = [
+    {
+      title: 'العملاء',
+      icon: Users,
+      route: '/clients',
+      permission: 'view_clients',
+      color: 'purple',
+    },
+    {
+      title: 'المبيعات',
+      icon: ShoppingCart,
+      route: '/sales',
+      permission: 'view_sales',
+      color: 'green',
+    },
+    {
+      title: 'المالية',
+      icon: DollarSign,
+      route: '/financial',
+      permission: 'view_financial',
+      color: 'yellow',
+    },
+    {
+      title: 'المستخدمين',
+      icon: Settings,
+      route: '/users',
+      permission: 'manage_users',
+      color: 'gray',
+    },
+    {
+      title: 'الأمان',
+      icon: Shield,
+      route: '/security',
+      permission: 'view_audit_logs',
+      color: 'orange',
+    },
+  ]
+
+  const colorClasses = {
+    blue: 'bg-blue-100 text-blue-600 hover:bg-blue-200',
+    red: 'bg-red-100 text-red-600 hover:bg-red-200',
+    purple: 'bg-purple-100 text-purple-600 hover:bg-purple-200',
+    green: 'bg-green-100 text-green-600 hover:bg-green-200',
+    yellow: 'bg-yellow-100 text-yellow-600 hover:bg-yellow-200',
+    gray: 'bg-gray-100 text-gray-600 hover:bg-gray-200',
+    orange: 'bg-orange-100 text-orange-600 hover:bg-orange-200',
+    teal: 'bg-teal-100 text-teal-600 hover:bg-teal-200',
+  }
+
+  const filteredQuickAccess = quickAccess.filter(item => 
+    !item.permission || hasPermission(item.permission)
+  )
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] items-center justify-center p-6">
-      <div className="w-full max-w-4xl space-y-6">
-        <div className="text-center mb-12">
-          <h1 className="text-4xl font-bold mb-2">نظام إدارة الأراضي</h1>
-          <p className="text-muted-foreground">اختر النظام الذي تريد الوصول إليه</p>
+    <div className="min-h-[calc(100vh-4rem)] p-6 bg-gradient-to-br from-background via-background to-muted/20">
+      <div className="max-w-7xl mx-auto space-y-8">
+        {/* Header */}
+        <div className="text-center space-y-4 mb-12">
+          <h1 className="text-5xl font-bold bg-gradient-to-r from-primary to-primary/60 bg-clip-text text-transparent">
+            نظام إدارة الأراضي
+          </h1>
+          <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
+            منصة شاملة لإدارة قطع الأراضي والمبيعات والعملاء والمالية
+          </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* نظام الأراضي Button */}
-          <Card className="hover:shadow-lg transition-shadow cursor-pointer border-2 hover:border-primary">
-            <CardContent className="p-8">
-              <Button
-                variant="ghost"
-                className="w-full h-auto flex flex-col items-center justify-center gap-4 p-6"
-                onClick={() => navigate('/land')}
+        {/* Main Systems */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+          {mainSystems.map((system) => {
+            if (system.permission && !hasPermission(system.permission)) return null
+            
+            const Icon = system.icon
+            return (
+              <Card 
+                key={system.route}
+                className="group hover:shadow-xl transition-all duration-300 border-2 hover:border-primary/50 cursor-pointer overflow-hidden"
+                onClick={() => navigate(system.route)}
               >
-                <div className="bg-blue-100 p-6 rounded-full">
-                  <Map className="h-16 w-16 text-blue-600" />
-                </div>
-                <div className="text-center">
-                  <h2 className="text-2xl font-bold mb-2">نظام الأراضي</h2>
-                  <p className="text-sm text-muted-foreground">
-                    إدارة قطع الأراضي والمبيعات والعملاء
-                  </p>
-                </div>
-              </Button>
-            </CardContent>
-          </Card>
-
-          {/* الديون Button */}
-          <Card className="hover:shadow-lg transition-shadow cursor-pointer border-2 hover:border-primary">
-            <CardContent className="p-8">
-              <Button
-                variant="ghost"
-                className="w-full h-auto flex flex-col items-center justify-center gap-4 p-6"
-                onClick={() => navigate('/debts')}
-              >
-                <div className="bg-red-100 p-6 rounded-full">
-                  <TrendingDown className="h-16 w-16 text-red-600" />
-                </div>
-                <div className="text-center">
-                  <h2 className="text-2xl font-bold mb-2">الديون</h2>
-                  <p className="text-sm text-muted-foreground">
-                    تتبع الديون وإدارة سدادها
-                  </p>
-                </div>
-              </Button>
-            </CardContent>
-          </Card>
+                <CardContent className="p-8">
+                  <div className="flex flex-col items-center justify-center gap-6">
+                    <div className={`${colorClasses[system.color as keyof typeof colorClasses]} p-8 rounded-2xl transition-transform group-hover:scale-110`}>
+                      <Icon className="h-20 w-20" />
+                    </div>
+                    <div className="text-center space-y-2">
+                      <h2 className="text-3xl font-bold">{system.title}</h2>
+                      <p className="text-muted-foreground text-base">
+                        {system.description}
+                      </p>
+                    </div>
+                    <Button 
+                      variant="default" 
+                      size="lg"
+                      className="mt-4"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        navigate(system.route)
+                      }}
+                    >
+                      الدخول إلى النظام
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            )
+          })}
         </div>
+
+        {/* Quick Access */}
+        {filteredQuickAccess.length > 0 && (
+          <Card className="border-2">
+            <CardHeader>
+              <CardTitle className="text-2xl">الوصول السريع</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+                {filteredQuickAccess.map((item) => {
+                  const Icon = item.icon
+                  return (
+                    <Button
+                      key={item.route}
+                      variant="outline"
+                      className="h-auto flex flex-col items-center justify-center gap-3 p-6 hover:bg-accent transition-all"
+                      onClick={() => navigate(item.route)}
+                    >
+                      <div className={`${colorClasses[item.color as keyof typeof colorClasses]} p-4 rounded-full`}>
+                        <Icon className="h-6 w-6" />
+                      </div>
+                      <span className="font-medium">{item.title}</span>
+                    </Button>
+                  )
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
       </div>
     </div>
   )
 }
-

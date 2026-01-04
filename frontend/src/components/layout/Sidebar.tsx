@@ -12,6 +12,9 @@ import {
   Shield,
   LogOut,
   TrendingDown,
+  CheckCircle2,
+  Settings2,
+  Receipt,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -21,8 +24,10 @@ const navItems = [
   { to: '/availability', icon: MapPin, label: 'توفر الأراضي', permission: 'view_land' },
   { to: '/clients', icon: Users, label: 'العملاء', permission: 'view_clients' },
   { to: '/sales', icon: ShoppingCart, label: 'المبيعات', permission: 'view_sales' },
+  { to: '/sale-confirmation', icon: CheckCircle2, label: 'تأكيد المبيعات', permission: 'edit_sales' },
   { to: '/installments', icon: CreditCard, label: 'الأقساط', permission: 'view_installments' },
   { to: '/financial', icon: DollarSign, label: 'المالية', permission: 'view_financial' },
+    { to: '/expenses', icon: Receipt, label: 'المصاريف', permission: 'view_financial' },
   { to: '/debts', icon: TrendingDown, label: 'الديون', permission: null },
   { to: '/users', icon: Settings, label: 'المستخدمين', permission: 'manage_users' },
   { to: '/security', icon: Shield, label: 'الأمان', permission: 'view_audit_logs' },

@@ -27,7 +27,7 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { sanitizeText, sanitizeNotes } from '@/lib/sanitize'
 import { debounce } from '@/lib/throttle'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Plus, Edit, Trash2, Map, ChevronDown, ChevronRight, Calculator, X } from 'lucide-react'
+import { Plus, Edit, Trash2, Map, ChevronDown, ChevronRight, Calculator, X, DollarSign, AlertTriangle } from 'lucide-react'
 import type { LandBatch, LandPiece, LandStatus } from '@/types/database'
 
 interface LandBatchWithPieces extends LandBatch {
@@ -70,7 +70,7 @@ const statusColors: Record<LandStatus, 'success' | 'warning' | 'default' | 'seco
 }
 
 export function LandManagement() {
-  const { hasPermission } = useAuth()
+  const { hasPermission, user } = useAuth()
   const [batches, setBatches] = useState<LandBatchWithPieces[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -92,6 +92,7 @@ export function LandManagement() {
   const [editingBatch, setEditingBatch] = useState<LandBatch | null>(null)
   const [batchForm, setBatchForm] = useState({
     name: '',
+    location: '',
     total_surface: '',
     total_cost: '',
     date_acquired: '',
@@ -166,22 +167,90 @@ export function LandManagement() {
   const [selectedBatchId, setSelectedBatchId] = useState<string>('')
   const [selectedBatchForPiece, setSelectedBatchForPiece] = useState<LandBatch | null>(null)
   const [pieceForm, setPieceForm] = useState({
-    piece_number: '',
-    surface_area: '',
-    purchase_cost: '',
+    piece_number: '', // Just a number (1, 2, 99, etc.)
+    surface_area: '', // Optional - will use default if empty
     selling_price_full: '',
     selling_price_installment: '',
     notes: '',
   })
 
-  // Auto-calculate purchase cost when surface area changes
-  const calculatePurchaseCost = (surfaceArea: string) => {
-    if (!selectedBatchForPiece || !surfaceArea) return ''
-    const surface = parseFloat(surfaceArea)
-    if (isNaN(surface) || surface <= 0) return ''
-    const ratio = surface / selectedBatchForPiece.total_surface
-    const cost = ratio * selectedBatchForPiece.total_cost
-    return Math.round(cost * 100) / 100
+  // Default values for new pieces (can be overridden)
+  const [defaultSurfaceArea, setDefaultSurfaceArea] = useState('400') // Default 400 m²
+  
+  // Price edit dialog
+  const [priceEditDialogOpen, setPriceEditDialogOpen] = useState(false)
+  const [editingPricePiece, setEditingPricePiece] = useState<LandPiece | null>(null)
+  const [priceForm, setPriceForm] = useState({
+    selling_price_full: '',
+    selling_price_installment: '',
+  })
+  
+  // Bulk price update dialog
+  const [bulkPriceDialogOpen, setBulkPriceDialogOpen] = useState(false)
+  const [bulkPriceBatch, setBulkPriceBatch] = useState<LandBatchWithPieces | null>(null)
+  const [bulkPriceForm, setBulkPriceForm] = useState({
+    price_per_m2_full: '',
+    price_per_m2_installment: '',
+  })
+
+  // Auto-calculate prices based on batch price per m² or existing pieces
+  const calculatePieceValues = (pieceNumber: string, surfaceArea: string) => {
+    if (!selectedBatchForPiece) return null
+    
+    const surface = parseFloat(surfaceArea || defaultSurfaceArea) || 400
+    if (isNaN(surface) || surface <= 0) return null
+    
+    let sellingPriceFull = 0
+    let sellingPriceInstallment = 0
+    
+    // First, try to use batch price per m² from the actual batch data (most reliable)
+    const batchPricePerM2Full = (selectedBatchForPiece as any).price_per_m2_full
+    const batchPricePerM2Installment = (selectedBatchForPiece as any).price_per_m2_installment
+    
+    // If batch data doesn't have prices, try batchForm (for newly created batches)
+    const pricePerM2Full = batchPricePerM2Full !== undefined && batchPricePerM2Full !== null
+      ? parseFloat(String(batchPricePerM2Full))
+      : parseFloat(batchForm.price_per_m2_full) || 0
+    const pricePerM2Installment = batchPricePerM2Installment !== undefined && batchPricePerM2Installment !== null
+      ? parseFloat(String(batchPricePerM2Installment))
+      : parseFloat(batchForm.price_per_m2_installment) || 0
+    
+    if (!isNaN(pricePerM2Full) && !isNaN(pricePerM2Installment) && pricePerM2Full > 0 && pricePerM2Installment > 0) {
+      // Use batch price per m²
+      sellingPriceFull = Math.round(surface * pricePerM2Full * 100) / 100
+      sellingPriceInstallment = Math.round(surface * pricePerM2Installment * 100) / 100
+    } else {
+      // Get average prices from existing pieces in this batch
+      const batchWithPieces = selectedBatchForPiece as LandBatchWithPieces
+      const existingPieces = batchWithPieces.land_pieces || []
+      
+      if (existingPieces.length > 0) {
+        // Calculate average price per m² from existing pieces
+        const totalFull = existingPieces.reduce((sum, p) => sum + (p.selling_price_full || 0), 0)
+        const totalInstallment = existingPieces.reduce((sum, p) => sum + (p.selling_price_installment || 0), 0)
+        const totalSurface = existingPieces.reduce((sum, p) => sum + (p.surface_area || 0), 0)
+        
+        if (totalSurface > 0) {
+          const avgPricePerM2Full = totalFull / totalSurface
+          const avgPricePerM2Installment = totalInstallment / totalSurface
+          sellingPriceFull = Math.round(surface * avgPricePerM2Full * 100) / 100
+          sellingPriceInstallment = Math.round(surface * avgPricePerM2Installment * 100) / 100
+        } else {
+          // Fallback defaults
+          sellingPriceFull = surface * 100
+          sellingPriceInstallment = surface * 110
+        }
+      } else {
+        // Default: 100 DT per m² for full, 110 DT per m² for installment
+        sellingPriceFull = surface * 100
+        sellingPriceInstallment = surface * 110
+      }
+    }
+    
+    return {
+      selling_price_full: sellingPriceFull,
+      selling_price_installment: sellingPriceInstallment,
+    }
   }
 
   useEffect(() => {
@@ -206,7 +275,16 @@ export function LandManagement() {
         }
         return
       }
-      setBatches((data as LandBatchWithPieces[]) || [])
+      const batchesData = (data as LandBatchWithPieces[]) || []
+      setBatches(batchesData)
+      
+      // Update selectedBatchForPiece if it's still selected
+      if (selectedBatchId) {
+        const updatedBatch = batchesData.find(b => b.id === selectedBatchId)
+        if (updatedBatch) {
+          setSelectedBatchForPiece(updatedBatch)
+        }
+      }
     } catch (err) {
       setError('خطأ في تحميل الدفعات')
     } finally {
@@ -231,19 +309,21 @@ export function LandManagement() {
       setEditingBatch(batch)
       setBatchForm({
         name: batch.name,
+        location: batch.location || '',
         total_surface: batch.total_surface.toString(),
         total_cost: batch.total_cost.toString(),
         date_acquired: batch.date_acquired,
         notes: batch.notes || '',
         real_estate_tax_number: (batch as any).real_estate_tax_number || '',
-        price_per_m2_full: '',
-        price_per_m2_installment: '',
+        price_per_m2_full: (batch as any).price_per_m2_full?.toString() || '',
+        price_per_m2_installment: (batch as any).price_per_m2_installment?.toString() || '',
       })
-      setGenerationMode('none') // Can't generate pieces when editing
+      // No generation mode when editing
     } else {
       setEditingBatch(null)
       setBatchForm({
         name: '',
+        location: '',
         total_surface: '',
         total_cost: '',
         date_acquired: '',
@@ -609,50 +689,52 @@ export function LandManagement() {
       return
     }
     
-    // Validate required fields based on generation mode
-    // Only require total_surface and total_cost for non-flexible automatic generation
-    // Flexible mode allows optional totals (will be calculated from pieces)
-    if (generationMode !== 'none' && generationMode !== 'custom_flexible') {
-      if (!batchForm.total_surface || !batchForm.total_cost) {
-        setError('يرجى إدخال إجمالي المساحة والتكلفة عند استخدام تقسيم تلقائي')
-        return
-      }
-    }
-    
-    // For manual mode (none) and flexible mode, totals are optional
-    // They will be calculated from pieces if not provided
-    
     setSavingBatch(true)
     setError(null)
     
     try {
-      // Calculate total surface and cost if not provided (for manual addition mode)
-      // If generationMode is 'none', allow empty values (will be calculated from pieces later)
-      let totalSurface = parseFloat(batchForm.total_surface) || 0
-      let totalCost = parseFloat(batchForm.total_cost) || 0
-      
-      // For manual mode, if totals are not provided, set to 0 (will be calculated from pieces)
-      if (generationMode === 'none' && !batchForm.total_surface && !batchForm.total_cost) {
-        totalSurface = 0
-        totalCost = 0
-      }
+      // For manual mode, totals will be calculated from pieces later
+      // Set to 0 initially - will be updated when pieces are added
+      const totalSurface = 0
+      const totalCost = 0
       
       // Sanitize inputs
-      // Use today's date as default if date_acquired is not provided (since DB requires NOT NULL)
-      const dateAcquired = batchForm.date_acquired || new Date().toISOString().split('T')[0]
+      // Use today's date as default (since DB requires NOT NULL)
+      const dateAcquired = new Date().toISOString().split('T')[0]
+      
+      // Ensure total_surface and total_cost are numbers (required by DB - NOT NULL)
+      const finalTotalSurface = totalSurface ? parseFloat(String(totalSurface)) || 0 : 0
+      const finalTotalCost = totalCost ? parseFloat(String(totalCost)) || 0 : 0
       
       const batchData: any = {
         name: sanitizeText(batchForm.name),
-        total_surface: totalSurface,
-        total_cost: totalCost,
+        total_surface: finalTotalSurface,
+        total_cost: finalTotalCost,
         date_acquired: dateAcquired,
         notes: batchForm.notes ? sanitizeNotes(batchForm.notes) : null,
       }
       
-      // Add real estate tax number if provided
-      if (batchForm.real_estate_tax_number) {
+      // Add location if provided (column may not exist if migration not run)
+      if (batchForm.location && batchForm.location.trim()) {
+        batchData.location = sanitizeText(batchForm.location)
+      }
+      
+      // Add real estate tax number if provided (column may not exist if migration not run)
+      if (batchForm.real_estate_tax_number && batchForm.real_estate_tax_number.trim()) {
         batchData.real_estate_tax_number = sanitizeText(batchForm.real_estate_tax_number)
       }
+
+      // Add price per m² - always include these fields (even if 0 or null) so they can be updated later
+      const pricePerM2Full = batchForm.price_per_m2_full && batchForm.price_per_m2_full.trim() 
+        ? parseFloat(batchForm.price_per_m2_full) 
+        : null
+      const pricePerM2Installment = batchForm.price_per_m2_installment && batchForm.price_per_m2_installment.trim()
+        ? parseFloat(batchForm.price_per_m2_installment)
+        : null
+      
+      // Always include these fields in batchData (even if null) to ensure they're saved
+      batchData.price_per_m2_full = pricePerM2Full !== null && !isNaN(pricePerM2Full) ? pricePerM2Full : null
+      batchData.price_per_m2_installment = pricePerM2Installment !== null && !isNaN(pricePerM2Installment) ? pricePerM2Installment : null
 
       if (editingBatch) {
         const { error } = await supabase
@@ -669,8 +751,15 @@ export function LandManagement() {
           .single()
         if (batchError) throw batchError
 
-        // Generate pieces if mode is not 'none'
-        if (generationMode !== 'none' && newBatch) {
+        // If this is a new batch and user might add pieces immediately, set it as selected
+        // This ensures the price_per_m2 fields are available when calculating piece prices
+        if (newBatch) {
+          setSelectedBatchForPiece(newBatch as LandBatch)
+          setSelectedBatchId(newBatch.id)
+        }
+
+        // Pieces will be added manually after batch creation
+        if (false && newBatch) {
           const piecesToCreate: {
             land_batch_id: string
             piece_number: string
@@ -824,17 +913,30 @@ export function LandManagement() {
       }
 
       setBatchDialogOpen(false)
+      
+      // If we just created/updated a batch and it's selected, refresh it immediately
+      if (editingBatch && selectedBatchForPiece && editingBatch.id === selectedBatchForPiece.id) {
+        // Refresh batches to get updated price data
+        await fetchBatches()
+      } else {
       fetchBatches()
+      }
+      
       setError(null)
     } catch (error: any) {
       console.error('Error saving batch:', error)
-      if (error?.message) {
-        setError('خطأ في حفظ الدفعة. يرجى المحاولة مرة أخرى.')
-      } else if (error?.code) {
-        setError('خطأ في حفظ الدفعة. يرجى المحاولة مرة أخرى.')
-      } else {
-        setError('خطأ في حفظ الدفعة')
+      let errorMessage = 'خطأ في حفظ الدفعة. يرجى المحاولة مرة أخرى.'
+      
+      // Check for specific database errors
+      if (error?.code === '42703' || error?.message?.includes('column') || error?.message?.includes('does not exist')) {
+        errorMessage = 'خطأ: عمود غير موجود في قاعدة البيانات. يرجى التأكد من تشغيل جميع ملفات SQL المطلوبة (add_location_to_land_batches.sql و add_real_estate_tax_number.sql)'
+      } else if (error?.code === '23502' || error?.message?.includes('NOT NULL')) {
+        errorMessage = 'خطأ: بعض الحقول المطلوبة فارغة. يرجى التأكد من ملء جميع الحقول المطلوبة.'
+      } else if (error?.message) {
+        errorMessage = `خطأ في حفظ الدفعة: ${error.message}`
       }
+      
+      setError(errorMessage)
     } finally {
       setSavingBatch(false)
     }
@@ -871,6 +973,155 @@ export function LandManagement() {
     }
   }
 
+  const openPriceEditDialog = (batchId: string, piece: LandPiece) => {
+    setEditingPricePiece(piece)
+    setPriceForm({
+      selling_price_full: piece.selling_price_full.toString(),
+      selling_price_installment: piece.selling_price_installment.toString(),
+    })
+    setPriceEditDialogOpen(true)
+  }
+
+  const openBulkPriceDialog = (batch: LandBatchWithPieces) => {
+    setBulkPriceBatch(batch)
+    // Calculate average price per m² from existing pieces
+    if (batch.land_pieces.length > 0) {
+      const avgFull = batch.land_pieces.reduce((sum, p) => sum + (p.selling_price_full || 0), 0) / batch.land_pieces.length
+      const avgInstallment = batch.land_pieces.reduce((sum, p) => sum + (p.selling_price_installment || 0), 0) / batch.land_pieces.length
+      const avgSurface = batch.land_pieces.reduce((sum, p) => sum + (p.surface_area || 0), 0) / batch.land_pieces.length
+      setBulkPriceForm({
+        price_per_m2_full: avgSurface > 0 ? (avgFull / avgSurface).toFixed(2) : '',
+        price_per_m2_installment: avgSurface > 0 ? (avgInstallment / avgSurface).toFixed(2) : '',
+      })
+    } else {
+      setBulkPriceForm({
+        price_per_m2_full: '',
+        price_per_m2_installment: '',
+      })
+    }
+    setBulkPriceDialogOpen(true)
+  }
+
+  const savePriceEdit = async () => {
+    if (!editingPricePiece || !user || user.role !== 'Owner') {
+      setError('فقط المالك يمكنه تعديل الأسعار')
+      return
+    }
+
+    setError(null)
+    try {
+      const oldFull = editingPricePiece.selling_price_full
+      const oldInstallment = editingPricePiece.selling_price_installment
+      const newFull = parseFloat(priceForm.selling_price_full)
+      const newInstallment = parseFloat(priceForm.selling_price_installment)
+
+      if (isNaN(newFull) || isNaN(newInstallment) || newFull < 0 || newInstallment < 0) {
+        setError('يرجى إدخال أسعار صحيحة')
+        return
+      }
+
+      // Update piece prices
+      const { error } = await supabase
+        .from('land_pieces')
+        .update({
+          selling_price_full: newFull,
+          selling_price_installment: newInstallment,
+        })
+        .eq('id', editingPricePiece.id)
+
+      if (error) throw error
+
+      // Log price change in audit log
+      try {
+        await supabase.from('audit_logs').insert({
+          action: 'price_change',
+          entity_type: 'land_piece',
+          entity_id: editingPricePiece.id,
+          details: JSON.stringify({
+            piece_number: editingPricePiece.piece_number,
+            old_price_full: oldFull,
+            new_price_full: newFull,
+            old_price_installment: oldInstallment,
+            new_price_installment: newInstallment,
+            note: 'تم تعديل أسعار القطعة - سيؤثر فقط على المبيعات المستقبلية',
+          }),
+          user_id: user?.id,
+        })
+      } catch (auditError) {
+        console.warn('Failed to log price change:', auditError)
+        // Don't fail the operation if audit log fails
+      }
+
+      setPriceEditDialogOpen(false)
+      fetchBatches()
+      setError(null)
+    } catch (err: any) {
+      setError(err.message || 'خطأ في حفظ الأسعار')
+    }
+  }
+
+  const saveBulkPriceUpdate = async () => {
+    if (!bulkPriceBatch || !user || user.role !== 'Owner') {
+      setError('فقط المالك يمكنه تعديل الأسعار')
+      return
+    }
+
+    setError(null)
+    try {
+      const pricePerM2Full = parseFloat(bulkPriceForm.price_per_m2_full)
+      const pricePerM2Installment = parseFloat(bulkPriceForm.price_per_m2_installment)
+
+      if (isNaN(pricePerM2Full) || isNaN(pricePerM2Installment) || pricePerM2Full < 0 || pricePerM2Installment < 0) {
+        setError('يرجى إدخال أسعار صحيحة')
+        return
+      }
+
+      const batchWithPieces = bulkPriceBatch as LandBatchWithPieces
+      // Update all pieces in batch
+      const updates = batchWithPieces.land_pieces.map(piece => ({
+        id: piece.id,
+        selling_price_full: piece.surface_area * pricePerM2Full,
+        selling_price_installment: piece.surface_area * pricePerM2Installment,
+      }))
+
+      for (const update of updates) {
+        const { error } = await supabase
+          .from('land_pieces')
+          .update({
+            selling_price_full: update.selling_price_full,
+            selling_price_installment: update.selling_price_installment,
+          })
+          .eq('id', update.id)
+
+        if (error) throw error
+
+        // Log price change for each piece
+        try {
+          await supabase.from('audit_logs').insert({
+            action: 'bulk_price_change',
+            entity_type: 'land_batch',
+            entity_id: bulkPriceBatch.id,
+            details: JSON.stringify({
+              piece_id: update.id,
+              price_per_m2_full: pricePerM2Full,
+              price_per_m2_installment: pricePerM2Installment,
+              note: 'تحديث جماعي للأسعار - سيؤثر فقط على المبيعات المستقبلية',
+            }),
+            user_id: user?.id,
+          })
+        } catch (auditError) {
+          console.warn('Failed to log bulk price change:', auditError)
+        }
+      }
+
+      setBulkPriceDialogOpen(false)
+      fetchBatches()
+      setError(null)
+    } catch (err: any) {
+      setError(err.message || 'خطأ في تحديث الأسعار')
+    }
+  }
+
   const openPieceDialog = (batchId: string, piece?: LandPiece) => {
     setSelectedBatchId(batchId)
     // Find the batch for auto-calculation
@@ -879,22 +1130,32 @@ export function LandManagement() {
     
     if (piece) {
       setEditingPiece(piece)
+      // Extract just the number from piece_number (remove any formatting like "P001")
+      const pieceNumber = piece.piece_number.replace(/\D/g, '') || piece.piece_number
       setPieceForm({
-        piece_number: piece.piece_number,
+        piece_number: pieceNumber,
         surface_area: piece.surface_area.toString(),
-        purchase_cost: piece.purchase_cost.toString(),
-        selling_price_full: piece.selling_price_full.toString(),
-        selling_price_installment: piece.selling_price_installment.toString(),
+        selling_price_full: piece.selling_price_full?.toString() || '',
+        selling_price_installment: piece.selling_price_installment?.toString() || '',
         notes: piece.notes || '',
       })
     } else {
       setEditingPiece(null)
-      // Get next piece number
+      // Get next piece number (just the number, no formatting)
       const existingPieces = batch?.land_pieces.length || 0
+      const nextNumber = existingPieces + 1
+      
+      // Get average surface area from existing pieces, or use default
+      let avgSurface = defaultSurfaceArea
+      if (batch?.land_pieces && batch.land_pieces.length > 0) {
+        const totalSurface = batch.land_pieces.reduce((sum, p) => sum + (p.surface_area || 0), 0)
+        avgSurface = Math.round(totalSurface / batch.land_pieces.length).toString()
+        setDefaultSurfaceArea(avgSurface)
+      }
+      
       setPieceForm({
-        piece_number: `P${String(existingPieces + 1).padStart(3, '0')}`,
-        surface_area: '',
-        purchase_cost: '',
+        piece_number: nextNumber.toString(),
+        surface_area: avgSurface,
         selling_price_full: '',
         selling_price_installment: '',
         notes: '',
@@ -903,14 +1164,25 @@ export function LandManagement() {
     setPieceDialogOpen(true)
   }
 
-  // Handle surface area change and auto-calculate purchase cost
+  // Handle piece number or surface area change - auto-format piece number
+  const handlePieceNumberChange = (value: string) => {
+    // Just keep the number, remove any formatting
+    const numberOnly = value.replace(/\D/g, '')
+    setPieceForm({
+      ...pieceForm,
+      piece_number: numberOnly,
+    })
+  }
+  
   const handleSurfaceAreaChange = (value: string) => {
-    const calculatedCost = calculatePurchaseCost(value)
     setPieceForm({
       ...pieceForm,
       surface_area: value,
-      purchase_cost: calculatedCost.toString(),
     })
+    // Update default for next piece
+    if (value) {
+      setDefaultSurfaceArea(value)
+    }
   }
 
   const savePiece = async () => {
@@ -922,14 +1194,65 @@ export function LandManagement() {
 
     setError(null)
     try {
+      // Validate batch is selected
+      if (!selectedBatchId) {
+        setError('يرجى اختيار دفعة أرض أولاً')
+        return
+      }
+
+      // Validate inputs
+      if (!pieceForm.piece_number || !pieceForm.piece_number.trim()) {
+        setError('يرجى إدخال رقم القطعة')
+        return
+      }
+      
+      const surfaceArea = parseFloat(pieceForm.surface_area || defaultSurfaceArea)
+      if (isNaN(surfaceArea) || surfaceArea <= 0) {
+        setError('يرجى إدخال مساحة صحيحة')
+        return
+      }
+      
+      // Use piece number as-is (just the number, no formatting)
+      const pieceNumber = pieceForm.piece_number.trim()
+      
+      // Determine prices: use form values if editing and provided, otherwise calculate
+      let sellingPriceFull = 0
+      let sellingPriceInstallment = 0
+      
+      if (editingPiece && pieceForm.selling_price_full && pieceForm.selling_price_installment) {
+        // Editing: use provided prices
+        sellingPriceFull = parseFloat(pieceForm.selling_price_full)
+        sellingPriceInstallment = parseFloat(pieceForm.selling_price_installment)
+        
+        if (isNaN(sellingPriceFull) || sellingPriceFull <= 0 || isNaN(sellingPriceInstallment) || sellingPriceInstallment <= 0) {
+          setError('يرجى إدخال أسعار صحيحة')
+          return
+        }
+      } else {
+        // New piece or no prices provided: auto-calculate
+        const calculatedValues = calculatePieceValues(pieceForm.piece_number, pieceForm.surface_area || defaultSurfaceArea)
+        if (!calculatedValues) {
+          setError('خطأ في حساب القيم. يرجى التأكد من بيانات الدفعة أو إدخال أسعار البيع.')
+          return
+        }
+        
+        if (!calculatedValues.selling_price_full || calculatedValues.selling_price_full <= 0) {
+          setError('خطأ في حساب السعر. يرجى التأكد من إدخال أسعار البيع في نموذج الدفعة أو إدخالها يدوياً.')
+          return
+        }
+        
+        sellingPriceFull = calculatedValues.selling_price_full
+        sellingPriceInstallment = calculatedValues.selling_price_installment
+      }
+      
       // Sanitize inputs
       const pieceData = {
         land_batch_id: selectedBatchId,
-        piece_number: sanitizeText(pieceForm.piece_number),
-        surface_area: parseFloat(pieceForm.surface_area),
-        purchase_cost: parseFloat(pieceForm.purchase_cost),
-        selling_price_full: parseFloat(pieceForm.selling_price_full),
-        selling_price_installment: parseFloat(pieceForm.selling_price_installment),
+        piece_number: pieceNumber,
+        surface_area: surfaceArea,
+        purchase_cost: 0, // Purchase cost removed - always 0
+        selling_price_full: sellingPriceFull,
+        selling_price_installment: sellingPriceInstallment,
         notes: pieceForm.notes ? sanitizeNotes(pieceForm.notes) : null,
       }
 
@@ -938,26 +1261,77 @@ export function LandManagement() {
           .from('land_pieces')
           .update(pieceData)
           .eq('id', editingPiece.id)
-        if (error) throw error
+        if (error) {
+          console.error('Error updating piece:', error)
+          throw error
+        }
       } else {
-        const { error } = await supabase
+        const { error, data } = await supabase
           .from('land_pieces')
           .insert([{ ...pieceData, status: 'Available' }])
-        if (error) throw error
+          .select()
+        if (error) {
+          console.error('Error inserting piece:', error)
+          // Provide more specific error message
+          if (error.code === '23505') {
+            setError(`القطعة رقم ${pieceNumber} موجودة بالفعل في هذه الدفعة`)
+          } else if (error.code === '23503') {
+            setError('الدفعة المحددة غير موجودة. يرجى تحديث الصفحة والمحاولة مرة أخرى.')
+          } else {
+            setError(`خطأ في حفظ القطعة: ${error.message}`)
+          }
+          throw error
+      }
+        console.log('Piece inserted successfully:', data)
       }
 
+      // Reset form and close dialog
       setPieceDialogOpen(false)
-      fetchBatches()
+      setPieceForm({
+        piece_number: '',
+        surface_area: '',
+        selling_price_full: '',
+        selling_price_installment: '',
+        notes: '',
+      })
+      setEditingPiece(null)
+      
+      // Refresh batches and ensure the batch is expanded
+      await fetchBatches()
+      
+      // Expand the batch to show the new piece
+      if (selectedBatchId) {
+        setExpandedBatches(prev => new Set(prev).add(selectedBatchId))
+      }
+      
       setError(null)
-    } catch (error) {
-      setError('خطأ في حفظ القطعة')
+    } catch (error: any) {
+      console.error('Error in savePiece:', error)
+      // Error message already set in catch block above if it's a database error
+      if (!error.message || error.message === 'خطأ في حفظ القطعة') {
+        setError(error.message || 'خطأ في حفظ القطعة. يرجى التحقق من البيانات والمحاولة مرة أخرى.')
     }
   }
+  }
 
-  const filteredBatches = batches.map((batch) => ({
+  // Filter batches by search term (name, location) and filter pieces within each batch
+  const filteredBatches = batches
+    .filter((batch) => {
+      // Filter batches by name or location
+      if (debouncedSearchTerm) {
+        const search = debouncedSearchTerm.toLowerCase()
+        const matchesName = batch.name.toLowerCase().includes(search)
+        const matchesLocation = batch.location?.toLowerCase().includes(search) || false
+        if (!matchesName && !matchesLocation) {
+          return false // Hide batch if it doesn't match search
+        }
+      }
+      return true
+    })
+    .map((batch) => ({
     ...batch,
-    land_pieces: batch.land_pieces.filter((piece) => {
-      const matchesStatus = filterStatus === 'all' || piece.status === filterStatus
+      land_pieces: (Array.isArray(batch.land_pieces) ? batch.land_pieces : []).filter((piece) => {
+        const matchesStatus = filterStatus === 'all' || filterStatus === '' || piece.status === filterStatus
       const matchesSearch =
         debouncedSearchTerm === '' ||
         piece.piece_number.toLowerCase().includes(debouncedSearchTerm.toLowerCase())
@@ -1001,7 +1375,7 @@ export function LandManagement() {
         {hasPermission('edit_land') && (
           <Button onClick={() => openBatchDialog()} className="w-full sm:w-auto">
             <Plus className="ml-2 h-4 w-4" />
-            إضافة دفعة
+            إضافة قطع أرض
           </Button>
         )}
       </div>
@@ -1012,7 +1386,7 @@ export function LandManagement() {
           <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">
             <div className="flex-1 w-full">
               <Input
-                placeholder="بحث برقم القطعة..."
+                placeholder="بحث عن دفعة أو موقع أو قطعة..."
                 value={searchTerm}
                 maxLength={50}
                 onChange={(e) => {
@@ -1027,7 +1401,6 @@ export function LandManagement() {
               onChange={(e) => setFilterStatus(e.target.value)}
               className="w-full sm:w-auto"
             >
-              <option value="all">جميع الحالات</option>
               <option value="Available">متاح</option>
               <option value="Reserved">محجوز</option>
               <option value="Sold">مباع</option>
@@ -1052,6 +1425,7 @@ export function LandManagement() {
                 <div>
                   <CardTitle>{batch.name}</CardTitle>
                   <p className="text-sm text-muted-foreground">
+                    {batch.location && <span className="font-medium text-primary">{batch.location} • </span>}
                     {formatDate(batch.date_acquired)} • {batch.total_surface} م² •{' '}
                     {batch.land_pieces.length} قطعة
                     {(batch as any).real_estate_tax_number && (
@@ -1092,15 +1466,17 @@ export function LandManagement() {
                 )}
               </div>
 
-              {batch.land_pieces.length === 0 ? (
+              {(!batch.land_pieces || batch.land_pieces.length === 0) ? (
                 <p className="text-center text-muted-foreground py-4">لا توجد قطع</p>
               ) : (
-                <div className="overflow-x-auto">
-                  <Table>
+                <div className="overflow-x-auto -mx-4 sm:mx-0 px-4 sm:px-0" style={{ WebkitOverflowScrolling: 'touch' }}>
+                  <Table className="min-w-full">
                     <TableHeader>
                       <TableRow>
                         <TableHead>رقم القطعة</TableHead>
                         <TableHead>المساحة</TableHead>
+                        <TableHead>السعر (كامل)</TableHead>
+                        <TableHead>السعر (أقساط)</TableHead>
                         <TableHead>الحالة</TableHead>
                         {hasPermission('edit_land') && <TableHead>إجراء</TableHead>}
                       </TableRow>
@@ -1110,6 +1486,8 @@ export function LandManagement() {
                         <TableRow key={piece.id}>
                           <TableCell className="font-medium">{piece.piece_number}</TableCell>
                           <TableCell>{piece.surface_area} م²</TableCell>
+                          <TableCell className="font-medium text-green-600">{formatCurrency(piece.selling_price_full || 0)}</TableCell>
+                          <TableCell className="font-medium text-blue-600">{formatCurrency(piece.selling_price_installment || 0)}</TableCell>
                           <TableCell>
                             <Badge variant={statusColors[piece.status]}>
                               {piece.status === 'Available' ? 'متاح' :
@@ -1119,13 +1497,27 @@ export function LandManagement() {
                           </TableCell>
                           {hasPermission('edit_land') && (
                             <TableCell>
+                              <div className="flex items-center gap-1">
                               <Button
                                 variant="ghost"
                                 size="icon"
                                 onClick={() => openPieceDialog(batch.id, piece)}
+                                  className="h-8 w-8"
                               >
                                 <Edit className="h-4 w-4" />
                               </Button>
+                                {user?.role === 'Owner' && (
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => openPriceEditDialog(batch.id, piece)}
+                                    className="h-8 w-8 text-blue-600"
+                                    title="تعديل الأسعار"
+                                  >
+                                    <DollarSign className="h-4 w-4" />
+                                  </Button>
+                                )}
+                              </div>
                             </TableCell>
                           )}
                         </TableRow>
@@ -1151,7 +1543,7 @@ export function LandManagement() {
       <Dialog open={batchDialogOpen} onOpenChange={setBatchDialogOpen}>
         <DialogContent className="w-[95vw] sm:w-full max-w-4xl max-h-[95vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{editingBatch ? 'تعديل الدفعة' : 'إضافة دفعة أرض جديدة'}</DialogTitle>
+            <DialogTitle>{editingBatch ? 'تعديل الدفعة' : 'إضافة قطع أرض'}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1165,6 +1557,18 @@ export function LandManagement() {
                   placeholder="مثال: دفعة تانيور"
                 />
               </div>
+              <div className="space-y-2">
+                <Label htmlFor="location">الموقع</Label>
+                <Input
+                  id="location"
+                  value={batchForm.location}
+                  maxLength={255}
+                  onChange={(e) => setBatchForm({ ...batchForm, location: e.target.value })}
+                  placeholder="مثال: تانيور - شارع الرئيسي"
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="real_estate_tax_number">الرسم العقاري عدد</Label>
                 <Input
@@ -1191,7 +1595,7 @@ export function LandManagement() {
                     onChange={(e) => setBatchForm({ ...batchForm, price_per_m2_full: e.target.value })}
                     placeholder="10.00"
                   />
-                  <p className="text-xs text-muted-foreground">سيتم تطبيق هذا السعر على جميع القطع عند الإنشاء</p>
+                  <p className="text-xs text-muted-foreground">سيتم تطبيق هذا السعر على القطع الجديدة فقط. القطع الموجودة والمبيعات السابقة لن تتأثر.</p>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="price_per_m2_installment">سعر المتر المربع (أقساط) *</Label>
@@ -1203,385 +1607,22 @@ export function LandManagement() {
                     onChange={(e) => setBatchForm({ ...batchForm, price_per_m2_installment: e.target.value })}
                     placeholder="12.00"
                   />
-                  <p className="text-xs text-muted-foreground">سيتم تطبيق هذا السعر على جميع القطع عند الإنشاء</p>
+                  <p className="text-xs text-muted-foreground">سيتم تطبيق هذا السعر على القطع الجديدة فقط. القطع الموجودة والمبيعات السابقة لن تتأثر.</p>
                 </div>
               </div>
             </div>
             
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="total_surface">إجمالي المساحة (م²) {(generationMode === 'none' || generationMode === 'custom_flexible') ? '(اختياري)' : '*'}</Label>
-                <Input
-                  id="total_surface"
-                  type="number"
-                  value={batchForm.total_surface}
-                  onChange={(e) => setBatchForm({ ...batchForm, total_surface: e.target.value })}
-                  placeholder={(generationMode === 'none' || generationMode === 'custom_flexible') ? "اختياري - سيتم حسابها تلقائياً" : "مثال: 50000"}
-                />
-                {(generationMode === 'none' || generationMode === 'custom_flexible') && (
-                  <p className="text-xs text-muted-foreground">يمكنك تركها فارغة - سيتم حسابها من القطع المضافة</p>
-                )}
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="total_cost">إجمالي التكلفة (DT) {(generationMode === 'none' || generationMode === 'custom_flexible') ? '(اختياري)' : '*'}</Label>
-                <Input
-                  id="total_cost"
-                  type="number"
-                  value={batchForm.total_cost}
-                  onChange={(e) => setBatchForm({ ...batchForm, total_cost: e.target.value })}
-                  placeholder={(generationMode === 'none' || generationMode === 'custom_flexible') ? "اختياري - سيتم حسابها تلقائياً" : "مثال: 100000"}
-                />
-                {(generationMode === 'none' || generationMode === 'custom_flexible') && (
-                  <p className="text-xs text-muted-foreground">يمكنك تركها فارغة - سيتم حسابها من القطع المضافة</p>
-                )}
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="date_acquired">تاريخ الشراء (اختياري)</Label>
-              <Input
-                id="date_acquired"
-                type="date"
-                value={batchForm.date_acquired}
-                onChange={(e) => setBatchForm({ ...batchForm, date_acquired: e.target.value })}
-              />
-            </div>
-
-            {/* Piece Generation Options - Only for new batches */}
+            {/* Manual Piece Addition - Simple approach */}
             {!editingBatch && (
               <div className="border rounded-lg p-4 space-y-4 bg-muted/30">
                 <div className="flex items-center gap-2">
                   <Calculator className="h-5 w-5 text-primary" />
-                  <Label className="text-base font-semibold">تقسيم الأرض تلقائياً</Label>
+                  <Label className="text-base font-semibold">إضافة قطع يدوياً</Label>
                 </div>
                 
-                <Select
-                  value={generationMode}
-                  onChange={(e) => {
-                    setGenerationMode(e.target.value as GenerationMode)
-                    if (e.target.value === 'custom_flexible' && flexiblePieces.length === 0) {
-                      // Initialize with one auto piece
-                      addFlexiblePiece('auto')
-                    }
-                  }}
-                  className="w-full"
-                >
-                  <option value="none">لا تقسم (إضافة يدوية لاحقاً)</option>
-                  <option value="custom_flexible">مخصص مرن (تحكم كامل في الترقيم)</option>
-                </Select>
-
-                {generationMode === 'custom_flexible' && (
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between flex-wrap gap-2">
-                      <Label className="text-sm font-medium">تكوينات القطع المرنة</Label>
-                      <div className="flex flex-wrap gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => addFlexiblePiece('auto')}
-                        >
-                          <Plus className="h-4 w-4 ml-1" />
-                          نطاق تلقائي
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => addFlexiblePiece('custom')}
-                        >
-                          <Plus className="h-4 w-4 ml-1" />
-                          قطعة مخصصة
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => addFlexiblePiece('uniform')}
-                        >
-                          <Plus className="h-4 w-4 ml-1" />
-                          موحد (نفس الحجم)
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => addFlexiblePiece('auto_smart')}
-                        >
-                          <Plus className="h-4 w-4 ml-1" />
-                          تلقائي ذكي
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => addFlexiblePiece('smart')}
-                        >
-                          <Plus className="h-4 w-4 ml-1" />
-                          محسّن
-                        </Button>
-                      </div>
-                    </div>
-                    
-                    <div className="space-y-3 max-h-96 overflow-y-auto">
-                      {flexiblePieces.map((item, index) => (
-                        <Card key={item.id} className="p-3">
-                          <div className="flex items-start justify-between mb-2">
-                            <Badge variant={item.type === 'auto' || item.type === 'uniform' ? 'default' : 'secondary'}>
-                              {item.type === 'auto' ? 'نطاق تلقائي' : 
-                               item.type === 'custom' ? 'مخصص' :
-                               item.type === 'uniform' ? 'موحد' :
-                               item.type === 'auto_smart' ? 'تلقائي ذكي' :
-                               item.type === 'smart' ? 'محسّن' : 'متقدم'}
-                            </Badge>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => removeFlexiblePiece(item.id)}
-                              className="h-6 w-6"
-                            >
-                              <X className="h-3 w-3" />
-                            </Button>
-                          </div>
-                          
-                          {item.type === 'auto' || item.type === 'uniform' ? (
-                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                              <div className="space-y-1">
-                                <Label className="text-xs">من رقم</Label>
-                                <Input
-                                  type="number"
-                                  value={item.startNumber || ''}
-                                  onChange={(e) => updateFlexiblePiece(item.id, { startNumber: parseInt(e.target.value) || 1 })}
-                                  placeholder="1"
-                                  className="w-full"
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-xs">العدد</Label>
-                                <Input
-                                  type="number"
-                                  value={item.count || ''}
-                                  onChange={(e) => updateFlexiblePiece(item.id, { count: parseInt(e.target.value) || 0 })}
-                                  placeholder="10"
-                                  className="w-full"
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-xs">الحجم (م²)</Label>
-                                <Input
-                                  type="number"
-                                  value={item.surface || ''}
-                                  onChange={(e) => updateFlexiblePiece(item.id, { surface: parseFloat(e.target.value) || 0 })}
-                                  placeholder="400"
-                                  className="w-full"
-                                />
-                              </div>
-                            </div>
-                          ) : item.type === 'custom' ? (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                              <div className="space-y-1">
-                                <Label className="text-xs">رقم القطعة</Label>
-                                <Input
-                                  type="text"
-                                  value={item.pieceNumber || ''}
-                                  onChange={(e) => updateFlexiblePiece(item.id, { pieceNumber: e.target.value })}
-                                  placeholder="P001"
-                                  className="w-full"
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-xs">الحجم (م²)</Label>
-                                <Input
-                                  type="number"
-                                  value={item.customSurface || ''}
-                                  onChange={(e) => updateFlexiblePiece(item.id, { customSurface: parseFloat(e.target.value) || 0 })}
-                                  placeholder="400"
-                                  className="w-full"
-                                />
-                              </div>
-                            </div>
-                          ) : item.type === 'auto_smart' ? (
-                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                              <div className="space-y-1">
-                                <Label className="text-xs">الحد الأدنى (م²)</Label>
-                                <Input
-                                  type="number"
-                                  value={item.minSize || autoMinSize}
-                                  onChange={(e) => updateFlexiblePiece(item.id, { minSize: parseFloat(e.target.value) || 200 })}
-                                  placeholder="200"
-                                  className="w-full"
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-xs">الحجم المفضل (م²)</Label>
-                                <Input
-                                  type="number"
-                                  value={item.preferredSize || autoPreferredSize}
-                                  onChange={(e) => updateFlexiblePiece(item.id, { preferredSize: parseFloat(e.target.value) || 400 })}
-                                  placeholder="400"
-                                  className="w-full"
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-xs">الحد الأقصى (م²)</Label>
-                                <Input
-                                  type="number"
-                                  value={item.maxSize || autoMaxSize}
-                                  onChange={(e) => updateFlexiblePiece(item.id, { maxSize: parseFloat(e.target.value) || 600 })}
-                                  placeholder="600"
-                                  className="w-full"
-                                />
-                              </div>
-                            </div>
-                          ) : item.type === 'smart' ? (
-                            <div className="space-y-2">
-                              <Label className="text-xs">استراتيجية التحسين</Label>
-                              <Select
-                                value={item.optimization || smartOptimization}
-                                onChange={(e) => updateFlexiblePiece(item.id, { optimization: e.target.value as any })}
-                                className="w-full"
-                              >
-                                <option value="balanced">متوازن (مزيج من الأحجام)</option>
-                                <option value="max_pieces">تعظيم عدد القطع (قطع أصغر)</option>
-                                <option value="min_waste">تقليل الهدر (قطع أكبر، ملء دقيق)</option>
-                              </Select>
-                            </div>
-                          ) : (
-                            <p className="text-xs text-muted-foreground">نوع غير مدعوم</p>
-                          )}
-                          
-                          {item.type === 'auto' && item.startNumber !== undefined && item.count !== undefined && (
-                            <p className="text-xs text-muted-foreground mt-2">
-                              سيتم إنشاء القطع من #{item.startNumber} إلى #{item.startNumber + (item.count || 0) - 1}
-                            </p>
-                          )}
-                        </Card>
-                      ))}
-                    </div>
-                    
-                    {flexiblePieces.length === 0 && (
-                      <p className="text-sm text-muted-foreground text-center py-4">
-                        اضغط على "نطاق تلقائي" أو "قطعة مخصصة" لإضافة قطع
-                      </p>
-                    )}
-                  </div>
-                )}
-                
-                {generationMode === 'auto' && (
-                  <div className="space-y-3">
                     <p className="text-sm text-muted-foreground">
-                      الوضع التلقائي: يقوم بتقسيم الأرض تلقائياً بأحجام متغيرة بين الحد الأدنى والأقصى مع تفضيل الحجم المفضل
-                    </p>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                      <div className="space-y-2">
-                        <Label className="text-xs">الحد الأدنى (م²)</Label>
-                        <Input
-                          type="number"
-                          value={autoMinSize}
-                          onChange={(e) => setAutoMinSize(e.target.value)}
-                          placeholder="200"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label className="text-xs">الحجم المفضل (م²)</Label>
-                        <Input
-                          type="number"
-                          value={autoPreferredSize}
-                          onChange={(e) => setAutoPreferredSize(e.target.value)}
-                          placeholder="400"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label className="text-xs">الحد الأقصى (م²)</Label>
-                        <Input
-                          type="number"
-                          value={autoMaxSize}
-                          onChange={(e) => setAutoMaxSize(e.target.value)}
-                          placeholder="600"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                )}
-                
-                {generationMode === 'smart' && (
-                  <div className="space-y-3">
-                    <p className="text-sm text-muted-foreground">
-                      الوضع الذكي: يحسّن التقسيم حسب الاستراتيجية المختارة
-                    </p>
-                    <div className="space-y-2">
-                      <Label className="text-sm font-medium">استراتيجية التحسين</Label>
-                      <Select
-                        value={smartOptimization}
-                        onChange={(e) => setSmartOptimization(e.target.value as any)}
-                        className="w-full"
-                      >
-                        <option value="balanced">متوازن (مزيج من الأحجام)</option>
-                        <option value="max_pieces">تعظيم عدد القطع (قطع أصغر)</option>
-                        <option value="min_waste">تقليل الهدر (قطع أكبر، ملء دقيق)</option>
-                      </Select>
-                    </div>
-                  </div>
-                )}
-                
-                {generationMode === 'advanced' && (
-                  <div className="space-y-3">
-                    <p className="text-sm text-muted-foreground">
-                      الوضع المتقدم: نمط مخصص معقد بصيغة JSON
-                    </p>
-                    <div className="space-y-2">
-                      <Label className="text-sm font-medium">النمط (JSON)</Label>
-                      <Textarea
-                        value={advancedPattern}
-                        onChange={(e) => setAdvancedPattern(e.target.value)}
-                        placeholder='[{"count": 10, "surface": 500}, {"count": 20, "surface": 300}]'
-                        className="font-mono text-xs"
-                        rows={4}
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        مثال: [&#123;"count": 10, "surface": 500&#125;, &#123;"count": 20, "surface": 300&#125;]
-                      </p>
-                    </div>
-                  </div>
-                )}
-
-                {/* Preview */}
-                {generationMode !== 'none' && piecesPreview.count > 0 && (
-                  <div className="bg-background rounded-md p-3 space-y-2">
-                    <p className="font-medium text-sm">معاينة:</p>
-                    {piecesPreview.pieces.map((p, i) => {
-                      const pieceInfo = p as any
-                      if (generationMode === 'custom_flexible') {
-                        if (pieceInfo.pieceNumbers) {
-                          return (
-                            <p key={i} className="text-sm text-muted-foreground">
-                              • قطعة #{pieceInfo.pieceNumbers[0]}: {p.surface} م² = {formatCurrency(p.cost)} تكلفة شراء
-                            </p>
-                          )
-                        } else if (pieceInfo.startNumber !== undefined) {
-                          const endNumber = pieceInfo.startNumber + p.count - 1
-                          return (
-                            <p key={i} className="text-sm text-muted-foreground">
-                              • {p.count} قطعة (#{pieceInfo.startNumber} - #{endNumber}) × {p.surface} م² = {formatCurrency(p.cost)} تكلفة شراء لكل قطعة
-                            </p>
-                          )
-                        }
-                      }
-                      return (
-                        <p key={i} className="text-sm text-muted-foreground">
-                          • {p.count} قطعة × {p.surface} م² = {formatCurrency(p.cost)} تكلفة شراء لكل قطعة
-                        </p>
-                      )
-                    })}
-                    <p className="text-sm font-medium pt-2 border-t">
-                      الإجمالي: {piecesPreview.count} قطعة ({piecesPreview.totalUsed} م² مستخدم)
-                    </p>
-                    {parseFloat(batchForm.total_surface) - piecesPreview.totalUsed > 0 && (
-                      <p className="text-xs text-yellow-600">
-                        ⚠ {(parseFloat(batchForm.total_surface) - piecesPreview.totalUsed).toFixed(0)} م² غير مستخدم
-                      </p>
-                    )}
-                    {parseFloat(batchForm.total_surface) - piecesPreview.totalUsed < 0 && (
-                      <p className="text-xs text-red-600">
-                        ⚠ المساحة المطلوبة تتجاوز المساحة الإجمالية!
-                      </p>
-                    )}
-                  </div>
-                )}
+                  بعد إنشاء الدفعة، يمكنك إضافة القطع يدوياً من خلال النقر على الدفعة وتحديد "إضافة قطعة"
+                </p>
               </div>
             )}
 
@@ -1619,76 +1660,96 @@ export function LandManagement() {
               <Label htmlFor="piece_number">رقم القطعة *</Label>
               <Input
                 id="piece_number"
+                type="number"
                 value={pieceForm.piece_number}
-                maxLength={50}
-                onChange={(e) => setPieceForm({ ...pieceForm, piece_number: e.target.value })}
-                placeholder="مثال: P001"
+                onChange={(e) => handlePieceNumberChange(e.target.value)}
+                placeholder="مثال: 1 أو 2 أو 99"
+                min="1"
+                autoFocus
               />
+              <p className="text-xs text-muted-foreground">
+                أدخل رقم القطعة فقط (مثال: 1، 2، 99). سيتم حساب باقي القيم تلقائياً.
+              </p>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            
               <div className="space-y-2">
-                <Label htmlFor="surface_area">المساحة (م²) *</Label>
+              <Label htmlFor="surface_area">المساحة (م²) {pieceForm.surface_area ? '' : '(اختياري - سيتم استخدام القيمة الافتراضية)'}</Label>
                 <Input
                   id="surface_area"
                   type="number"
                   value={pieceForm.surface_area}
                   onChange={(e) => handleSurfaceAreaChange(e.target.value)}
-                  placeholder="400"
+                placeholder={defaultSurfaceArea}
+                min="1"
                 />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="purchase_cost">
-                  تكلفة الشراء
-                  {selectedBatchForPiece && (
-                    <span className="text-xs text-muted-foreground mr-1">(محسوبة تلقائياً)</span>
-                  )}
-                </Label>
-                <Input
-                  id="purchase_cost"
-                  type="number"
-                  value={pieceForm.purchase_cost}
-                  onChange={(e) => setPieceForm({ ...pieceForm, purchase_cost: e.target.value })}
-                  className={selectedBatchForPiece ? 'bg-muted/50' : ''}
-                  placeholder="0"
-                />
-                {selectedBatchForPiece && pieceForm.surface_area && (
                   <p className="text-xs text-muted-foreground">
-                    بناءً على {pieceForm.surface_area}م² / {selectedBatchForPiece.total_surface}م² × {formatCurrency(selectedBatchForPiece.total_cost)}
+                {pieceForm.surface_area 
+                  ? `سيتم حساب التكلفة والأسعار بناءً على ${pieceForm.surface_area} م²`
+                  : `القيمة الافتراضية: ${defaultSurfaceArea} م² (من القطع السابقة أو القيمة الافتراضية)`
+                }
                   </p>
-                )}
               </div>
-            </div>
+            
+            {/* Price fields - show when editing or allow manual entry */}
+            {editingPiece ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="selling_price_full">السعر (دفع كامل)</Label>
+                  <Label htmlFor="selling_price_full">السعر (كامل) *</Label>
                 <Input
                   id="selling_price_full"
                   type="number"
+                    step="0.01"
                   value={pieceForm.selling_price_full}
                   onChange={(e) => setPieceForm({ ...pieceForm, selling_price_full: e.target.value })}
-                  placeholder="0"
+                    placeholder="0.00"
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="selling_price_installment">السعر (أقساط)</Label>
+                  <Label htmlFor="selling_price_installment">السعر (أقساط) *</Label>
                 <Input
                   id="selling_price_installment"
                   type="number"
+                    step="0.01"
                   value={pieceForm.selling_price_installment}
                   onChange={(e) => setPieceForm({ ...pieceForm, selling_price_installment: e.target.value })}
-                  placeholder="0"
+                    placeholder="0.00"
                 />
               </div>
             </div>
+            ) : (
+              /* Show calculated values preview for new pieces */
+              pieceForm.piece_number && selectedBatchForPiece && (() => {
+                const calculated = calculatePieceValues(pieceForm.piece_number, pieceForm.surface_area || defaultSurfaceArea)
+                if (calculated) {
+                  return (
+                    <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 space-y-2">
+                      <p className="text-sm font-medium mb-2">القيم المحسوبة تلقائياً:</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+                        <div>
+                          <span className="text-muted-foreground">السعر (كامل):</span>
+                          <span className="mr-2 font-medium text-green-600">{formatCurrency(calculated.selling_price_full)}</span>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">السعر (أقساط):</span>
+                          <span className="mr-2 font-medium text-blue-600">{formatCurrency(calculated.selling_price_installment)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                }
+                return null
+              })()
+            )}
+            
             <div className="space-y-2">
-              <Label htmlFor="piece_notes">ملاحظات</Label>
+              <Label htmlFor="piece_notes">ملاحظات (اختياري)</Label>
               <Textarea
                 id="piece_notes"
                 value={pieceForm.notes}
                 maxLength={5000}
                 onChange={(e) => setPieceForm({ ...pieceForm, notes: e.target.value })}
                 placeholder="ملاحظات إضافية (اختياري)"
-                rows={3}
+                rows={2}
               />
             </div>
           </div>
@@ -1698,6 +1759,144 @@ export function LandManagement() {
             </Button>
             <Button onClick={savePiece} className="w-full sm:w-auto">
               {editingPiece ? 'حفظ' : 'إضافة'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Price Edit Dialog */}
+      <Dialog open={priceEditDialogOpen} onOpenChange={setPriceEditDialogOpen}>
+        <DialogContent className="w-[95vw] sm:w-full max-w-lg">
+          <DialogHeader>
+            <DialogTitle>تعديل أسعار القطعة #{editingPricePiece?.piece_number}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="h-5 w-5 text-yellow-600 mt-0.5" />
+                <div className="text-sm text-yellow-800">
+                  <p className="font-medium mb-1">ملاحظة مهمة:</p>
+                  <p>تغيير الأسعار سيؤثر فقط على المبيعات المستقبلية. المبيعات الحالية والمباعة لن تتأثر بهذا التغيير.</p>
+                </div>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="selling_price_full">السعر (دفع كامل) *</Label>
+                <Input
+                  id="selling_price_full"
+                  type="number"
+                  step="0.01"
+                  value={priceForm.selling_price_full}
+                  onChange={(e) => setPriceForm({ ...priceForm, selling_price_full: e.target.value })}
+                  placeholder="0.00"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="selling_price_installment">السعر (أقساط) *</Label>
+                <Input
+                  id="selling_price_installment"
+                  type="number"
+                  step="0.01"
+                  value={priceForm.selling_price_installment}
+                  onChange={(e) => setPriceForm({ ...priceForm, selling_price_installment: e.target.value })}
+                  placeholder="0.00"
+                />
+              </div>
+            </div>
+            {editingPricePiece && (
+              <div className="text-sm text-muted-foreground">
+                <p>المساحة: {editingPricePiece.surface_area} م²</p>
+                <p>السعر الحالي للكامل: {formatCurrency(editingPricePiece.selling_price_full)}</p>
+                <p>السعر الحالي للأقساط: {formatCurrency(editingPricePiece.selling_price_installment)}</p>
+              </div>
+            )}
+          </div>
+          <DialogFooter className="flex-col sm:flex-row gap-2">
+            <Button variant="outline" onClick={() => setPriceEditDialogOpen(false)} className="w-full sm:w-auto">
+              إلغاء
+            </Button>
+            <Button 
+              onClick={savePriceEdit} 
+              disabled={!priceForm.selling_price_full || !priceForm.selling_price_installment}
+              className="w-full sm:w-auto"
+            >
+              حفظ الأسعار
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Price Update Dialog */}
+      <Dialog open={bulkPriceDialogOpen} onOpenChange={setBulkPriceDialogOpen}>
+        <DialogContent className="w-[95vw] sm:w-full max-w-lg">
+          <DialogHeader>
+            <DialogTitle>تحديث أسعار جميع القطع في {bulkPriceBatch?.name}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="h-5 w-5 text-yellow-600 mt-0.5" />
+                <div className="text-sm text-yellow-800">
+                  <p className="font-medium mb-1">تحذير:</p>
+                  <p>سيتم تحديث أسعار جميع القطع في هذه الدفعة ({bulkPriceBatch?.land_pieces.length} قطعة).</p>
+                  <p className="mt-1">هذا التغيير سيؤثر فقط على المبيعات المستقبلية. المبيعات الحالية والمباعة لن تتأثر.</p>
+                </div>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-2">
+                <Label htmlFor="bulk_price_per_m2_full">السعر لكل م² (دفع كامل) *</Label>
+                <Input
+                  id="bulk_price_per_m2_full"
+                  type="number"
+                  step="0.01"
+                  value={bulkPriceForm.price_per_m2_full}
+                  onChange={(e) => setBulkPriceForm({ ...bulkPriceForm, price_per_m2_full: e.target.value })}
+                  placeholder="0.00"
+              />
+            </div>
+              <div className="space-y-2">
+                <Label htmlFor="bulk_price_per_m2_installment">السعر لكل م² (أقساط) *</Label>
+                <Input
+                  id="bulk_price_per_m2_installment"
+                  type="number"
+                  step="0.01"
+                  value={bulkPriceForm.price_per_m2_installment}
+                  onChange={(e) => setBulkPriceForm({ ...bulkPriceForm, price_per_m2_installment: e.target.value })}
+                  placeholder="0.00"
+                />
+              </div>
+            </div>
+            {bulkPriceBatch && bulkPriceForm.price_per_m2_full && bulkPriceForm.price_per_m2_installment && (
+              <div className="bg-gray-50 rounded-lg p-3 text-sm">
+                <p className="font-medium mb-2">معاينة الأسعار الجديدة:</p>
+                <div className="space-y-1">
+                  {(bulkPriceBatch as LandBatchWithPieces).land_pieces.slice(0, 5).map(piece => (
+                    <div key={piece.id} className="flex justify-between">
+                      <span>#{piece.piece_number} ({piece.surface_area} م²):</span>
+                      <span>
+                        {formatCurrency(piece.surface_area * parseFloat(bulkPriceForm.price_per_m2_full))} / {formatCurrency(piece.surface_area * parseFloat(bulkPriceForm.price_per_m2_installment))}
+                      </span>
+                    </div>
+                  ))}
+                  {(bulkPriceBatch as LandBatchWithPieces).land_pieces.length > 5 && (
+                    <p className="text-muted-foreground">... و {(bulkPriceBatch as LandBatchWithPieces).land_pieces.length - 5} قطعة أخرى</p>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+          <DialogFooter className="flex-col sm:flex-row gap-2">
+            <Button variant="outline" onClick={() => setBulkPriceDialogOpen(false)} className="w-full sm:w-auto">
+              إلغاء
+            </Button>
+            <Button 
+              onClick={saveBulkPriceUpdate} 
+              disabled={!bulkPriceForm.price_per_m2_full || !bulkPriceForm.price_per_m2_installment}
+              className="w-full sm:w-auto"
+            >
+              تحديث جميع الأسعار
             </Button>
           </DialogFooter>
         </DialogContent>

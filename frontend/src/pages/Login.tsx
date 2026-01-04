@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import { Button } from '@/components/ui/button'
@@ -12,8 +12,15 @@ export function Login() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
-  const { signIn } = useAuth()
+  const { signIn, user, loading: authLoading } = useAuth()
   const navigate = useNavigate()
+
+  // Navigate when user is loaded after login
+  useEffect(() => {
+    if (!authLoading && user) {
+      navigate('/', { replace: true })
+    }
+  }, [user, authLoading, navigate])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -24,12 +31,13 @@ export function Login() {
       const { error } = await signIn(email, password)
       if (error) {
         setError(error.message)
+        setLoading(false)
       } else {
-        navigate('/')
+        // Don't navigate here - let useEffect handle it when user is loaded
+        // This ensures the profile is fetched before navigation
       }
     } catch {
       setError('An unexpected error occurred')
-    } finally {
       setLoading(false)
     }
   }
