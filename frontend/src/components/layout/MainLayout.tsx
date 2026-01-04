@@ -16,21 +16,24 @@ export function MainLayout() {
   }, [])
 
   // Swipe gesture: swipe right from left edge to open sidebar, swipe left to close
+  // Only trigger when sidebar state matches to prevent browser back navigation interference
   useSwipeGesture({
     onSwipeRight: () => {
       // Swipe right (from left edge toward right) to open sidebar on mobile
+      // Only when sidebar is closed - prevents interference with browser navigation
       if (window.innerWidth < 768 && !sidebarOpen) {
         setSidebarOpen(true)
       }
     },
     onSwipeLeft: () => {
-      // Swipe left to close sidebar (when it's open)
+      // Swipe left to close sidebar (only when it's open)
+      // Only when sidebar is open - prevents interference with browser back navigation
       if (window.innerWidth < 768 && sidebarOpen) {
         setSidebarOpen(false)
       }
     },
     threshold: 100, // Start swipe detection within 100px of left edge
-    minSwipeDistance: 60, // Minimum swipe distance to trigger
+    minSwipeDistance: 80, // Minimum swipe distance to trigger (increased to reduce false triggers)
     disabled: false,
   })
 

@@ -970,11 +970,18 @@ export function Installments() {
   }
 
   // Filter installments - also check if overdue based on due date
+  // For 'Paid' status: only show installments that still have remaining amount (partially paid)
   const filteredInstallments = installments.filter((inst) => {
     if (filterStatus === 'all') return true
     if (filterStatus === 'Late') {
       // Check if actually overdue: due date passed AND not fully paid
       return isInstallmentOverdue(inst)
+    }
+    if (filterStatus === 'Paid') {
+      // Only show 'Paid' installments that still have remaining amount (partially paid)
+      // Exclude fully paid installments
+      const remaining = getRemainingAmount(inst)
+      return inst.status === 'Paid' && remaining > 0.01
     }
     return inst.status === filterStatus
   })

@@ -47,13 +47,14 @@ export function useSwipeGesture({
         if (deltaX < 0 && onSwipeRight) {
           // Check if swipe started near the left edge (within threshold)
           // This allows opening sidebar by swiping from left edge toward right
+          // Only trigger if starting from the very edge to avoid interfering with normal scrolling
           if (touchStartX.current < threshold) {
             onSwipeRight()
           }
         }
         // Swipe left (start is more right than end) - swipe from right to left
+        // Only trigger if sidebar is open (don't interfere with browser back navigation when sidebar is closed)
         else if (deltaX > 0 && onSwipeLeft) {
-          // Can be triggered anywhere, typically used to close sidebar
           onSwipeLeft()
         }
       }
@@ -67,7 +68,7 @@ export function useSwipeGesture({
 
     document.addEventListener('touchstart', handleTouchStart, { passive: true })
     document.addEventListener('touchmove', handleTouchMove, { passive: true })
-    document.addEventListener('touchend', handleTouchEnd, { passive: true })
+    document.addEventListener('touchend', handleTouchEnd, { passive: false })
 
     return () => {
       document.removeEventListener('touchstart', handleTouchStart)
