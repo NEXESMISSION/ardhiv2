@@ -1020,14 +1020,14 @@ export function Users() {
           <DialogHeader>
             <DialogTitle>{editingUser ? 'تعديل المستخدم' : 'إضافة مستخدم جديد'}</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4">
+          <div className="space-y-3 sm:space-y-4">
             {error && (
-              <div className="p-3 bg-red-50 border border-red-200 rounded-md text-red-800 text-sm">
+              <div className="p-2.5 sm:p-3 bg-red-50 border border-red-200 rounded-md text-red-800 text-xs sm:text-sm">
                 {error}
               </div>
             )}
-            <div className="space-y-2">
-              <Label htmlFor="name">الاسم</Label>
+            <div className="space-y-1.5 sm:space-y-2">
+              <Label htmlFor="name" className="text-xs sm:text-sm">الاسم</Label>
               <Input
                 id="name"
                 value={form.name}
@@ -1038,10 +1038,11 @@ export function Users() {
                 placeholder="أدخل اسم المستخدم"
                 disabled={saving}
                 maxLength={255}
+                className="text-xs sm:text-sm"
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="email">البريد الإلكتروني</Label>
+            <div className="space-y-1.5 sm:space-y-2">
+              <Label htmlFor="email" className="text-xs sm:text-sm">البريد الإلكتروني</Label>
               <Input
                 id="email"
                 type="email"
@@ -1053,11 +1054,12 @@ export function Users() {
                 disabled={!!editingUser || saving}
                 placeholder="user@example.com"
                 maxLength={254}
+                className="text-xs sm:text-sm"
               />
             </div>
             {!editingUser && (
-              <div className="space-y-2">
-                <Label htmlFor="password">كلمة المرور (اختياري)</Label>
+              <div className="space-y-1.5 sm:space-y-2">
+                <Label htmlFor="password" className="text-xs sm:text-sm">كلمة المرور (اختياري)</Label>
                 <Input
                   id="password"
                   type="password"
@@ -1069,30 +1071,33 @@ export function Users() {
                   placeholder="اتركه فارغاً لإنشاء كلمة مرور عشوائية"
                   disabled={saving}
                   maxLength={72}
+                  className="text-xs sm:text-sm"
                 />
                 <p className="text-xs text-muted-foreground">
                   إذا تركت الحقل فارغاً، سيتم إنشاء كلمة مرور عشوائية تلقائياً
                 </p>
               </div>
             )}
-            <div className="space-y-2">
-              <Label htmlFor="role">الدور</Label>
+            <div className="space-y-1.5 sm:space-y-2">
+              <Label htmlFor="role" className="text-xs sm:text-sm">الدور</Label>
               <Select
                 value={form.role}
                 onChange={(e) => setForm({ ...form, role: e.target.value as UserRole })}
                 disabled={saving}
+                className="text-xs sm:text-sm"
               >
                 <option value="Owner">مالك (Owner)</option>
                 <option value="Manager">مدير (Manager)</option>
                 <option value="FieldStaff">موظف ميداني (Field Staff)</option>
               </Select>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="status">الحالة</Label>
+            <div className="space-y-1.5 sm:space-y-2">
+              <Label htmlFor="status" className="text-xs sm:text-sm">الحالة</Label>
               <Select
                 value={form.status}
                 onChange={(e) => setForm({ ...form, status: e.target.value as UserStatus })}
                 disabled={saving}
+                className="text-xs sm:text-sm"
               >
                 <option value="Active">نشط</option>
                 <option value="Inactive">غير نشط</option>
@@ -1101,19 +1106,20 @@ export function Users() {
 
             {/* Page Permissions Section - Only show for non-Owner roles */}
             {form.role !== 'Owner' && (
-              <div className="space-y-3 border-t pt-4 mt-4">
-                <div className="flex items-center justify-between">
-                  <Label className="text-base font-semibold flex items-center gap-2">
-                    <Lock className="h-4 w-4" />
+              <div className="space-y-2 sm:space-y-3 border-t pt-3 sm:pt-4 mt-3 sm:mt-4">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+                  <Label className="text-sm sm:text-base font-semibold flex items-center gap-2">
+                    <Lock className="h-3 w-3 sm:h-4 sm:w-4" />
                     الصفحات المتاحة
                   </Label>
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 w-full sm:w-auto">
                     <Button 
                       type="button" 
                       variant="outline" 
                       size="sm"
                       onClick={selectAllPages}
                       disabled={saving}
+                      className="flex-1 sm:flex-none text-xs"
                     >
                       <Eye className="h-3 w-3 mr-1" />
                       تحديد الكل
@@ -1124,6 +1130,7 @@ export function Users() {
                       size="sm"
                       onClick={deselectAllPages}
                       disabled={saving}
+                      className="flex-1 sm:flex-none text-xs"
                     >
                       <EyeOff className="h-3 w-3 mr-1" />
                       إلغاء الكل
@@ -1133,7 +1140,7 @@ export function Users() {
                 <p className="text-xs text-muted-foreground">
                   اختر الصفحات التي يمكن للمستخدم الوصول إليها
                 </p>
-                <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto p-2 bg-gray-50 rounded-lg">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto p-2 bg-gray-50 rounded-lg">
                   {ALL_PAGES.map(page => {
                     const PageIcon = page.icon
                     const isSelected = form.allowedPages?.includes(page.id) || false
@@ -1171,15 +1178,15 @@ export function Users() {
             )}
 
             {form.role === 'Owner' && (
-              <div className="bg-green-50 border border-green-200 rounded-lg p-3 mt-4">
-                <p className="text-sm text-green-800 flex items-center gap-2">
-                  <Shield className="h-4 w-4" />
+              <div className="bg-green-50 border border-green-200 rounded-lg p-2.5 sm:p-3 mt-3 sm:mt-4">
+                <p className="text-xs sm:text-sm text-green-800 flex items-center gap-2">
+                  <Shield className="h-3 w-3 sm:h-4 sm:w-4" />
                   المالك لديه صلاحية الوصول الكامل لجميع الصفحات
                 </p>
               </div>
             )}
           </div>
-          <DialogFooter>
+          <DialogFooter className="gap-2">
             <Button 
               variant="outline" 
               onClick={() => {
@@ -1187,10 +1194,11 @@ export function Users() {
                 setError(null)
               }}
               disabled={saving}
+              className="w-full sm:w-auto"
             >
               إلغاء
             </Button>
-            <Button onClick={saveUser} disabled={saving}>
+            <Button onClick={saveUser} disabled={saving} className="w-full sm:w-auto">
               {saving ? 'جاري الحفظ...' : editingUser ? 'حفظ التغييرات' : 'إضافة المستخدم'}
             </Button>
           </DialogFooter>
@@ -1214,7 +1222,7 @@ export function Users() {
           setDetailsTab('overview')
         }
       }}>
-        <DialogContent className="w-[95vw] sm:w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
+        <DialogContent className="w-[95vw] sm:w-full max-w-5xl max-h-[95vh] overflow-hidden flex flex-col">
           {selectedUserForDetails && (
             <>
               {/* Header with User Info */}

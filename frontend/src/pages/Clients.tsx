@@ -530,14 +530,14 @@ export function Clients() {
 
       {/* Client Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <DialogContent className="w-[95vw] sm:w-full max-w-2xl max-h-[95vh] overflow-y-auto p-4 sm:p-6">
-          <DialogHeader className="pb-3 sm:pb-4">
-            <DialogTitle className="text-lg sm:text-xl">{editingClient ? 'تعديل العميل' : 'إضافة عميل جديد'}</DialogTitle>
+          <DialogContent className="w-[95vw] sm:w-full max-w-2xl max-h-[95vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{editingClient ? 'تعديل العميل' : 'إضافة عميل جديد'}</DialogTitle>
           </DialogHeader>
           <div className="space-y-3 sm:space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
               <div className="space-y-1.5 sm:space-y-2">
-                <Label htmlFor="name" className="text-sm sm:text-base">الاسم</Label>
+                <Label htmlFor="name" className="text-xs sm:text-sm">الاسم</Label>
                 <Input
                   id="name"
                   value={form.name}
@@ -546,56 +546,53 @@ export function Clients() {
                 />
               </div>
               <div className="space-y-1.5 sm:space-y-2">
-                <Label htmlFor="cin" className="text-sm sm:text-base">رقم الهوية</Label>
+                <Label htmlFor="cin" className="text-xs sm:text-sm">رقم الهوية</Label>
                 <Input
                   id="cin"
                   value={form.cin}
                   onChange={(e) => setForm({ ...form, cin: e.target.value })}
                   maxLength={50}
-                  className="text-sm sm:text-base"
                 />
               </div>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
               <div className="space-y-1.5 sm:space-y-2">
-                <Label htmlFor="phone" className="text-sm sm:text-base">الهاتف</Label>
+                <Label htmlFor="phone" className="text-xs sm:text-sm">الهاتف</Label>
                 <Input
                   id="phone"
                   value={form.phone}
                   onChange={(e) => setForm({ ...form, phone: e.target.value })}
                   maxLength={20}
-                  className="text-sm sm:text-base"
                 />
               </div>
               <div className="space-y-1.5 sm:space-y-2">
-                <Label htmlFor="email" className="text-sm sm:text-base">البريد الإلكتروني</Label>
+                <Label htmlFor="email" className="text-xs sm:text-sm">البريد الإلكتروني</Label>
                 <Input
                   id="email"
                   type="email"
                   value={form.email}
                   onChange={(e) => setForm({ ...form, email: e.target.value })}
                   maxLength={254}
-                  className="text-sm sm:text-base"
                 />
               </div>
             </div>
             <div className="space-y-1.5 sm:space-y-2">
-              <Label htmlFor="address" className="text-sm sm:text-base">العنوان</Label>
+              <Label htmlFor="address" className="text-xs sm:text-sm">العنوان</Label>
               <Input
                 id="address"
                 value={form.address}
                 onChange={(e) => setForm({ ...form, address: e.target.value })}
                 maxLength={500}
-                className="text-sm sm:text-base"
               />
             </div>
             <div className="space-y-1.5 sm:space-y-2">
-              <Label htmlFor="notes" className="text-sm sm:text-base">ملاحظات</Label>
+              <Label htmlFor="notes" className="text-xs sm:text-sm">ملاحظات</Label>
               <Textarea
                 id="notes"
                 value={form.notes}
                 onChange={(e) => setForm({ ...form, notes: e.target.value })}
                 maxLength={5000}
+                className="min-h-[80px] sm:min-h-[100px]"
               />
             </div>
             {errorMessage && (
@@ -604,29 +601,29 @@ export function Clients() {
               </div>
             )}
           </div>
-          <DialogFooter className="flex-col sm:flex-row gap-2 pt-3 sm:pt-4">
+          <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => {
               setDialogOpen(false)
               setErrorMessage(null)
-            }} className="w-full sm:w-auto text-sm sm:text-base">
+            }} className="w-full sm:w-auto">
               إلغاء
             </Button>
-            <Button onClick={saveClient} disabled={saving} className="w-full sm:w-auto text-sm sm:text-base">حفظ</Button>
+            <Button onClick={saveClient} disabled={saving} className="w-full sm:w-auto">حفظ</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* Details Dialog */}
       <Dialog open={detailsOpen} onOpenChange={setDetailsOpen}>
-        <DialogContent className="w-[95vw] sm:w-full max-w-2xl max-h-[95vh] overflow-y-auto p-4 sm:p-6">
-          <DialogHeader className="pb-3 sm:pb-4">
-            <DialogTitle className="text-lg sm:text-xl">تفاصيل العميل</DialogTitle>
+        <DialogContent className="w-[95vw] sm:w-full max-w-2xl max-h-[95vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>تفاصيل العميل</DialogTitle>
           </DialogHeader>
           {selectedClient && (
-            <div className="space-y-4 sm:space-y-6">
+            <div className="space-y-3 sm:space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                 <div>
-                  <p className="text-xs sm:text-sm text-muted-foreground mb-1">الاسم</p>
+                  <p className="text-xs text-muted-foreground mb-1">الاسم</p>
                   <p className="font-medium text-sm sm:text-base">{selectedClient.name}</p>
                 </div>
                 <div>

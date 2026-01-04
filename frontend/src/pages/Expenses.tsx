@@ -726,14 +726,15 @@ export function Expenses() {
           <DialogHeader>
             <DialogTitle>{editingExpense ? 'تعديل مصروف' : 'إضافة مصروف جديد'}</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="category_id">الفئة *</Label>
+          <div className="space-y-3 sm:space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+              <div className="space-y-1.5 sm:space-y-2">
+                <Label htmlFor="category_id" className="text-xs sm:text-sm">الفئة *</Label>
                 <Select
                   id="category_id"
                   value={expenseForm.category_id}
                   onChange={(e) => setExpenseForm({ ...expenseForm, category_id: e.target.value })}
+                  className="text-xs sm:text-sm"
                 >
                   <option value="">اختر الفئة</option>
                   {categories.map(cat => (
@@ -741,8 +742,8 @@ export function Expenses() {
                   ))}
                 </Select>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="amount">المبلغ (DT) *</Label>
+              <div className="space-y-1.5 sm:space-y-2">
+                <Label htmlFor="amount" className="text-xs sm:text-sm">المبلغ (DT) *</Label>
                 <Input
                   id="amount"
                   type="number"
@@ -750,25 +751,28 @@ export function Expenses() {
                   value={expenseForm.amount}
                   onChange={(e) => setExpenseForm({ ...expenseForm, amount: e.target.value })}
                   placeholder="0.00"
+                  className="text-xs sm:text-sm"
                 />
               </div>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="expense_date">التاريخ *</Label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+              <div className="space-y-1.5 sm:space-y-2">
+                <Label htmlFor="expense_date" className="text-xs sm:text-sm">التاريخ *</Label>
                 <Input
                   id="expense_date"
                   type="date"
                   value={expenseForm.expense_date}
                   onChange={(e) => setExpenseForm({ ...expenseForm, expense_date: e.target.value })}
+                  className="text-xs sm:text-sm"
                 />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="payment_method">طريقة الدفع *</Label>
+              <div className="space-y-1.5 sm:space-y-2">
+                <Label htmlFor="payment_method" className="text-xs sm:text-sm">طريقة الدفع *</Label>
                 <Select
                   id="payment_method"
                   value={expenseForm.payment_method}
                   onChange={(e) => setExpenseForm({ ...expenseForm, payment_method: e.target.value as any })}
+                  className="text-xs sm:text-sm"
                 >
                   <option value="Cash">نقد</option>
                   <option value="BankTransfer">تحويل بنكي</option>
@@ -778,23 +782,25 @@ export function Expenses() {
                 </Select>
               </div>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="description">الوصف</Label>
+            <div className="space-y-1.5 sm:space-y-2">
+              <Label htmlFor="description" className="text-xs sm:text-sm">الوصف</Label>
               <Textarea
                 id="description"
                 value={expenseForm.description}
                 onChange={(e) => setExpenseForm({ ...expenseForm, description: e.target.value })}
                 placeholder="وصف المصروف..."
                 rows={3}
+                className="text-xs sm:text-sm min-h-[80px] sm:min-h-[100px]"
               />
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="related_batch_id">متعلق بدفعة أرض (اختياري)</Label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+              <div className="space-y-1.5 sm:space-y-2">
+                <Label htmlFor="related_batch_id" className="text-xs sm:text-sm">متعلق بدفعة أرض (اختياري)</Label>
                 <Select
                   id="related_batch_id"
                   value={expenseForm.related_batch_id}
                   onChange={(e) => setExpenseForm({ ...expenseForm, related_batch_id: e.target.value })}
+                  className="text-xs sm:text-sm"
                 >
                   <option value="">لا يوجد</option>
                   {batches.map(batch => (
@@ -802,28 +808,30 @@ export function Expenses() {
                   ))}
                 </Select>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="tags">العلامات (مفصولة بفواصل)</Label>
+              <div className="space-y-1.5 sm:space-y-2">
+                <Label htmlFor="tags" className="text-xs sm:text-sm">العلامات (مفصولة بفواصل)</Label>
                 <Input
                   id="tags"
                   value={expenseForm.tags}
                   onChange={(e) => setExpenseForm({ ...expenseForm, tags: e.target.value })}
                   placeholder="مثال: عاجل، شهري، صيانة"
+                  className="text-xs sm:text-sm"
                 />
               </div>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="notes">ملاحظات</Label>
+            <div className="space-y-1.5 sm:space-y-2">
+              <Label htmlFor="notes" className="text-xs sm:text-sm">ملاحظات</Label>
               <Textarea
                 id="notes"
                 value={expenseForm.notes}
                 onChange={(e) => setExpenseForm({ ...expenseForm, notes: e.target.value })}
                 placeholder="ملاحظات إضافية..."
                 rows={2}
+                className="text-xs sm:text-sm min-h-[60px] sm:min-h-[80px]"
               />
             </div>
           </div>
-          <DialogFooter className="flex-col sm:flex-row gap-2">
+          <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setExpenseDialogOpen(false)} className="w-full sm:w-auto">
               إلغاء
             </Button>

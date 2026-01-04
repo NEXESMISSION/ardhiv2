@@ -690,28 +690,29 @@ export function RealEstateBuildings() {
 
       {/* Project Dialog */}
       <Dialog open={projectDialogOpen} onOpenChange={setProjectDialogOpen}>
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="w-[95vw] sm:w-full max-w-3xl max-h-[95vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editingProject ? 'تعديل المشروع' : 'مشروع جديد'}</DialogTitle>
-            <DialogDescription>
+            <DialogDescription className="text-xs sm:text-sm">
               {editingProject ? 'قم بتعديل بيانات المشروع' : 'أضف مشروعاً عقارياً جديداً'}
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>اسم المشروع *</Label>
+          <div className="space-y-3 sm:space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
+              <div className="space-y-1.5 sm:space-y-2">
+                <Label className="text-xs sm:text-sm">اسم المشروع *</Label>
                 <Input
                   value={projectForm.name}
                   onChange={(e) => setProjectForm({ ...projectForm, name: e.target.value })}
                   placeholder="أدخل اسم المشروع"
                 />
               </div>
-              <div className="space-y-2">
-                <Label>النوع *</Label>
+              <div className="space-y-1.5 sm:space-y-2">
+                <Label className="text-xs sm:text-sm">النوع *</Label>
                 <Select
                   value={projectForm.project_type}
                   onChange={(e) => setProjectForm({ ...projectForm, project_type: e.target.value as ProjectType })}
+                  className="text-xs sm:text-sm"
                 >
                   <option value="Building">مبنى</option>
                   <option value="House">منزل</option>
@@ -719,12 +720,13 @@ export function RealEstateBuildings() {
                 </Select>
               </div>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>الحالة</Label>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
+              <div className="space-y-1.5 sm:space-y-2">
+                <Label className="text-xs sm:text-sm">الحالة</Label>
                 <Select
                   value={projectForm.status}
                   onChange={(e) => setProjectForm({ ...projectForm, status: e.target.value as ProjectStatus })}
+                  className="text-xs sm:text-sm"
                 >
                   <option value="Planning">التخطيط</option>
                   <option value="InProgress">قيد التنفيذ</option>
@@ -733,89 +735,97 @@ export function RealEstateBuildings() {
                   <option value="Cancelled">ملغي</option>
                 </Select>
               </div>
-              <div className="space-y-2">
-                <Label>الموقع</Label>
+              <div className="space-y-1.5 sm:space-y-2">
+                <Label className="text-xs sm:text-sm">الموقع</Label>
                 <Input
                   value={projectForm.location}
                   onChange={(e) => setProjectForm({ ...projectForm, location: e.target.value })}
                   placeholder="أدخل الموقع"
+                  className="text-xs sm:text-sm"
                 />
               </div>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="space-y-2">
-                <Label>تاريخ البدء</Label>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4">
+              <div className="space-y-1.5 sm:space-y-2">
+                <Label className="text-xs sm:text-sm">تاريخ البدء</Label>
                 <Input
                   type="date"
                   value={projectForm.start_date}
                   onChange={(e) => setProjectForm({ ...projectForm, start_date: e.target.value })}
+                  className="text-xs sm:text-sm"
                 />
               </div>
-              <div className="space-y-2">
-                <Label>تاريخ الانتهاء المتوقع</Label>
+              <div className="space-y-1.5 sm:space-y-2">
+                <Label className="text-xs sm:text-sm">تاريخ الانتهاء المتوقع</Label>
                 <Input
                   type="date"
                   value={projectForm.expected_completion_date}
                   onChange={(e) => setProjectForm({ ...projectForm, expected_completion_date: e.target.value })}
+                  className="text-xs sm:text-sm"
                 />
               </div>
-              <div className="space-y-2">
-                <Label>الميزانية (DT) *</Label>
+              <div className="space-y-1.5 sm:space-y-2">
+                <Label className="text-xs sm:text-sm">الميزانية (DT) *</Label>
                 <Input
                   type="number"
                   step="0.01"
                   value={projectForm.estimated_budget}
                   onChange={(e) => setProjectForm({ ...projectForm, estimated_budget: e.target.value })}
                   placeholder="0.00"
+                  className="text-xs sm:text-sm"
                 />
               </div>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>عدد الوحدات</Label>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
+              <div className="space-y-1.5 sm:space-y-2">
+                <Label className="text-xs sm:text-sm">عدد الوحدات</Label>
                 <Input
                   type="number"
                   value={projectForm.units_count}
                   onChange={(e) => setProjectForm({ ...projectForm, units_count: e.target.value })}
                   placeholder="0"
+                  className="text-xs sm:text-sm"
                 />
               </div>
-              <div className="space-y-2">
-                <Label>المساحة الإجمالية (م²)</Label>
+              <div className="space-y-1.5 sm:space-y-2">
+                <Label className="text-xs sm:text-sm">المساحة الإجمالية (م²)</Label>
                 <Input
                   type="number"
                   step="0.01"
                   value={projectForm.total_area}
                   onChange={(e) => setProjectForm({ ...projectForm, total_area: e.target.value })}
                   placeholder="0.00"
+                  className="text-xs sm:text-sm"
                 />
               </div>
             </div>
-            <div className="space-y-2">
-              <Label>الوصف</Label>
+            <div className="space-y-1.5 sm:space-y-2">
+              <Label className="text-xs sm:text-sm">الوصف</Label>
               <Textarea
                 value={projectForm.description}
                 onChange={(e) => setProjectForm({ ...projectForm, description: e.target.value })}
                 rows={3}
                 placeholder="أدخل وصف المشروع"
+                className="text-xs sm:text-sm min-h-[80px] sm:min-h-[100px]"
               />
             </div>
-            <div className="space-y-2">
-              <Label>ملاحظات</Label>
+            <div className="space-y-1.5 sm:space-y-2">
+              <Label className="text-xs sm:text-sm">ملاحظات</Label>
               <Textarea
                 value={projectForm.notes}
                 onChange={(e) => setProjectForm({ ...projectForm, notes: e.target.value })}
                 rows={2}
                 placeholder="أدخل ملاحظات إضافية"
+                className="text-xs sm:text-sm min-h-[60px] sm:min-h-[80px]"
               />
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setProjectDialogOpen(false)}>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setProjectDialogOpen(false)} className="w-full sm:w-auto">
               إلغاء
             </Button>
-            <Button onClick={saveProject} className="gap-2">
-              <Save className="h-4 w-4" />
+            <Button onClick={saveProject} className="gap-2 w-full sm:w-auto">
+              <Save className="h-3 w-3 sm:h-4 sm:w-4" />
               حفظ
             </Button>
           </DialogFooter>
@@ -824,7 +834,7 @@ export function RealEstateBuildings() {
 
       {/* Project Details Dialog */}
       <Dialog open={detailsDialogOpen} onOpenChange={setDetailsDialogOpen}>
-        <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="w-[95vw] sm:w-full max-w-5xl max-h-[95vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center justify-between">
               <span>تفاصيل المشروع</span>

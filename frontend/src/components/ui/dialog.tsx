@@ -144,14 +144,14 @@ const DialogContent = React.forwardRef<
       <div
         ref={ref}
         className={cn(
-          "fixed left-[50%] top-[50%] z-50 grid w-full max-w-[95vw] sm:max-w-lg md:max-w-2xl lg:max-w-3xl translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-4 sm:p-6 shadow-lg duration-200 sm:rounded-lg max-h-[90vh] overflow-y-auto",
+          "fixed left-[50%] top-[50%] z-50 grid w-full max-w-[95vw] sm:max-w-lg md:max-w-2xl lg:max-w-3xl translate-x-[-50%] translate-y-[-50%] gap-3 sm:gap-4 border bg-background p-3 sm:p-4 md:p-6 shadow-lg duration-200 rounded-lg sm:rounded-lg max-h-[95vh] sm:max-h-[90vh] overflow-y-auto",
           className
         )}
         {...props}
       >
         {children}
         <button
-          className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none"
+          className="absolute right-2 sm:right-4 top-2 sm:top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none p-1"
           onClick={() => context.setOpen(false)}
           type="button"
         >
@@ -170,7 +170,7 @@ const DialogHeader = ({
 }: React.HTMLAttributes<HTMLDivElement>) => (
   <div
     className={cn(
-      "flex flex-col space-y-1.5 text-center sm:text-left",
+      "flex flex-col space-y-1 sm:space-y-1.5 text-center sm:text-left pb-2 sm:pb-3",
       className
     )}
     {...props}
@@ -199,7 +199,7 @@ const DialogTitle = React.forwardRef<
   <h2
     ref={ref}
     className={cn(
-      "text-lg font-semibold leading-none tracking-tight",
+      "text-base sm:text-lg font-semibold leading-none tracking-tight",
       className
     )}
     {...props}

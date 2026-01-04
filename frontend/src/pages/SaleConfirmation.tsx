@@ -1112,18 +1112,18 @@ export function SaleConfirmation() {
             </DialogTitle>
           </DialogHeader>
           {selectedSale && selectedPiece && (
-            <div className="space-y-4">
-              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 space-y-2">
+            <div className="space-y-3 sm:space-y-4">
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 sm:p-4 space-y-2">
                 {(() => {
                   const { pricePerPiece, reservationPerPiece, companyFeePerPiece, totalPayablePerPiece } = calculatePieceValues(selectedSale, selectedPiece)
                   return (
                     <>
-                      <div className="flex justify-between">
-                        <span className="text-sm text-muted-foreground">سعر القطعة:</span>
+                      <div className="flex justify-between text-xs sm:text-sm">
+                        <span className="text-muted-foreground">سعر القطعة:</span>
                         <span className="font-medium">{formatCurrency(pricePerPiece)}</span>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <Label htmlFor="companyFeePercentage" className="text-sm">عمولة الشركة (%):</Label>
+                      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2">
+                        <Label htmlFor="companyFeePercentage" className="text-xs sm:text-sm whitespace-nowrap">عمولة الشركة (%):</Label>
                         <Input
                           id="companyFeePercentage"
                           type="number"
@@ -1132,22 +1132,22 @@ export function SaleConfirmation() {
                           max="100"
                           value={companyFeePercentage}
                           onChange={e => setCompanyFeePercentage(e.target.value)}
-                          className="w-24"
+                          className="w-full sm:w-24 text-xs sm:text-sm"
                         />
                       </div>
-                      <div className="flex justify-between">
-                        <span className="text-sm text-muted-foreground">عمولة الشركة:</span>
+                      <div className="flex justify-between text-xs sm:text-sm">
+                        <span className="text-muted-foreground">عمولة الشركة:</span>
                         <span className="font-medium text-blue-600">{formatCurrency(companyFeePerPiece)}</span>
                       </div>
-                      <div className="flex justify-between font-bold text-lg pt-2 border-t">
+                      <div className="flex justify-between font-bold text-sm sm:text-lg pt-2 border-t">
                         <span>المبلغ الإجمالي المستحق:</span>
                         <span className="text-green-600">{formatCurrency(totalPayablePerPiece)}</span>
                       </div>
-                      <div className="flex justify-between text-sm">
+                      <div className="flex justify-between text-xs sm:text-sm">
                         <span className="text-muted-foreground">المدفوع مسبقاً:</span>
                         <span className="text-green-600">{formatCurrency(reservationPerPiece)}</span>
                       </div>
-                      <div className="flex justify-between font-bold pt-2 border-t">
+                      <div className="flex justify-between font-bold text-sm sm:text-base pt-2 border-t">
                         <span>المتبقي:</span>
                         <span className="text-orange-600">
                           {formatCurrency(totalPayablePerPiece - reservationPerPiece)}
@@ -1159,11 +1159,11 @@ export function SaleConfirmation() {
               </div>
 
               {confirmationType === 'bigAdvance' && selectedSale?.payment_type === 'Installment' && (
-                <div className="space-y-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
-                  <p className="text-sm font-medium text-blue-800 mb-3">إعدادات الأقساط</p>
+                <div className="space-y-3 sm:space-y-4 p-3 sm:p-4 bg-blue-50 rounded-lg border border-blue-200">
+                  <p className="text-xs sm:text-sm font-medium text-blue-800 mb-2 sm:mb-3">إعدادات الأقساط</p>
                   
-                  <div className="space-y-2">
-                    <Label htmlFor="numberOfInstallments">عدد الأشهر *</Label>
+                  <div className="space-y-1.5 sm:space-y-2">
+                    <Label htmlFor="numberOfInstallments" className="text-xs sm:text-sm">عدد الأشهر *</Label>
                     <Input
                       id="numberOfInstallments"
                       type="number"
@@ -1171,17 +1171,19 @@ export function SaleConfirmation() {
                       value={numberOfInstallments}
                       onChange={e => setNumberOfInstallments(e.target.value)}
                       placeholder="أدخل عدد الأشهر"
+                      className="text-xs sm:text-sm"
                     />
                   </div>
                   
-                  <div className="space-y-2">
-                    <Label htmlFor="installmentStartDate">تاريخ بداية الأقساط *</Label>
+                  <div className="space-y-1.5 sm:space-y-2">
+                    <Label htmlFor="installmentStartDate" className="text-xs sm:text-sm">تاريخ بداية الأقساط *</Label>
                     <Input
                       id="installmentStartDate"
                       type="date"
                       value={installmentStartDate}
                       onChange={e => setInstallmentStartDate(e.target.value)}
                       min={new Date().toISOString().split('T')[0]}
+                      className="text-xs sm:text-sm"
                     />
                     <p className="text-xs text-muted-foreground">
                       سيتم إنشاء جدول الأقساط تلقائياً بعد تأكيد الدفعة الكبيرة
@@ -1190,23 +1192,25 @@ export function SaleConfirmation() {
                 </div>
               )}
 
-              <div className="space-y-2">
-                <Label htmlFor="receivedAmount">المبلغ المستلم *</Label>
+              <div className="space-y-1.5 sm:space-y-2">
+                <Label htmlFor="receivedAmount" className="text-xs sm:text-sm">المبلغ المستلم *</Label>
                 <Input
                   id="receivedAmount"
                   type="number"
                   value={receivedAmount}
                   onChange={e => setReceivedAmount(e.target.value)}
                   placeholder="أدخل المبلغ المستلم"
+                  className="text-xs sm:text-sm"
                 />
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="paymentMethod">طريقة الدفع</Label>
+              <div className="space-y-1.5 sm:space-y-2">
+                <Label htmlFor="paymentMethod" className="text-xs sm:text-sm">طريقة الدفع</Label>
                 <Select
                   id="paymentMethod"
                   value={paymentMethod}
                   onChange={e => setPaymentMethod(e.target.value)}
+                  className="text-xs sm:text-sm"
                 >
                   <option value="cash">نقدي</option>
                   <option value="check">شيك</option>
@@ -1214,22 +1218,23 @@ export function SaleConfirmation() {
                 </Select>
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="confirmationNotes">ملاحظات</Label>
+              <div className="space-y-1.5 sm:space-y-2">
+                <Label htmlFor="confirmationNotes" className="text-xs sm:text-sm">ملاحظات</Label>
                 <Textarea
                   id="confirmationNotes"
                   value={confirmationNotes}
                   onChange={e => setConfirmationNotes(e.target.value)}
                   placeholder="ملاحظات إضافية..."
                   rows={3}
+                  className="text-xs sm:text-sm min-h-[80px] sm:min-h-[100px]"
                 />
               </div>
 
-              <DialogFooter>
-                <Button variant="outline" onClick={() => setConfirmDialogOpen(false)}>
+              <DialogFooter className="gap-2">
+                <Button variant="outline" onClick={() => setConfirmDialogOpen(false)} className="w-full sm:w-auto">
                   إلغاء
                 </Button>
-                <Button onClick={handleConfirmation} disabled={confirming}>
+                <Button onClick={handleConfirmation} disabled={confirming} className="w-full sm:w-auto">
                   {confirming ? 'جاري التأكيد...' : 'تأكيد'}
                 </Button>
               </DialogFooter>
@@ -1245,11 +1250,11 @@ export function SaleConfirmation() {
             <DialogTitle>تفاصيل العميل</DialogTitle>
           </DialogHeader>
           {selectedClientForDetails && (
-            <div className="space-y-6">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-4 sm:space-y-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                 <div>
-                  <p className="text-sm text-muted-foreground">الاسم</p>
-                  <p className="font-medium">{selectedClientForDetails.name}</p>
+                  <p className="text-xs sm:text-sm text-muted-foreground">الاسم</p>
+                  <p className="font-medium text-sm sm:text-base">{selectedClientForDetails.name}</p>
                 </div>
                 <div>
                   <p className="text-sm text-muted-foreground">رقم CIN</p>

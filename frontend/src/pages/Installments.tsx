@@ -2481,7 +2481,7 @@ export function Installments() {
             <DialogTitle>تسجيل دفعة</DialogTitle>
           </DialogHeader>
           {selectedInstallment && (
-            <div className="space-y-4">
+            <div className="space-y-3 sm:space-y-4">
               {(() => {
                 // Calculate total unpaid amount for the entire sale
                 const unpaid = getUnpaidInstallmentsForSale(selectedInstallment.sale_id)
@@ -2508,17 +2508,17 @@ export function Installments() {
                 
                 return (
                   <>
-                    <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-4 rounded-lg border">
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+                    <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-3 sm:p-4 rounded-lg border">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 text-xs sm:text-sm">
                         <div>
                           <p className="text-muted-foreground mb-1">العميل</p>
-                          <p className="font-semibold text-base">
+                          <p className="font-semibold text-sm sm:text-base">
                             {selectedInstallment.sale?.client?.name}
                           </p>
                         </div>
                         <div>
                           <p className="text-muted-foreground mb-1">رقم القسط</p>
-                          <p className="font-semibold text-base">#{selectedInstallment.installment_number}</p>
+                          <p className="font-semibold text-sm sm:text-base">#{selectedInstallment.installment_number}</p>
                         </div>
                         {isInstallmentSale && (
                           <div className="sm:col-span-2">
@@ -2530,20 +2530,20 @@ export function Installments() {
                       </div>
                     </div>
                     
-                    <div className="space-y-3">
-                      <div className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
+                    <div className="space-y-2 sm:space-y-3">
+                      <div className="flex justify-between items-center p-2 sm:p-3 bg-gray-50 rounded-lg text-xs sm:text-sm">
                         <span className="text-muted-foreground">المدفوع:</span>
                         <span className="font-bold text-green-600">{formatCurrency(roundedPaid)}</span>
                       </div>
-                      <div className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
+                      <div className="flex justify-between items-center p-2 sm:p-3 bg-gray-50 rounded-lg text-xs sm:text-sm">
                         <span className="text-muted-foreground">الإجمالي:</span>
                         <span className="font-bold">{formatCurrency(roundedTotal)}</span>
                       </div>
                       {!isInstallmentSale && (
                         // Only show "المتبقي" for full payment sales
-                        <div className="flex justify-between items-center p-3 bg-primary/10 rounded-lg border-2 border-primary">
+                        <div className="flex justify-between items-center p-2 sm:p-3 bg-primary/10 rounded-lg border-2 border-primary text-xs sm:text-sm">
                           <span className="text-muted-foreground font-medium">المتبقي:</span>
-                          <span className="font-bold text-lg text-primary">{formatCurrency(roundedUnpaid)}</span>
+                          <span className="font-bold text-sm sm:text-lg text-primary">{formatCurrency(roundedUnpaid)}</span>
                         </div>
                       )}
                     </div>
@@ -2568,8 +2568,8 @@ export function Installments() {
                       const totalAmount = monthTotals[monthsToPayCount - 1] || 0
                       
                       return (
-                        <div className="space-y-2 bg-blue-50 p-3 rounded-md border border-blue-200">
-                          <Label className="font-semibold">دفع عدة أشهر معاً</Label>
+                        <div className="space-y-2 bg-blue-50 p-2 sm:p-3 rounded-md border border-blue-200">
+                          <Label className="font-semibold text-xs sm:text-sm">دفع عدة أشهر معاً</Label>
                           {overdueCount > 0 && (
                             <div className="bg-red-50 border border-red-200 rounded p-2 mb-2">
                               <p className="text-xs text-red-700 font-medium">
@@ -2585,6 +2585,7 @@ export function Installments() {
                               const amount = monthTotals[count - 1] || 0
                               setPaymentAmount(String(Math.round(amount * 100) / 100))
                             }}
+                            className="text-xs sm:text-sm"
                           >
                             {unpaid.map((inst, idx) => {
                               const amount = monthTotals[idx] || Math.round(getRemainingAmount(inst) * 100) / 100
@@ -2599,7 +2600,7 @@ export function Installments() {
                           <p className="text-xs text-blue-600">
                             الأقساط: {unpaid.slice(0, monthsToPayCount).map(i => `#${i.installment_number}`).join('، ')}
                           </p>
-                          <p className="text-sm font-bold text-blue-800 mt-2">
+                          <p className="text-xs sm:text-sm font-bold text-blue-800 mt-2">
                             المبلغ الإجمالي: {formatCurrency(Math.round(totalAmount * 100) / 100)}
                           </p>
                         </div>
@@ -2607,7 +2608,7 @@ export function Installments() {
                     })()}
 
                     <div className="space-y-2">
-                      <Label htmlFor="paymentAmount">المبلغ *</Label>
+                      <Label htmlFor="paymentAmount" className="text-xs sm:text-sm">المبلغ *</Label>
                       <Input
                         id="paymentAmount"
                         type="number"
@@ -2629,7 +2630,7 @@ export function Installments() {
                           }
                         }}
                         placeholder="أدخل المبلغ"
-                        className="text-lg font-semibold"
+                        className="text-base sm:text-lg font-semibold"
                       />
                       {isInstallmentSale ? (
                         <p className="text-xs text-muted-foreground">
@@ -2642,7 +2643,7 @@ export function Installments() {
                       )}
                     </div>
 
-                    <p className="text-sm text-muted-foreground">
+                    <p className="text-xs sm:text-sm text-muted-foreground">
                       المتبقي بعد الدفع:{' '}
                       <span className="font-medium">
                         {formatCurrency(
@@ -2658,7 +2659,7 @@ export function Installments() {
               })()}
             </div>
           )}
-          <DialogFooter className="flex-col sm:flex-row gap-2">
+          <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setPaymentDialogOpen(false)} className="w-full sm:w-auto">
               إلغاء
             </Button>

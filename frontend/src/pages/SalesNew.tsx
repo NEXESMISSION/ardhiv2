@@ -1766,10 +1766,10 @@ export function SalesNew() {
           <DialogHeader>
             <DialogTitle>بيع جديد</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4">
+          <div className="space-y-3 sm:space-y-4">
             <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label>العميل</Label>
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+                <Label className="text-xs sm:text-sm">العميل</Label>
                 <Button
                   type="button"
                   variant="outline"
@@ -1777,8 +1777,9 @@ export function SalesNew() {
                   onClick={() => {
                     setNewClientOpen(true)
                   }}
+                  className="w-full sm:w-auto text-xs sm:text-sm"
                 >
-                  <Plus className="h-4 w-4 ml-1" />
+                  <Plus className="h-3 w-3 sm:h-4 sm:w-4 ml-1" />
                   إضافة عميل جديد
                 </Button>
               </div>
@@ -1825,7 +1826,7 @@ export function SalesNew() {
             </div>
 
             <div className="space-y-2">
-              <Label>قطع الأرض ({selectedPieces.length} محددة)</Label>
+              <Label className="text-xs sm:text-sm">قطع الأرض ({selectedPieces.length} محددة)</Label>
               <div className="space-y-2">
                 <Select 
                   value={pieceBatchFilter} 
@@ -1834,7 +1835,7 @@ export function SalesNew() {
                     setSelectedPieces([]) // Clear selected pieces when changing batch
                     setPieceSearch('') // Clear search when changing batch
                   }} 
-                  className="w-full"
+                  className="w-full text-xs sm:text-sm"
                 >
                   <option value="">اختر موقع الأرض / الدفعة</option>
                   {availableBatchNames.map(batch => (
@@ -1852,14 +1853,14 @@ export function SalesNew() {
                   setPieceSearch(e.target.value)
                   debouncedPieceSearchFn(e.target.value)
                 }}
-                      className="w-full"
+                      className="w-full text-xs sm:text-sm"
               />
-              <div className="max-h-40 overflow-y-auto border rounded-md p-2 space-y-1">
+              <div className="max-h-32 sm:max-h-40 overflow-y-auto border rounded-md p-2 space-y-1">
                 {filteredAvailablePieces.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">لا توجد قطع متاحة</p>
+                  <p className="text-xs sm:text-sm text-muted-foreground">لا توجد قطع متاحة</p>
                 ) : (
                   filteredAvailablePieces.map((piece: any) => (
-                    <label key={piece.id} className="flex items-center gap-2 p-1 hover:bg-gray-50 rounded cursor-pointer">
+                    <label key={piece.id} className="flex items-center gap-2 p-1.5 hover:bg-gray-50 rounded cursor-pointer">
                       <input
                         type="checkbox"
                         checked={selectedPieces.includes(piece.id)}
@@ -1872,7 +1873,7 @@ export function SalesNew() {
                         }}
                         className="rounded"
                       />
-                      <span className="text-sm">
+                      <span className="text-xs sm:text-sm">
                               #{piece.piece_number} ({piece.surface_area} م²)
                       </span>
                     </label>
@@ -1887,7 +1888,7 @@ export function SalesNew() {
                   </>
                 )}
                 {!pieceBatchFilter && (
-                  <p className="text-sm text-muted-foreground text-center py-4">
+                  <p className="text-xs sm:text-sm text-muted-foreground text-center py-4">
                     يرجى اختيار موقع الأرض / الدفعة أولاً
                 </p>
               )}
@@ -1895,23 +1896,24 @@ export function SalesNew() {
             </div>
 
             <div className="space-y-2">
-              <Label>نوع الدفع</Label>
-              <Select value={paymentType} onChange={e => setPaymentType(e.target.value as any)}>
+              <Label className="text-xs sm:text-sm">نوع الدفع</Label>
+              <Select value={paymentType} onChange={e => setPaymentType(e.target.value as any)} className="text-xs sm:text-sm">
                 <option value="Full">بالحاضر</option>
                 <option value="Installment">بالتقسيط</option>
               </Select>
             </div>
 
             <div className="space-y-2">
-              <Label>العربون (مبلغ الحجز)</Label>
+              <Label className="text-xs sm:text-sm">العربون (مبلغ الحجز)</Label>
               <Input
                 type="number"
                 value={reservationAmount}
                 onChange={e => setReservationAmount(e.target.value)}
                 placeholder="أدخل مبلغ العربون"
+                className="text-xs sm:text-sm"
               />
               {reservationAmount && selectedPieces.length > 0 && calculatedTotalPrice > 0 && (
-                <p className="text-sm text-muted-foreground">
+                <p className="text-xs sm:text-sm text-muted-foreground">
                   المتبقي: {formatCurrency(calculatedTotalPrice)}
                   <span className="mr-2">(العربون سيُضاف للدفعة الأولى)</span>
                 </p>
@@ -1920,13 +1922,14 @@ export function SalesNew() {
 
 
               <div className="space-y-2">
-              <Label htmlFor="deadlineDate">آخر أجل لإتمام الإجراءات (اختياري)</Label>
+              <Label htmlFor="deadlineDate" className="text-xs sm:text-sm">آخر أجل لإتمام الإجراءات (اختياري)</Label>
                 <Input
                 id="deadlineDate"
                 type="date"
                 value={deadlineDate}
                 onChange={e => setDeadlineDate(e.target.value)}
                 min={new Date().toISOString().split('T')[0]}
+                className="text-xs sm:text-sm"
                 />
                 <p className="text-xs text-muted-foreground">
                 تاريخ آخر أجل لإتمام إجراءات البيع. سيتم عرض تحذيرات عند اقتراب الموعد النهائي.
@@ -1935,7 +1938,7 @@ export function SalesNew() {
 
 
           </div>
-          <DialogFooter className="flex-col sm:flex-row gap-2">
+          <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setNewSaleOpen(false)} className="w-full sm:w-auto">
               إلغاء
             </Button>
@@ -1953,18 +1956,18 @@ export function SalesNew() {
             <DialogTitle>تأكيد الدفع الكامل</DialogTitle>
           </DialogHeader>
           {selectedSale && (
-            <div className="space-y-4">
-              <div className="bg-muted/50 p-4 rounded-lg space-y-2">
+            <div className="space-y-3 sm:space-y-4">
+              <div className="bg-muted/50 p-3 sm:p-4 rounded-lg space-y-2 text-xs sm:text-sm">
                 <p><strong>العميل:</strong> {selectedSale.clientName}</p>
                 <p><strong>القطعة:</strong> {selectedSale.batchName} - {selectedSale.pieceName}</p>
                 <p><strong>السعر:</strong> {formatCurrency(selectedSale.price)}</p>
               </div>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-xs sm:text-sm text-muted-foreground">
                 سيتم تأكيد استلام الدفعة الكاملة وتحويل حالة القطعة إلى "مباعة".
               </p>
             </div>
           )}
-          <DialogFooter className="flex-col sm:flex-row gap-2">
+          <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setConfirmFullOpen(false)} className="w-full sm:w-auto">
               إلغاء
             </Button>
@@ -1982,8 +1985,8 @@ export function SalesNew() {
             <DialogTitle>تأكيد الدفعة الأولى وإنشاء جدول الأقساط</DialogTitle>
           </DialogHeader>
           {selectedSale && (
-            <div className="space-y-4">
-              <div className="bg-muted/50 p-4 rounded-lg space-y-2">
+            <div className="space-y-3 sm:space-y-4">
+              <div className="bg-muted/50 p-3 sm:p-4 rounded-lg space-y-2 text-xs sm:text-sm">
                 <p><strong>العميل:</strong> {selectedSale.clientName}</p>
                 <p><strong>القطعة:</strong> {selectedSale.batchName} - {selectedSale.pieceName}</p>
                 <p><strong>السعر الإجمالي:</strong> {formatCurrency(selectedSale.price)}</p>
@@ -1993,7 +1996,7 @@ export function SalesNew() {
               </div>
 
               <div className="space-y-2">
-                <Label>عدد الأشهر</Label>
+                <Label className="text-xs sm:text-sm">عدد الأشهر</Label>
                 <Input
                   type="number"
                   value={numberOfInstallments}
@@ -2001,6 +2004,7 @@ export function SalesNew() {
                   placeholder="أدخل عدد الأشهر (مثال: 12)"
                   min="1"
                   max="120"
+                  className="text-xs sm:text-sm"
                 />
                 <p className="text-xs text-muted-foreground">
                   عدد الأشهر لسداد المبلغ المتبقي
