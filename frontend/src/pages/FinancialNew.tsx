@@ -20,7 +20,7 @@ import {
 } from '@/components/ui/dialog'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { retryWithBackoff, isRetryableError } from '@/lib/retry'
-import { DollarSign, CreditCard, TrendingUp, X } from 'lucide-react'
+import { DollarSign, CreditCard, TrendingUp, X, ChevronDown, ChevronUp } from 'lucide-react'
 import type { Sale, Client, Payment, LandPiece, LandBatch } from '@/types/database'
 
 interface SaleWithClient extends Sale {
@@ -86,8 +86,7 @@ export function Financial() {
   const [landPieces, setLandPieces] = useState<Array<LandPiece & { land_batch?: LandBatch }>>([])
   const [loading, setLoading] = useState(true)
   const [dateFilter, setDateFilter] = useState<DateFilter>('today')
-  const [paymentDetailDialogOpen, setPaymentDetailDialogOpen] = useState(false)
-  const [selectedPaymentType, setSelectedPaymentType] = useState<PaymentTypeFilter>(null)
+  const [expandedPaymentType, setExpandedPaymentType] = useState<PaymentTypeFilter | null>(null)
   const [companyFeeDialogOpen, setCompanyFeeDialogOpen] = useState(false)
 
   useEffect(() => {

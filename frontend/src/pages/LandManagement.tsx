@@ -1524,62 +1524,120 @@ export function LandManagement() {
               {(!batch.land_pieces || batch.land_pieces.length === 0) ? (
                 <p className="text-center text-muted-foreground py-4">لا توجد قطع</p>
               ) : (
-                <div className="overflow-x-auto -mx-4 sm:mx-0 px-4 sm:px-0" style={{ WebkitOverflowScrolling: 'touch' }}>
-                  <Table className="min-w-full">
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>رقم القطعة</TableHead>
-                        <TableHead>المساحة</TableHead>
-                        <TableHead>السعر (كامل)</TableHead>
-                        <TableHead>السعر (أقساط)</TableHead>
-                        <TableHead>الحالة</TableHead>
-                        {hasPermission('edit_land') && <TableHead>إجراء</TableHead>}
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {batch.land_pieces.map((piece) => (
-                        <TableRow key={piece.id}>
-                          <TableCell className="font-medium">{piece.piece_number}</TableCell>
-                          <TableCell>{piece.surface_area} م²</TableCell>
-                          <TableCell className="font-medium text-green-600">{formatCurrency(piece.selling_price_full || 0)}</TableCell>
-                          <TableCell className="font-medium text-blue-600">{formatCurrency(piece.selling_price_installment || 0)}</TableCell>
-                          <TableCell>
+                <>
+                  {/* Mobile Card View */}
+                  <div className="grid grid-cols-1 gap-3 md:hidden">
+                    {batch.land_pieces.map((piece) => (
+                      <Card key={piece.id} className="p-4">
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <div className="flex-1">
+                              <div className="font-semibold text-base">{piece.piece_number}</div>
+                              <div className="text-sm text-muted-foreground mt-1">{piece.surface_area} م²</div>
+                            </div>
                             <Badge variant={statusColors[piece.status]}>
                               {piece.status === 'Available' ? 'متاح' :
                                piece.status === 'Reserved' ? 'محجوز' :
                                piece.status === 'Sold' ? 'مباع' : 'ملغي'}
                             </Badge>
-                          </TableCell>
+                          </div>
+                          <div className="grid grid-cols-2 gap-3 text-sm">
+                            <div>
+                              <span className="text-muted-foreground text-xs">السعر (كامل):</span>
+                              <div className="font-medium text-green-600">{formatCurrency(piece.selling_price_full || 0)}</div>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground text-xs">السعر (أقساط):</span>
+                              <div className="font-medium text-blue-600">{formatCurrency(piece.selling_price_installment || 0)}</div>
+                            </div>
+                          </div>
                           {hasPermission('edit_land') && (
-                            <TableCell>
-                              <div className="flex items-center gap-1">
+                            <div className="flex items-center gap-2 pt-2 border-t">
                               <Button
-                                variant="ghost"
-                                size="icon"
+                                variant="outline"
+                                size="sm"
                                 onClick={() => openPieceDialog(batch.id, piece)}
-                                  className="h-8 w-8"
+                                className="flex-1"
                               >
-                                <Edit className="h-4 w-4" />
+                                <Edit className="h-4 w-4 ml-2" />
+                                تعديل
                               </Button>
-                                {user?.role === 'Owner' && (
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    onClick={() => openPriceEditDialog(batch.id, piece)}
-                                    className="h-8 w-8 text-blue-600"
-                                    title="تعديل الأسعار"
-                                  >
-                                    <DollarSign className="h-4 w-4" />
-                                  </Button>
-                                )}
-                              </div>
-                            </TableCell>
+                              {user?.role === 'Owner' && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => openPriceEditDialog(batch.id, piece)}
+                                  className="flex-1 text-blue-600"
+                                  title="تعديل الأسعار"
+                                >
+                                  <DollarSign className="h-4 w-4 ml-2" />
+                                  الأسعار
+                                </Button>
+                              )}
+                            </div>
                           )}
+                        </div>
+                      </Card>
+                    ))}
+                  </div>
+                  {/* Desktop Table View */}
+                  <div className="hidden md:block overflow-x-auto -mx-4 sm:mx-0 px-4 sm:px-0" style={{ WebkitOverflowScrolling: 'touch' }}>
+                    <Table className="min-w-full">
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>رقم القطعة</TableHead>
+                          <TableHead>المساحة</TableHead>
+                          <TableHead>السعر (كامل)</TableHead>
+                          <TableHead>السعر (أقساط)</TableHead>
+                          <TableHead>الحالة</TableHead>
+                          {hasPermission('edit_land') && <TableHead>إجراء</TableHead>}
                         </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
+                      </TableHeader>
+                      <TableBody>
+                        {batch.land_pieces.map((piece) => (
+                          <TableRow key={piece.id}>
+                            <TableCell className="font-medium">{piece.piece_number}</TableCell>
+                            <TableCell>{piece.surface_area} م²</TableCell>
+                            <TableCell className="font-medium text-green-600">{formatCurrency(piece.selling_price_full || 0)}</TableCell>
+                            <TableCell className="font-medium text-blue-600">{formatCurrency(piece.selling_price_installment || 0)}</TableCell>
+                            <TableCell>
+                              <Badge variant={statusColors[piece.status]}>
+                                {piece.status === 'Available' ? 'متاح' :
+                                 piece.status === 'Reserved' ? 'محجوز' :
+                                 piece.status === 'Sold' ? 'مباع' : 'ملغي'}
+                              </Badge>
+                            </TableCell>
+                            {hasPermission('edit_land') && (
+                              <TableCell>
+                                <div className="flex items-center gap-1">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => openPieceDialog(batch.id, piece)}
+                                    className="h-8 w-8"
+                                >
+                                  <Edit className="h-4 w-4" />
+                                </Button>
+                                  {user?.role === 'Owner' && (
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      onClick={() => openPriceEditDialog(batch.id, piece)}
+                                      className="h-8 w-8 text-blue-600"
+                                      title="تعديل الأسعار"
+                                    >
+                                      <DollarSign className="h-4 w-4" />
+                                    </Button>
+                                  )}
+                                </div>
+                              </TableCell>
+                            )}
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </>
               )}
             </CardContent>
           )}

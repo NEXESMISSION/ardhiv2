@@ -827,15 +827,14 @@ export function Installments() {
       // DON'T close dialog until refresh is complete - keep user informed
       // setPaymentDialogOpen(false) // Moved below
       
-      // Wait for database to commit the transaction
-      // Using longer delay to ensure PostgreSQL transaction is committed
-      await new Promise(resolve => setTimeout(resolve, 800))
+      // Minimal delay for database commit (reduced from 800ms to 200ms)
+      await new Promise(resolve => setTimeout(resolve, 200))
       
       // CRITICAL: Refresh installments data to update UI
-      // Retry up to 3 times if initial fetch fails
+      // Retry up to 2 times if initial fetch fails (reduced from 3)
       let refreshSuccess = false
-      for (let attempt = 1; attempt <= 3; attempt++) {
-        console.log(`[recordPayment] Refresh attempt ${attempt}/3...`)
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        console.log(`[recordPayment] Refresh attempt ${attempt}/2...`)
         try {
           refreshSuccess = await fetchInstallments()
           if (refreshSuccess) {
@@ -846,8 +845,8 @@ export function Installments() {
           console.error(`[recordPayment] Refresh attempt ${attempt} failed:`, fetchError)
         }
         
-        if (attempt < 3) {
-          await new Promise(resolve => setTimeout(resolve, 500))
+        if (attempt < 2) {
+          await new Promise(resolve => setTimeout(resolve, 200)) // Reduced from 500ms
         }
       }
       
@@ -861,8 +860,8 @@ export function Installments() {
       if (wasDetailsDrawerOpen) {
         console.log('[recordPayment] Refreshing details drawer...')
         
-        // Wait a bit more to ensure database consistency
-        await new Promise(resolve => setTimeout(resolve, 300))
+        // Minimal delay for database consistency (reduced from 300ms to 100ms)
+        await new Promise(resolve => setTimeout(resolve, 100))
         
         try {
           // Fetch fresh installments for this sale from database
@@ -1422,13 +1421,19 @@ export function Installments() {
       {/* Compact Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <h1 className="text-2xl sm:text-3xl font-bold">الأقساط</h1>
-        <div className="flex flex-wrap gap-2 sm:gap-4 text-xs sm:text-sm">
-          <span>مدفوع: <strong className="text-green-600">{formatCurrency(stats.totalPaid)}</strong></span>
-          <span>متبقي: <strong>{formatCurrency(stats.totalDue - stats.totalPaid)}</strong></span>
-          {stats.totalOverdue > 0 && (
-            <span className="text-red-600">متأخر: <strong>{formatCurrency(stats.totalOverdue)}</strong></span>
-          )}
-        </div>
+        {filterStatus !== 'Paid' || dealsTableData.length > 0 ? (
+          <div className="flex flex-wrap gap-2 sm:gap-4 text-xs sm:text-sm">
+            <span>مدفوع: <strong className="text-green-600">{formatCurrency(stats.totalPaid)}</strong></span>
+            <span>متبقي: <strong>{formatCurrency(stats.totalDue - stats.totalPaid)}</strong></span>
+            {stats.totalOverdue > 0 && (
+              <span className="text-red-600">متأخر: <strong>{formatCurrency(stats.totalOverdue)}</strong></span>
+            )}
+          </div>
+        ) : (
+          <div className="text-xs sm:text-sm text-muted-foreground">
+            لا توجد أقساط مدفوعة جزئياً
+          </div>
+        )}
       </div>
 
       {/* Monthly Summary - Compact */}
