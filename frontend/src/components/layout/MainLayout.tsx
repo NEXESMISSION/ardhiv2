@@ -4,6 +4,7 @@ import { Sidebar } from './Sidebar'
 import { Menu, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { PullToRefresh } from './PullToRefresh'
+import { useSwipeGesture } from '@/hooks/useSwipeGesture'
 
 export function MainLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -13,6 +14,25 @@ export function MainLayout() {
   const handleRefresh = useCallback(async () => {
     window.location.reload()
   }, [])
+
+  // Swipe left from right edge to open sidebar
+  useSwipeGesture({
+    onSwipeLeft: () => {
+      // Only open sidebar on mobile (when it's closed)
+      if (window.innerWidth < 768 && !sidebarOpen) {
+        setSidebarOpen(true)
+      }
+    },
+    onSwipeRight: () => {
+      // Swipe right to close sidebar (when it's open)
+      if (sidebarOpen) {
+        setSidebarOpen(false)
+      }
+    },
+    threshold: 80, // Start swipe detection within 80px of right edge
+    minSwipeDistance: 50,
+    disabled: false,
+  })
 
   // Scroll to top on route change - ensure it works reliably
   useEffect(() => {
