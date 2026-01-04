@@ -327,11 +327,11 @@ export function Clients() {
   }
 
   return (
-    <div className="space-y-6 p-4 sm:p-6">
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+    <div className="space-y-3 sm:space-y-4 md:space-y-6 p-3 sm:p-4 md:p-6">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-bold">إدارة العملاء</h1>
-          <p className="text-muted-foreground text-sm sm:text-base">إدارة عملائك ومعلوماتهم</p>
+          <h1 className="text-xl sm:text-2xl md:text-3xl font-bold">إدارة العملاء</h1>
+          <p className="text-muted-foreground text-xs sm:text-sm md:text-base mt-1">إدارة عملائك ومعلوماتهم</p>
         </div>
         {hasPermission('edit_clients') && (
           <Button onClick={() => openDialog()} className="w-full sm:w-auto">
@@ -343,7 +343,7 @@ export function Clients() {
 
       {/* Search */}
       <Card>
-        <CardContent className="pt-6">
+        <CardContent className="p-3 sm:p-4 md:p-6 pt-4 sm:pt-5 md:pt-6">
           <Input
             placeholder="البحث بالاسم، رقم الهوية، أو الهاتف..."
             value={searchTerm}
@@ -352,18 +352,19 @@ export function Clients() {
               debouncedSearchFn(e.target.value)
             }}
             maxLength={255}
+            className="text-sm sm:text-base"
           />
         </CardContent>
       </Card>
 
       {/* Clients Table */}
       <Card>
-        <CardContent className="pt-6">
+        <CardContent className="p-0 sm:p-3 md:p-6 pt-3 sm:pt-4 md:pt-6">
           {filteredClients.length === 0 ? (
-            <p className="text-center text-muted-foreground py-8">لا توجد عملاء</p>
+            <p className="text-center text-muted-foreground py-6 sm:py-8 text-sm sm:text-base">لا توجد عملاء</p>
           ) : (
-            <div className="overflow-x-auto -mx-4 sm:mx-0 px-4 sm:px-0" style={{ WebkitOverflowScrolling: 'touch' }}>
-            <Table className="min-w-full">
+            <div className="overflow-x-auto -mx-3 sm:-mx-3 md:mx-0 px-3 sm:px-3 md:px-0" style={{ WebkitOverflowScrolling: 'touch' }}>
+            <Table className="min-w-full text-sm sm:text-base">
               <TableHeader>
                 <TableRow>
                   <TableHead>الاسم</TableHead>
@@ -448,14 +449,14 @@ export function Clients() {
 
       {/* Client Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="w-[95vw] sm:w-full max-w-2xl max-h-[95vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>{editingClient ? 'تعديل العميل' : 'إضافة عميل جديد'}</DialogTitle>
+          <DialogContent className="w-[95vw] sm:w-full max-w-2xl max-h-[95vh] overflow-y-auto p-4 sm:p-6">
+          <DialogHeader className="pb-3 sm:pb-4">
+            <DialogTitle className="text-lg sm:text-xl">{editingClient ? 'تعديل العميل' : 'إضافة عميل جديد'}</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="name">الاسم</Label>
+          <div className="space-y-3 sm:space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+              <div className="space-y-1.5 sm:space-y-2">
+                <Label htmlFor="name" className="text-sm sm:text-base">الاسم</Label>
                 <Input
                   id="name"
                   value={form.name}
@@ -463,48 +464,52 @@ export function Clients() {
                   maxLength={255}
                 />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="cin">رقم الهوية</Label>
+              <div className="space-y-1.5 sm:space-y-2">
+                <Label htmlFor="cin" className="text-sm sm:text-base">رقم الهوية</Label>
                 <Input
                   id="cin"
                   value={form.cin}
                   onChange={(e) => setForm({ ...form, cin: e.target.value })}
                   maxLength={50}
+                  className="text-sm sm:text-base"
                 />
               </div>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="phone">الهاتف</Label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+              <div className="space-y-1.5 sm:space-y-2">
+                <Label htmlFor="phone" className="text-sm sm:text-base">الهاتف</Label>
                 <Input
                   id="phone"
                   value={form.phone}
                   onChange={(e) => setForm({ ...form, phone: e.target.value })}
                   maxLength={20}
+                  className="text-sm sm:text-base"
                 />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="email">البريد الإلكتروني</Label>
+              <div className="space-y-1.5 sm:space-y-2">
+                <Label htmlFor="email" className="text-sm sm:text-base">البريد الإلكتروني</Label>
                 <Input
                   id="email"
                   type="email"
                   value={form.email}
                   onChange={(e) => setForm({ ...form, email: e.target.value })}
                   maxLength={254}
+                  className="text-sm sm:text-base"
                 />
               </div>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="address">العنوان</Label>
+            <div className="space-y-1.5 sm:space-y-2">
+              <Label htmlFor="address" className="text-sm sm:text-base">العنوان</Label>
               <Input
                 id="address"
                 value={form.address}
                 onChange={(e) => setForm({ ...form, address: e.target.value })}
                 maxLength={500}
+                className="text-sm sm:text-base"
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="notes">ملاحظات</Label>
+            <div className="space-y-1.5 sm:space-y-2">
+              <Label htmlFor="notes" className="text-sm sm:text-base">ملاحظات</Label>
               <Textarea
                 id="notes"
                 value={form.notes}
@@ -513,61 +518,61 @@ export function Clients() {
               />
             </div>
             {errorMessage && (
-              <div className="bg-destructive/10 text-destructive p-3 rounded-md text-sm">
+              <div className="bg-destructive/10 text-destructive p-2.5 sm:p-3 rounded-md text-xs sm:text-sm">
                 {errorMessage}
               </div>
             )}
           </div>
-          <DialogFooter className="flex-col sm:flex-row gap-2">
+          <DialogFooter className="flex-col sm:flex-row gap-2 pt-3 sm:pt-4">
             <Button variant="outline" onClick={() => {
               setDialogOpen(false)
               setErrorMessage(null)
-            }} className="w-full sm:w-auto">
+            }} className="w-full sm:w-auto text-sm sm:text-base">
               إلغاء
             </Button>
-            <Button onClick={saveClient} disabled={saving} className="w-full sm:w-auto">حفظ</Button>
+            <Button onClick={saveClient} disabled={saving} className="w-full sm:w-auto text-sm sm:text-base">حفظ</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* Details Dialog */}
       <Dialog open={detailsOpen} onOpenChange={setDetailsOpen}>
-        <DialogContent className="w-[95vw] sm:w-full max-w-2xl max-h-[95vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>تفاصيل العميل</DialogTitle>
+        <DialogContent className="w-[95vw] sm:w-full max-w-2xl max-h-[95vh] overflow-y-auto p-4 sm:p-6">
+          <DialogHeader className="pb-3 sm:pb-4">
+            <DialogTitle className="text-lg sm:text-xl">تفاصيل العميل</DialogTitle>
           </DialogHeader>
           {selectedClient && (
-            <div className="space-y-6">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-4 sm:space-y-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                 <div>
-                  <p className="text-sm text-muted-foreground">الاسم</p>
-                  <p className="font-medium">{selectedClient.name}</p>
+                  <p className="text-xs sm:text-sm text-muted-foreground mb-1">الاسم</p>
+                  <p className="font-medium text-sm sm:text-base">{selectedClient.name}</p>
                 </div>
                 <div>
-                  <p className="text-sm text-muted-foreground">رقم CIN</p>
-                  <p className="font-medium">{selectedClient.cin}</p>
+                  <p className="text-xs sm:text-sm text-muted-foreground mb-1">رقم CIN</p>
+                  <p className="font-medium text-sm sm:text-base">{selectedClient.cin}</p>
                 </div>
                 <div>
-                  <p className="text-sm text-muted-foreground">رقم الهاتف</p>
-                  <p className="font-medium">{selectedClient.phone || '-'}</p>
+                  <p className="text-xs sm:text-sm text-muted-foreground mb-1">رقم الهاتف</p>
+                  <p className="font-medium text-sm sm:text-base">{selectedClient.phone || '-'}</p>
                 </div>
                 <div>
-                  <p className="text-sm text-muted-foreground">البريد الإلكتروني</p>
-                  <p className="font-medium">{selectedClient.email || '-'}</p>
+                  <p className="text-xs sm:text-sm text-muted-foreground mb-1">البريد الإلكتروني</p>
+                  <p className="font-medium text-sm sm:text-base">{selectedClient.email || '-'}</p>
                 </div>
                 {selectedClient.address && (
                   <div className="sm:col-span-2">
-                    <p className="text-sm text-muted-foreground">العنوان</p>
-                    <p className="font-medium">{selectedClient.address}</p>
+                    <p className="text-xs sm:text-sm text-muted-foreground mb-1">العنوان</p>
+                    <p className="font-medium text-sm sm:text-base">{selectedClient.address}</p>
                   </div>
                 )}
               </div>
 
               {selectedClient.sales && selectedClient.sales.length > 0 && (
                 <div>
-                  <h4 className="font-semibold mb-3 text-lg">سجل المبيعات</h4>
-                  <div className="overflow-x-auto">
-                  <Table>
+                  <h4 className="font-semibold mb-2 sm:mb-3 text-base sm:text-lg">سجل المبيعات</h4>
+                  <div className="overflow-x-auto -mx-4 sm:mx-0 px-4 sm:px-0">
+                  <Table className="text-xs sm:text-sm">
                     <TableHeader>
                       <TableRow className="bg-gray-100">
                         <TableHead className="font-semibold">التاريخ</TableHead>

@@ -111,6 +111,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (initializedRef.current) return
     initializedRef.current = true
     
+    // Hard timeout to prevent infinite loading (15 seconds)
+    const loadingTimeout = setTimeout(() => {
+      console.warn('Loading timeout reached - forcing loading to stop')
+      setLoading(false)
+      setProfileLoading(false)
+      fetchingRef.current = false
+    }, 15000)
+    
     // Use retry mechanism for initial session fetch
     retryWithBackoff(
       async () => {
@@ -127,19 +135,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     )
       .then((session) => {
-      setSession(session)
-      setUser(session?.user ?? null)
-      if (session?.user) {
-        fetchProfile(session.user.id)
-      } else {
-        setLoading(false)
-      }
+        clearTimeout(loadingTimeout)
+        setSession(session)
+        setUser(session?.user ?? null)
+        if (session?.user) {
+          fetchProfile(session.user.id)
+        } else {
+          setLoading(false)
+        }
       })
       .catch((error) => {
+        clearTimeout(loadingTimeout)
         console.error('Failed to get session:', error)
         // Still allow app to load, user can try logging in
-      setLoading(false)
-    })
+        setLoading(false)
+      })
+    
+    return () => {
+      clearTimeout(loadingTimeout)
+    }
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
@@ -165,6 +179,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (fetchingRef.current) return
     fetchingRef.current = true
     setProfileLoading(true)
+    
+    // Hard timeout to prevent infinite loading (15 seconds)
+    const profileTimeout = setTimeout(() => {
+      console.warn('Profile loading timeout reached - forcing loading to stop')
+      setProfileLoading(false)
+      fetchingRef.current = false
+    }, 15000)
     
     try {
       // Use retry mechanism for profile fetch
@@ -265,7 +286,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       )
       
-        setProfile(data)
+        clearTimeout(profileTimeout)
+      setProfile(data)
         
         // Fetch custom user permissions if not Owner
         if (data.role !== 'Owner') {
@@ -275,6 +297,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setUserPermissions({})
       }
     } catch (error) {
+      clearTimeout(profileTimeout)
       console.error('Failed to fetch profile:', error)
       // If it's a retryable error, show a message but don't block
       if (isRetryableError(error as Error)) {
@@ -283,6 +306,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setProfile(null)
       setUserPermissions({})
     } finally {
+      clearTimeout(profileTimeout)
       fetchingRef.current = false
       setProfileLoading(false)
       setLoading(false)

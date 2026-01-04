@@ -1,12 +1,18 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Outlet, useLocation } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
 import { Menu, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { PullToRefresh } from './PullToRefresh'
 
 export function MainLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const location = useLocation()
+
+  // Pull to refresh handler - reload the page
+  const handleRefresh = useCallback(async () => {
+    window.location.reload()
+  }, [])
 
   // Scroll to top on route change - ensure it works reliably
   useEffect(() => {
@@ -65,6 +71,7 @@ export function MainLayout() {
       )}
 
       <main className="flex-1 w-full md:ml-0 min-h-screen">
+        <PullToRefresh onRefresh={handleRefresh} />
         <div className="container mx-auto p-4 sm:p-6 pb-8">
           <Outlet />
         </div>
