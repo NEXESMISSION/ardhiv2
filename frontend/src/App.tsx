@@ -114,14 +114,14 @@ function AppRoutes() {
     } else {
       // No explicit page access - use role permissions
       if (permission && !hasPermission(permission)) {
-        return (
-          <div className="flex h-screen items-center justify-center">
-            <div className="text-center">
-              <h2 className="text-2xl font-bold mb-2">غير مصرح</h2>
-              <p className="text-muted-foreground">ليس لديك صلاحية للوصول إلى هذه الصفحة</p>
-            </div>
+      return (
+        <div className="flex h-screen items-center justify-center">
+          <div className="text-center">
+            <h2 className="text-2xl font-bold mb-2">غير مصرح</h2>
+            <p className="text-muted-foreground">ليس لديك صلاحية للوصول إلى هذه الصفحة</p>
           </div>
-        )
+        </div>
+      )
       }
     }
 

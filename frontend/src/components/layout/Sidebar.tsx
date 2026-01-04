@@ -84,7 +84,7 @@ export function Sidebar({ onClose }: SidebarProps) {
             if (!hasPageAccess(item.pageId)) return null
           } else {
             // No explicit page access configured - use role permissions
-            if (item.permission && !hasPermission(item.permission)) return null
+          if (item.permission && !hasPermission(item.permission)) return null
           }
 
           return (

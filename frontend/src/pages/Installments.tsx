@@ -2694,7 +2694,7 @@ export function Installments() {
         <DialogContent className="w-[95vw] sm:w-full max-w-4xl max-h-[95vh] overflow-y-auto">
           <DialogHeader>
             <div className="flex items-center justify-between">
-              <DialogTitle>تفاصيل الصفقة</DialogTitle>
+            <DialogTitle>تفاصيل الصفقة</DialogTitle>
               {selectedSaleForDetails && (
                 <Button
                   variant="ghost"

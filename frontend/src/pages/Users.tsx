@@ -1120,20 +1120,20 @@ export function Users() {
               <div className="flex items-center gap-4 p-4 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border">
                 <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-full flex items-center justify-center text-white text-2xl font-bold shadow-lg">
                   {selectedUserForDetails.name.charAt(0).toUpperCase()}
-                </div>
+                    </div>
                 <div className="flex-1">
                   <h2 className="text-xl font-bold text-gray-900">{selectedUserForDetails.name}</h2>
                   <p className="text-sm text-gray-600">{selectedUserForDetails.email}</p>
                   <div className="flex items-center gap-2 mt-1">
                     <Badge variant={roleColors[selectedUserForDetails.role]} className="text-xs">
-                      {selectedUserForDetails.role === 'Owner' ? 'مالك' : 
+                        {selectedUserForDetails.role === 'Owner' ? 'مالك' : 
                        selectedUserForDetails.role === 'Manager' ? 'مدير' : 'موظف ميداني'}
-                    </Badge>
+                      </Badge>
                     <Badge variant={selectedUserForDetails.status === 'Active' ? 'success' : 'secondary'} className="text-xs">
-                      {selectedUserForDetails.status === 'Active' ? 'نشط' : 'غير نشط'}
-                    </Badge>
+                        {selectedUserForDetails.status === 'Active' ? 'نشط' : 'غير نشط'}
+                      </Badge>
+                    </div>
                   </div>
-                </div>
                 <div className="text-left">
                   <p className="text-xs text-gray-500">تاريخ الانضمام</p>
                   <p className="text-sm font-medium">{formatDate(selectedUserForDetails.created_at)}</p>
@@ -1146,17 +1146,17 @@ export function Users() {
                   <ShoppingCart className="h-4 w-4 text-blue-600 mx-auto mb-1" />
                   <p className="text-lg font-bold text-blue-900">{userCreatedSales.length}</p>
                   <p className="text-[10px] text-blue-700">مبيعات</p>
-                </div>
+                        </div>
                 <div className="text-center p-2 bg-green-50 rounded-lg">
                   <CheckCircle2 className="h-4 w-4 text-green-600 mx-auto mb-1" />
                   <p className="text-lg font-bold text-green-900">{userConfirmedSales.length}</p>
                   <p className="text-[10px] text-green-700">مؤكدة</p>
-                </div>
+                        </div>
                 <div className="text-center p-2 bg-purple-50 rounded-lg">
                   <CreditCard className="h-4 w-4 text-purple-600 mx-auto mb-1" />
                   <p className="text-lg font-bold text-purple-900">{userPayments.length}</p>
                   <p className="text-[10px] text-purple-700">دفعات</p>
-                </div>
+                  </div>
                 <div className="text-center p-2 bg-indigo-50 rounded-lg">
                   <UsersIcon className="h-4 w-4 text-indigo-600 mx-auto mb-1" />
                   <p className="text-lg font-bold text-indigo-900">{userClients.length}</p>
@@ -1210,12 +1210,12 @@ export function Users() {
 
               {/* Tab Content */}
               <div className="flex-1 overflow-y-auto p-1">
-                {loadingDetails ? (
+              {loadingDetails ? (
                   <div className="flex items-center justify-center h-40">
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
                   </div>
-                ) : (
-                  <>
+              ) : (
+                <>
                     {/* Overview Tab */}
                     {detailsTab === 'overview' && (
                       <div className="space-y-4">
@@ -1273,7 +1273,7 @@ export function Users() {
                             {userCreatedSales.length === 0 && userPayments.length === 0 && userClients.length === 0 && (
                               <p className="text-center text-gray-500 text-sm py-4">لا يوجد نشاط بعد</p>
                             )}
-                          </div>
+                        </div>
                         </div>
 
                         {/* Allowed Pages */}
@@ -1318,9 +1318,9 @@ export function Users() {
                         {userCreatedSales.length === 0 && userConfirmedSales.length === 0 ? (
                           <p className="text-center text-gray-500 py-8">لا توجد مبيعات</p>
                         ) : (
-                          <div className="overflow-x-auto">
-                            <Table>
-                              <TableHeader>
+                        <div className="overflow-x-auto">
+                          <Table>
+                            <TableHeader>
                                 <TableRow className="bg-gray-50">
                                   <TableHead className="text-xs">التاريخ</TableHead>
                                   <TableHead className="text-xs">العميل</TableHead>
@@ -1328,9 +1328,9 @@ export function Users() {
                                   <TableHead className="text-xs text-right">المبلغ</TableHead>
                                   <TableHead className="text-xs">الحالة</TableHead>
                                   <TableHead className="text-xs">الإجراء</TableHead>
-                                </TableRow>
-                              </TableHeader>
-                              <TableBody>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
                                 {[...userCreatedSales, ...userConfirmedSales.filter(cs => !userCreatedSales.find(s => s.id === cs.id))]
                                   .sort((a, b) => new Date(b.sale_date).getTime() - new Date(a.sale_date).getTime())
                                   .map((sale: any) => (
@@ -1340,14 +1340,14 @@ export function Users() {
                                       <TableCell className="py-2">
                                         <Badge variant={sale.payment_type === 'Full' ? 'success' : 'secondary'} className="text-[10px]">
                                           {sale.payment_type === 'Full' ? 'حاضر' : 'تقسيط'}
-                                        </Badge>
-                                      </TableCell>
+                                    </Badge>
+                                  </TableCell>
                                       <TableCell className="py-2 text-right font-medium">{formatCurrency(sale.total_selling_price)}</TableCell>
                                       <TableCell className="py-2">
                                         <Badge variant={sale.status === 'Completed' ? 'success' : sale.status === 'Cancelled' ? 'destructive' : 'warning'} className="text-[10px]">
                                           {sale.status === 'Completed' ? 'مكتمل' : sale.status === 'Cancelled' ? 'ملغي' : 'قيد الدفع'}
-                                        </Badge>
-                                      </TableCell>
+                                    </Badge>
+                                  </TableCell>
                                       <TableCell className="py-2">
                                         {userCreatedSales.find(s => s.id === sale.id) && (
                                           <Badge variant="outline" className="text-[10px]">أنشأ</Badge>
@@ -1356,14 +1356,14 @@ export function Users() {
                                           <Badge variant="outline" className="text-[10px] mr-1">أكد</Badge>
                                         )}
                                       </TableCell>
-                                    </TableRow>
-                                  ))}
-                              </TableBody>
-                            </Table>
-                          </div>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </div>
                         )}
                       </div>
-                    )}
+                  )}
 
                     {/* Payments Tab */}
                     {detailsTab === 'payments' && (
@@ -1371,41 +1371,41 @@ export function Users() {
                         {userPayments.length === 0 ? (
                           <p className="text-center text-gray-500 py-8">لا توجد مدفوعات</p>
                         ) : (
-                          <div className="overflow-x-auto">
-                            <Table>
-                              <TableHeader>
+                        <div className="overflow-x-auto">
+                          <Table>
+                            <TableHeader>
                                 <TableRow className="bg-gray-50">
                                   <TableHead className="text-xs">التاريخ</TableHead>
                                   <TableHead className="text-xs">العميل</TableHead>
                                   <TableHead className="text-xs">النوع</TableHead>
                                   <TableHead className="text-xs text-right">المبلغ</TableHead>
                                   <TableHead className="text-xs">ملاحظات</TableHead>
-                                </TableRow>
-                              </TableHeader>
-                              <TableBody>
-                                {userPayments.map((payment: any) => (
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {userPayments.map((payment: any) => (
                                   <TableRow key={payment.id} className="text-xs">
                                     <TableCell className="py-2">{formatDate(payment.payment_date)}</TableCell>
                                     <TableCell className="py-2">{payment.client?.name || '-'}</TableCell>
                                     <TableCell className="py-2">
                                       <Badge variant="secondary" className="text-[10px]">
                                         {payment.payment_type === 'Full' ? 'كامل' :
-                                         payment.payment_type === 'Installment' ? 'قسط' :
+                                       payment.payment_type === 'Installment' ? 'قسط' :
                                          payment.payment_type === 'BigAdvance' ? 'دفعة' : 'عربون'}
-                                      </Badge>
-                                    </TableCell>
+                                    </Badge>
+                                  </TableCell>
                                     <TableCell className="py-2 text-right font-medium text-green-600">
                                       +{formatCurrency(payment.amount_paid)}
-                                    </TableCell>
+                                  </TableCell>
                                     <TableCell className="py-2 text-gray-500">{payment.notes || '-'}</TableCell>
-                                  </TableRow>
-                                ))}
-                              </TableBody>
-                            </Table>
-                          </div>
+                                </TableRow>
+                              ))}
+                            </TableBody>
+                          </Table>
+                        </div>
                         )}
                       </div>
-                    )}
+                  )}
 
                     {/* Clients Tab */}
                     {detailsTab === 'clients' && (
@@ -1435,40 +1435,40 @@ export function Users() {
                     {detailsTab === 'activity' && (
                       <div className="space-y-2">
                         <div className="flex items-center justify-between mb-3">
-                          <Select 
-                            value={activityFilter} 
-                            onChange={(e) => setActivityFilter(e.target.value as any)}
+                        <Select 
+                          value={activityFilter} 
+                          onChange={(e) => setActivityFilter(e.target.value as any)}
                             className="w-40 text-xs"
-                          >
+                        >
                             <option value="all">كل النشاطات</option>
-                            <option value="sales">المبيعات</option>
-                            <option value="payments">المدفوعات</option>
+                          <option value="sales">المبيعات</option>
+                          <option value="payments">المدفوعات</option>
                             <option value="clients">العملاء</option>
                             <option value="land">الأراضي</option>
-                          </Select>
-                        </div>
+                        </Select>
+                      </div>
                         <div className="space-y-2 max-h-96 overflow-y-auto">
-                          {(() => {
-                            const allActivities: any[] = []
-                            
-                            userCreatedSales.forEach(sale => {
-                              allActivities.push({
+                        {(() => {
+                          const allActivities: any[] = []
+                          
+                          userCreatedSales.forEach(sale => {
+                            allActivities.push({
                                 type: 'sale', date: sale.created_at, icon: ShoppingCart, color: 'blue',
                                 title: 'بيع جديد', desc: `${sale.client?.name || 'عميل'} - ${formatCurrency(sale.total_selling_price)}`
-                              })
                             })
-                            userConfirmedSales.forEach(sale => {
-                              allActivities.push({
+                          })
+                          userConfirmedSales.forEach(sale => {
+                            allActivities.push({
                                 type: 'sale', date: sale.updated_at || sale.created_at, icon: CheckCircle2, color: 'green',
                                 title: 'تأكيد بيع', desc: `${sale.client?.name || 'عميل'} - ${formatCurrency(sale.total_selling_price)}`
-                              })
                             })
+                          })
                             userPayments.forEach(p => {
-                              allActivities.push({
+                            allActivities.push({
                                 type: 'payment', date: p.created_at, icon: CreditCard, color: 'purple',
                                 title: 'دفعة', desc: `${p.client?.name || 'عميل'} - ${formatCurrency(p.amount_paid)}`
-                              })
                             })
+                          })
                             userClients.forEach(c => {
                               allActivities.push({
                                 type: 'client', date: c.created_at, icon: UsersIcon, color: 'indigo',
@@ -1476,57 +1476,57 @@ export function Users() {
                               })
                             })
                             userLandBatches.forEach(b => {
-                              allActivities.push({
+                                allActivities.push({
                                 type: 'land', date: b.created_at, icon: MapIcon, color: 'teal',
                                 title: 'دفعة أراضي', desc: `${b.name} - ${formatCurrency(b.total_cost)}`
+                                })
                               })
-                            })
                             userReservations.forEach(r => {
-                              allActivities.push({
+                                allActivities.push({
                                 type: 'land', date: r.created_at, icon: Calendar, color: 'orange',
                                 title: 'حجز', desc: `${r.client?.name || 'عميل'} - ${formatCurrency(r.small_advance_amount)}`
                               })
                             })
                             
-                            const filtered = activityFilter === 'all' ? allActivities :
+                          const filtered = activityFilter === 'all' ? allActivities :
                               activityFilter === 'sales' ? allActivities.filter(a => a.type === 'sale') :
-                              activityFilter === 'payments' ? allActivities.filter(a => a.type === 'payment') :
+                            activityFilter === 'payments' ? allActivities.filter(a => a.type === 'payment') :
                               activityFilter === 'clients' ? allActivities.filter(a => a.type === 'client') :
                               allActivities.filter(a => a.type === 'land')
-                            
+                          
                             return filtered.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).slice(0, 50).map((act, idx) => {
                               const Icon = act.icon
                               const colors: Record<string, string> = {
-                                blue: 'bg-blue-100 text-blue-600',
-                                green: 'bg-green-100 text-green-600',
-                                purple: 'bg-purple-100 text-purple-600',
+                                  blue: 'bg-blue-100 text-blue-600',
+                                  green: 'bg-green-100 text-green-600',
+                                  purple: 'bg-purple-100 text-purple-600',
                                 indigo: 'bg-indigo-100 text-indigo-600',
                                 teal: 'bg-teal-100 text-teal-600',
                                 orange: 'bg-orange-100 text-orange-600',
-                              }
-                              return (
+                                }
+                                return (
                                 <div key={idx} className="flex items-center gap-3 p-2 hover:bg-gray-50 rounded-lg transition-colors">
                                   <div className={`w-8 h-8 rounded-full flex items-center justify-center ${colors[act.color]}`}>
-                                    <Icon className="h-4 w-4" />
-                                  </div>
+                                      <Icon className="h-4 w-4" />
+                                    </div>
                                   <div className="flex-1 min-w-0">
                                     <p className="text-sm font-medium">{act.title}</p>
                                     <p className="text-xs text-gray-500 truncate">{act.desc}</p>
-                                  </div>
+                                      </div>
                                   <p className="text-xs text-gray-400 whitespace-nowrap">{formatDate(act.date)}</p>
-                                </div>
-                              )
+                                  </div>
+                                )
                             })
-                          })()}
+                        })()}
                           {userCreatedSales.length === 0 && userPayments.length === 0 && userClients.length === 0 && (
                             <p className="text-center text-gray-500 py-8">لا يوجد نشاط</p>
                           )}
-                        </div>
+                      </div>
                       </div>
                     )}
-                  </>
-                )}
-              </div>
+                </>
+              )}
+            </div>
             </>
           )}
         </DialogContent>

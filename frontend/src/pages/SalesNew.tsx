@@ -792,9 +792,9 @@ export function SalesNew() {
     let filtered = availablePieces
     
     // Filter by batch (required)
-    filtered = filtered.filter((piece: any) => 
-      piece.land_batch?.name === pieceBatchFilter
-    )
+      filtered = filtered.filter((piece: any) => 
+        piece.land_batch?.name === pieceBatchFilter
+      )
     
     // Filter by piece number search
     if (debouncedPieceSearch) {
@@ -1728,45 +1728,45 @@ export function SalesNew() {
                 </Select>
                 {pieceBatchFilter && (
                   <>
-                    <Input
-                      type="text"
-                      placeholder="بحث عن قطعة برقم القطعة..."
-                      value={pieceSearch}
-                      maxLength={50}
-                      onChange={e => {
-                        setPieceSearch(e.target.value)
-                        debouncedPieceSearchFn(e.target.value)
-                      }}
+              <Input
+                type="text"
+                placeholder="بحث عن قطعة برقم القطعة..."
+                value={pieceSearch}
+                maxLength={50}
+                onChange={e => {
+                  setPieceSearch(e.target.value)
+                  debouncedPieceSearchFn(e.target.value)
+                }}
                       className="w-full"
-                    />
-                    <div className="max-h-40 overflow-y-auto border rounded-md p-2 space-y-1">
-                      {filteredAvailablePieces.length === 0 ? (
-                        <p className="text-sm text-muted-foreground">لا توجد قطع متاحة</p>
-                      ) : (
-                        filteredAvailablePieces.map((piece: any) => (
-                          <label key={piece.id} className="flex items-center gap-2 p-1 hover:bg-gray-50 rounded cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={selectedPieces.includes(piece.id)}
-                              onChange={(e) => {
-                                if (e.target.checked) {
-                                  setSelectedPieces([...selectedPieces, piece.id])
-                                } else {
-                                  setSelectedPieces(selectedPieces.filter(id => id !== piece.id))
-                                }
-                              }}
-                              className="rounded"
-                            />
-                            <span className="text-sm">
+              />
+              <div className="max-h-40 overflow-y-auto border rounded-md p-2 space-y-1">
+                {filteredAvailablePieces.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">لا توجد قطع متاحة</p>
+                ) : (
+                  filteredAvailablePieces.map((piece: any) => (
+                    <label key={piece.id} className="flex items-center gap-2 p-1 hover:bg-gray-50 rounded cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={selectedPieces.includes(piece.id)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedPieces([...selectedPieces, piece.id])
+                          } else {
+                            setSelectedPieces(selectedPieces.filter(id => id !== piece.id))
+                          }
+                        }}
+                        className="rounded"
+                      />
+                      <span className="text-sm">
                               #{piece.piece_number} ({piece.surface_area} م²)
-                            </span>
-                          </label>
-                        ))
-                      )}
-                    </div>
-                    {selectedPieces.length > 0 && (
-                      <p className="text-xs text-muted-foreground">
-                        إجمالي المساحة: {pieces.filter(p => selectedPieces.includes(p.id)).reduce((sum, p: any) => sum + p.surface_area, 0)} م²
+                      </span>
+                    </label>
+                  ))
+                )}
+              </div>
+              {selectedPieces.length > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  إجمالي المساحة: {pieces.filter(p => selectedPieces.includes(p.id)).reduce((sum, p: any) => sum + p.surface_area, 0)} م²
                       </p>
                     )}
                   </>
@@ -1774,8 +1774,8 @@ export function SalesNew() {
                 {!pieceBatchFilter && (
                   <p className="text-sm text-muted-foreground text-center py-4">
                     يرجى اختيار موقع الأرض / الدفعة أولاً
-                  </p>
-                )}
+                </p>
+              )}
               </div>
             </div>
 
