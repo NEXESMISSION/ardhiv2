@@ -94,7 +94,7 @@ export function NotificationContainer() {
             </div>
             <button
               onClick={() => removeNotification(notification.id)}
-              className="flex-shrink-0 text-current opacity-70 hover:opacity-100 transition-opacity"
+              className="flex-shrink-0 rounded-full bg-red-500 hover:bg-red-600 text-white transition-colors p-1.5 flex items-center justify-center"
             >
               <X className="h-4 w-4" />
             </button>

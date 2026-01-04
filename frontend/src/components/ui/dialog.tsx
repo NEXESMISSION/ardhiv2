@@ -151,7 +151,7 @@ const DialogContent = React.forwardRef<
       >
         {children}
         <button
-          className="absolute right-2 sm:right-4 top-2 sm:top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none p-1"
+          className="absolute right-2 sm:right-4 top-2 sm:top-4 rounded-full bg-red-500 hover:bg-red-600 text-white transition-colors focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 disabled:pointer-events-none p-1.5 flex items-center justify-center"
           onClick={() => context.setOpen(false)}
           type="button"
         >
