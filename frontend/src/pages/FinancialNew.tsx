@@ -2,7 +2,7 @@ import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import {
   Table,
@@ -763,77 +763,196 @@ export function Financial() {
         <DialogContent className="w-[95vw] sm:w-full max-w-6xl max-h-[95vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
+              <DollarSign className="h-5 w-5 text-green-600" />
               <span>تفاصيل {selectedPaymentType ? getPaymentTypeLabel(selectedPaymentType) : 'المدفوعات'}</span>
-              {dateFilter !== 'all' && (
-                <Badge variant="outline" className="text-xs">
-                  {filterLabels[dateFilter]}
-                </Badge>
-              )}
+              {dateFilter !== 'all' && <span className="text-sm text-muted-foreground font-normal">- {filterLabels[dateFilter]}</span>}
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 sm:space-y-6">
             {/* Summary Card */}
             {paymentsByLand.length > 0 && (
-              <div className="bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-950/20 dark:to-emerald-950/20 p-4 sm:p-6 rounded-lg border border-green-200 dark:border-green-800">
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  <div className="bg-white dark:bg-gray-900 p-4 rounded-lg">
-                    <p className="text-xs sm:text-sm text-muted-foreground mb-2">إجمالي المدفوعات</p>
-                    <p className="text-xl sm:text-2xl font-bold text-green-600">
-                      {formatCurrency(paymentsByLand.reduce((sum, g) => sum + g.totalAmount, 0))}
-                    </p>
+              <Card className="bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-950/20 dark:to-emerald-950/20 border-green-200 dark:border-green-800">
+                <CardHeader className="p-4 sm:p-6">
+                  <CardTitle className="text-base sm:text-lg">الملخص</CardTitle>
+                </CardHeader>
+                <CardContent className="p-4 sm:p-6 pt-0">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4">
+                    <div className="bg-white dark:bg-gray-900 p-3 rounded-lg">
+                      <p className="text-xs sm:text-sm text-muted-foreground mb-1">إجمالي المدفوعات</p>
+                      <p className="text-lg sm:text-xl font-bold text-green-600">{formatCurrency(paymentsByLand.reduce((sum, g) => sum + g.totalAmount, 0))}</p>
+                    </div>
+                    <div className="bg-white dark:bg-gray-900 p-3 rounded-lg">
+                      <p className="text-xs sm:text-sm text-muted-foreground mb-1">عدد الدفعات</p>
+                      <p className="text-lg sm:text-xl font-bold text-blue-600">{paymentsByLand.length}</p>
+                    </div>
+                    <div className="bg-white dark:bg-gray-900 p-3 rounded-lg col-span-2 sm:col-span-1">
+                      <p className="text-xs sm:text-sm text-muted-foreground mb-1">إجمالي عدد المدفوعات</p>
+                      <p className="text-lg sm:text-xl font-bold text-purple-600">{paymentsByLand.reduce((sum, g) => sum + g.paymentCount, 0)}</p>
+                    </div>
                   </div>
-                  <div className="bg-white dark:bg-gray-900 p-4 rounded-lg">
-                    <p className="text-xs sm:text-sm text-muted-foreground mb-2">عدد الدفعات</p>
-                    <p className="text-xl sm:text-2xl font-bold text-blue-600">
-                      {paymentsByLand.reduce((sum, g) => sum + g.paymentCount, 0)}
-                    </p>
-                  </div>
-                  <div className="bg-white dark:bg-gray-900 p-4 rounded-lg">
-                    <p className="text-xs sm:text-sm text-muted-foreground mb-2">عدد المجموعات</p>
-                    <p className="text-xl sm:text-2xl font-bold text-purple-600">
-                      {paymentsByLand.length}
-                    </p>
-                  </div>
-                </div>
-              </div>
+                </CardContent>
+              </Card>
             )}
 
-            {/* Combined Table - Summary and Details in One */}
-            <div className="overflow-x-auto -mx-4 sm:mx-0 px-4 sm:px-0" style={{ WebkitOverflowScrolling: 'touch' }}>
-              <Table className="min-w-full">
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>التاريخ</TableHead>
-                    <TableHead>العميل</TableHead>
-                    <TableHead>اسم الدفعة</TableHead>
-                    <TableHead>الموقع</TableHead>
-                    <TableHead>عدد القطع</TableHead>
-                    <TableHead>نوع الدفع</TableHead>
-                    <TableHead className="text-right">المبلغ</TableHead>
-                    <TableHead>ملاحظات</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {paymentsByLand.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={8} className="text-center text-muted-foreground py-8">
-                        لا توجد مدفوعات
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    <>
+            {/* Mobile Card View / Desktop Table View */}
+            {paymentsByLand.length === 0 ? (
+              <Card>
+                <CardContent className="py-8 text-center">
+                  <p className="text-muted-foreground">لا توجد مدفوعات</p>
+                </CardContent>
+              </Card>
+            ) : (
+              <>
+                {/* Mobile Card View */}
+                <div className="space-y-4 md:hidden">
+                  {paymentsByLand.map((group, groupIndex) => {
+                    const totalGroupAmount = group.totalAmount
+                    const fullCount = group.payments.filter(p => p.payment_type === 'Full').length
+                    const bigAdvanceCount = group.payments.filter(p => p.payment_type === 'BigAdvance').length
+                    const installmentCount = group.payments.filter(p => p.payment_type === 'Installment').length
+                    const smallAdvanceCount = group.payments.filter(p => p.payment_type === 'SmallAdvance').length
+                    const totalPieces = group.payments.reduce((sum, p) => sum + (p.land_pieces?.length || 0), 0)
+                    
+                    return (
+                      <div key={groupIndex} className="space-y-2">
+                        {/* Group Header Card */}
+                        <Card className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/20 dark:to-indigo-950/20 border-blue-200 dark:border-blue-800">
+                          <CardContent className="p-4">
+                            <div className="space-y-3">
+                              <div>
+                                <h4 className="font-bold text-base mb-1">{group.landBatchName}</h4>
+                                {group.location && <p className="text-xs text-muted-foreground">{group.location}</p>}
+                              </div>
+                              <div className="grid grid-cols-2 gap-3 text-xs">
+                                <div>
+                                  <span className="text-muted-foreground">المبلغ:</span>
+                                  <div className="font-bold text-base text-green-600">{formatCurrency(totalGroupAmount)}</div>
+                                </div>
+                                <div>
+                                  <span className="text-muted-foreground">عدد الدفعات:</span>
+                                  <div className="font-bold text-base">{group.paymentCount}</div>
+                                </div>
+                                <div>
+                                  <span className="text-muted-foreground">عدد القطع:</span>
+                                  <div className="font-medium">{totalPieces}</div>
+                                </div>
+                                <div>
+                                  <span className="text-muted-foreground">الأنواع:</span>
+                                  <div className="text-xs space-y-0.5">
+                                    {fullCount > 0 && <div>بالحاضر: {fullCount}</div>}
+                                    {bigAdvanceCount > 0 && <div>دفعة: {bigAdvanceCount}</div>}
+                                    {installmentCount > 0 && <div>بالتقسيط: {installmentCount}</div>}
+                                    {smallAdvanceCount > 0 && <div>عربون: {smallAdvanceCount}</div>}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </CardContent>
+                        </Card>
+                        
+                        {/* Payment Cards */}
+                        {group.payments.map((payment) => {
+                          const pieces = payment.land_pieces || []
+                          const batchName = pieces[0]?.land_batch?.name || 'غير محدد'
+                          const location = pieces[0]?.land_batch?.location || null
+                          const piecesCount = pieces.length || 0
+                          const paymentTypeLabel = 
+                            payment.payment_type === 'Full' ? 'دفع كامل' :
+                            payment.payment_type === 'BigAdvance' ? 'دفعة كبيرة' :
+                            payment.payment_type === 'Installment' ? 'قسط' :
+                            payment.payment_type === 'SmallAdvance' ? 'عربون' : payment.payment_type || '-'
+                          
+                          const client = payment.client as any
+                          const saleType = payment.sale?.payment_type === 'Full' ? 'بالحاضر' : payment.sale?.payment_type === 'Installment' ? 'بالتقسيط' : '-'
+                          const pieceNumbers = pieces.map(p => `#${p.piece_number}`).join('، ') || '-'
+                          
+                          return (
+                            <Card key={payment.id} className="hover:shadow-md transition-shadow">
+                              <CardContent className="p-3">
+                                <div className="space-y-2">
+                                  <div className="flex items-start justify-between">
+                                    <div className="flex-1 min-w-0">
+                                      <div className="font-semibold text-base text-green-600">
+                                        {formatCurrency(payment.amount_paid)}
+                                      </div>
+                                      <div className="text-xs text-muted-foreground mt-1">
+                                        {formatDate(payment.payment_date)}
+                                      </div>
+                                    </div>
+                                    <Badge variant="outline" className="text-xs flex-shrink-0">
+                                      {paymentTypeLabel}
+                                    </Badge>
+                                  </div>
+                                  
+                                  <div className="space-y-1.5 text-xs">
+                                    <div>
+                                      <span className="text-muted-foreground">العميل:</span>
+                                      <div className="font-medium mt-0.5">{client?.name || 'غير معروف'}</div>
+                                      {client?.phone && <div className="text-xs text-muted-foreground">({client.phone})</div>}
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-2">
+                                      <div>
+                                        <span className="text-muted-foreground">الدفعة:</span>
+                                        <div className="font-medium">{batchName}</div>
+                                      </div>
+                                      {location && (
+                                        <div>
+                                          <span className="text-muted-foreground">الموقع:</span>
+                                          <div className="font-medium">{location}</div>
+                                        </div>
+                                      )}
+                                      <div>
+                                        <span className="text-muted-foreground">القطع:</span>
+                                        <div className="font-medium">{piecesCount} {pieceNumbers !== '-' && `(${pieceNumbers})`}</div>
+                                      </div>
+                                      {saleType !== '-' && (
+                                        <div>
+                                          <span className="text-muted-foreground">نوع البيع:</span>
+                                          <div className="font-medium">{saleType}</div>
+                                        </div>
+                                      )}
+                                    </div>
+                                    {payment.notes && (
+                                      <div>
+                                        <span className="text-muted-foreground">ملاحظات:</span>
+                                        <div className="font-medium mt-0.5">{payment.notes}</div>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              </CardContent>
+                            </Card>
+                          )
+                        })}
+                      </div>
+                    )
+                  })}
+                </div>
+
+                {/* Desktop Table View */}
+                <div className="hidden md:block overflow-x-auto -mx-4 sm:mx-0 px-4 sm:px-0" style={{ WebkitOverflowScrolling: 'touch' }}>
+                  <Table className="min-w-full">
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>التاريخ</TableHead>
+                        <TableHead>العميل</TableHead>
+                        <TableHead>اسم الدفعة</TableHead>
+                        <TableHead>الموقع</TableHead>
+                        <TableHead>عدد القطع</TableHead>
+                        <TableHead>نوع الدفع</TableHead>
+                        <TableHead className="text-right">المبلغ</TableHead>
+                        <TableHead>ملاحظات</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
                       {paymentsByLand.flatMap((group, groupIndex) => {
                         const totalGroupAmount = group.totalAmount
-                        const groupPercentage = group.percentage
-                        
-                        // Calculate payment type breakdown for this group
                         const fullCount = group.payments.filter(p => p.payment_type === 'Full').length
                         const bigAdvanceCount = group.payments.filter(p => p.payment_type === 'BigAdvance').length
                         const installmentCount = group.payments.filter(p => p.payment_type === 'Installment').length
                         const smallAdvanceCount = group.payments.filter(p => p.payment_type === 'SmallAdvance').length
                         
                         return [
-                          // Summary row for this land batch
                           <TableRow key={`summary-${groupIndex}`} className="bg-gray-50 font-bold">
                             <TableCell colSpan={4} className="font-bold">
                               {group.landBatchName} {group.location && `- ${group.location}`}
@@ -848,7 +967,6 @@ export function Financial() {
                             <TableCell className="text-right font-bold">{formatCurrency(totalGroupAmount)}</TableCell>
                             <TableCell className="text-sm text-muted-foreground">{group.paymentCount} دفعة</TableCell>
                           </TableRow>,
-                          // Detail rows for each payment
                           ...group.payments.map((payment) => {
                             const pieces = payment.land_pieces || []
                             const batchName = pieces[0]?.land_batch?.name || 'غير محدد'
@@ -885,7 +1003,7 @@ export function Financial() {
                                   <div className="flex flex-col">
                                     <span>{paymentTypeLabel}</span>
                                     {saleType !== '-' && <span className="text-xs text-muted-foreground">({saleType})</span>}
-                </div>
+                                  </div>
                                 </TableCell>
                                 <TableCell className="text-right font-medium">{formatCurrency(payment.amount_paid)}</TableCell>
                                 <TableCell className="text-sm text-muted-foreground">{payment.notes || '-'}</TableCell>
@@ -894,7 +1012,6 @@ export function Financial() {
                           })
                         ]
                       })}
-                      {/* Grand Total Row */}
                       <TableRow className="bg-primary/10 font-bold border-t-2">
                         <TableCell colSpan={4} className="font-bold">الإجمالي</TableCell>
                         <TableCell className="text-center font-bold">
@@ -924,11 +1041,11 @@ export function Financial() {
                           {paymentsByLand.reduce((sum, g) => sum + g.paymentCount, 0)} دفعة
                         </TableCell>
                       </TableRow>
-                    </>
-                )}
-                </TableBody>
-              </Table>
-              </div>
+                    </TableBody>
+                  </Table>
+                </div>
+              </>
+            )}
           </div>
         </DialogContent>
       </Dialog>
@@ -938,45 +1055,39 @@ export function Financial() {
         <DialogContent className="w-[95vw] sm:w-full max-w-6xl max-h-[95vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
+              <TrendingUp className="h-5 w-5 text-indigo-600" />
               <span>تفاصيل العمولة</span>
-              {dateFilter !== 'all' && (
-                <Badge variant="outline" className="text-xs">
-                  {filterLabels[dateFilter]}
-                </Badge>
-              )}
+              {dateFilter !== 'all' && <span className="text-sm text-muted-foreground font-normal">- {filterLabels[dateFilter]}</span>}
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 sm:space-y-6">
             {/* Summary Card */}
             {filteredData.groupedCompanyFees.length > 0 && (
-              <div className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/20 dark:to-indigo-950/20 p-4 sm:p-6 rounded-lg border border-blue-200 dark:border-blue-800">
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                  <div className="bg-white dark:bg-gray-900 p-4 rounded-lg">
-                    <p className="text-xs sm:text-sm text-muted-foreground mb-2">إجمالي العمولة</p>
-                    <p className="text-xl sm:text-2xl font-bold text-blue-600">
-                      {formatCurrency(filteredData.companyFeesTotal)}
-                    </p>
+              <Card className="bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-950/20 dark:to-purple-950/20 border-indigo-200 dark:border-indigo-800">
+                <CardHeader className="p-4 sm:p-6">
+                  <CardTitle className="text-base sm:text-lg">الملخص</CardTitle>
+                </CardHeader>
+                <CardContent className="p-4 sm:p-6 pt-0">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+                    <div className="bg-white dark:bg-gray-900 p-3 rounded-lg">
+                      <p className="text-xs sm:text-sm text-muted-foreground mb-1">إجمالي العمولة</p>
+                      <p className="text-lg sm:text-xl font-bold text-indigo-600">{formatCurrency(filteredData.companyFeesTotal)}</p>
+                    </div>
+                    <div className="bg-white dark:bg-gray-900 p-3 rounded-lg">
+                      <p className="text-xs sm:text-sm text-muted-foreground mb-1">عدد المبيعات</p>
+                      <p className="text-lg sm:text-xl font-bold text-blue-600">{filteredData.groupedCompanyFees.reduce((sum, g) => sum + g.sales.length, 0)}</p>
+                    </div>
+                    <div className="bg-white dark:bg-gray-900 p-3 rounded-lg">
+                      <p className="text-xs sm:text-sm text-muted-foreground mb-1">عدد العملاء</p>
+                      <p className="text-lg sm:text-xl font-bold text-purple-600">{filteredData.groupedCompanyFees.length}</p>
+                    </div>
+                    <div className="bg-white dark:bg-gray-900 p-3 rounded-lg">
+                      <p className="text-xs sm:text-sm text-muted-foreground mb-1">عدد القطع</p>
+                      <p className="text-lg sm:text-xl font-bold text-green-600">{filteredData.groupedCompanyFees.reduce((sum, g) => sum + g.piecesCount, 0)}</p>
+                    </div>
                   </div>
-                  <div className="bg-white dark:bg-gray-900 p-4 rounded-lg">
-                    <p className="text-xs sm:text-sm text-muted-foreground mb-2">عدد المبيعات</p>
-                    <p className="text-xl sm:text-2xl font-bold text-green-600">
-                      {filteredData.groupedCompanyFees.reduce((sum, g) => sum + g.sales.length, 0)}
-                    </p>
-                  </div>
-                  <div className="bg-white dark:bg-gray-900 p-4 rounded-lg">
-                    <p className="text-xs sm:text-sm text-muted-foreground mb-2">عدد العملاء</p>
-                    <p className="text-xl sm:text-2xl font-bold text-purple-600">
-                      {filteredData.groupedCompanyFees.length}
-                    </p>
-                  </div>
-                  <div className="bg-white dark:bg-gray-900 p-4 rounded-lg">
-                    <p className="text-xs sm:text-sm text-muted-foreground mb-2">عدد القطع</p>
-                    <p className="text-xl sm:text-2xl font-bold text-orange-600">
-                      {filteredData.groupedCompanyFees.reduce((sum, g) => sum + g.piecesCount, 0)}
-                    </p>
-                  </div>
-                </div>
-              </div>
+                </CardContent>
+              </Card>
             )}
 
             {/* Company Fees Table - Grouped by Land Batch */}
@@ -1039,105 +1150,213 @@ export function Financial() {
                 percentage: totalAmount > 0 ? (group.totalAmount / totalAmount) * 100 : 0,
               })).sort((a, b) => b.totalAmount - a.totalAmount)
               
-              return (
-                <div className="overflow-x-auto -mx-4 sm:mx-0 px-4 sm:px-0" style={{ WebkitOverflowScrolling: 'touch' }}>
-                  <Table className="min-w-full">
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>التاريخ</TableHead>
-                        <TableHead>العميل</TableHead>
-                        <TableHead>اسم الدفعة</TableHead>
-                        <TableHead>الموقع</TableHead>
-                        <TableHead>عدد القطع</TableHead>
-                        <TableHead>نوع البيع</TableHead>
-                        <TableHead className="text-right">سعر البيع</TableHead>
-                        <TableHead className="text-right">نسبة العمولة</TableHead>
-                        <TableHead className="text-right">مبلغ العمولة</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {companyFeesByLand.length === 0 ? (
-                        <TableRow>
-                          <TableCell colSpan={9} className="text-center text-muted-foreground py-8">
-                            لا توجد عمولات
-                          </TableCell>
-                        </TableRow>
-                      ) : (
-                        <>
-                          {companyFeesByLand.flatMap((group, groupIndex) => {
-                            const totalGroupAmount = group.totalAmount
+              return companyFeesByLand.length === 0 ? (
+                <Card>
+                  <CardContent className="py-8 text-center">
+                    <p className="text-muted-foreground">لا توجد عمولات</p>
+                  </CardContent>
+                </Card>
+              ) : (
+                <>
+                  {/* Mobile Card View */}
+                  <div className="space-y-4 md:hidden">
+                    {companyFeesByLand.map((group, groupIndex) => {
+                      const totalGroupAmount = group.totalAmount
+                      const totalSalesAmount = group.sales.reduce((sum, s) => sum + s.total_selling_price, 0)
+                      const totalPieces = group.sales.reduce((sum, s) => sum + (s.land_piece_ids?.length || 0), 0)
+                      
+                      return (
+                        <div key={groupIndex} className="space-y-2">
+                          {/* Group Header Card */}
+                          <Card className="bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-950/20 dark:to-purple-950/20 border-indigo-200 dark:border-indigo-800">
+                            <CardContent className="p-4">
+                              <div className="space-y-3">
+                                <div>
+                                  <h4 className="font-bold text-base mb-1">{group.landBatchName}</h4>
+                                  {group.location && <p className="text-xs text-muted-foreground">{group.location}</p>}
+                                </div>
+                                <div className="grid grid-cols-2 gap-3 text-xs">
+                                  <div>
+                                    <span className="text-muted-foreground">مبلغ العمولة:</span>
+                                    <div className="font-bold text-base text-indigo-600">{formatCurrency(totalGroupAmount)}</div>
+                                  </div>
+                                  <div>
+                                    <span className="text-muted-foreground">سعر البيع:</span>
+                                    <div className="font-bold text-base text-green-600">{formatCurrency(totalSalesAmount)}</div>
+                                  </div>
+                                  <div>
+                                    <span className="text-muted-foreground">عدد المبيعات:</span>
+                                    <div className="font-medium">{group.saleCount}</div>
+                                  </div>
+                                  <div>
+                                    <span className="text-muted-foreground">عدد القطع:</span>
+                                    <div className="font-medium">{totalPieces}</div>
+                                  </div>
+                                </div>
+                              </div>
+                            </CardContent>
+                          </Card>
+                          
+                          {/* Sale Cards */}
+                          {group.sales.map((sale) => {
+                            const pieceIds = sale.land_piece_ids || []
+                            const pieces = landPieces.filter(p => pieceIds.includes(p.id))
+                            const pieceNumbers = pieces.map(p => `#${p.piece_number}`).join('، ') || '-'
+                            const batchName = pieces[0]?.land_batch?.name || 'غير محدد'
+                            const location = pieces[0]?.land_batch?.location || null
+                            const client = sale.client as any
+                            const feePerPiece = (sale.company_fee_amount || 0) / pieceIds.length
+                            const feeForThisBatch = pieces.length * feePerPiece
+                            const salePriceForThisBatch = (sale.total_selling_price / pieceIds.length) * pieces.length
                             
-                            return [
-                              // Summary row for this land batch
-                              <TableRow key={`summary-${groupIndex}`} className="bg-gray-50 font-bold">
-                                <TableCell colSpan={4} className="font-bold">
-                                  {group.landBatchName} {group.location && `- ${group.location}`}
-                                </TableCell>
-                                <TableCell className="text-center">
-                                  {group.sales.reduce((sum, s) => sum + (s.land_piece_ids?.length || 0), 0)}
-                                </TableCell>
-                                <TableCell className="text-sm">
-                                  {group.saleCount} مبيعة
-                                </TableCell>
-                                <TableCell className="text-right font-bold">{formatCurrency(group.sales.reduce((sum, s) => sum + s.total_selling_price, 0))}</TableCell>
-                                <TableCell className="text-right font-bold">{formatCurrency(totalGroupAmount)}</TableCell>
-                                <TableCell className="text-right font-bold">{formatCurrency(totalGroupAmount)}</TableCell>
-                              </TableRow>,
-                              // Detail rows for each sale
-                              ...group.sales.map((sale) => {
-                                const pieceIds = sale.land_piece_ids || []
-                                const pieces = landPieces.filter(p => pieceIds.includes(p.id))
-                                const pieceNumbers = pieces.map(p => `#${p.piece_number}`).join('، ') || '-'
-                                const batchName = pieces[0]?.land_batch?.name || 'غير محدد'
-                                const location = pieces[0]?.land_batch?.location || null
-                                const client = sale.client as any
-                                const feePerPiece = (sale.company_fee_amount || 0) / pieceIds.length
-                                const feeForThisBatch = pieces.length * feePerPiece
-                                
-                                return (
-                                  <TableRow key={sale.id} className="bg-white">
-                                    <TableCell>{formatDate(sale.sale_date)}</TableCell>
-                                    <TableCell>
-                                      <div className="flex flex-col">
-                                        <span className="font-medium">{client?.name || 'غير معروف'}</span>
-                                        {client?.phone && <span className="text-xs text-muted-foreground">({client.phone})</span>}
+                            return (
+                              <Card key={sale.id} className="hover:shadow-md transition-shadow">
+                                <CardContent className="p-3">
+                                  <div className="space-y-2">
+                                    <div className="flex items-start justify-between">
+                                      <div className="flex-1 min-w-0">
+                                        <div className="font-semibold text-base text-indigo-600">
+                                          {formatCurrency(feeForThisBatch)}
+                                        </div>
+                                        <div className="text-xs text-muted-foreground mt-1">
+                                          {formatDate(sale.sale_date)}
+                                        </div>
                                       </div>
-                                    </TableCell>
-                                    <TableCell className="text-muted-foreground">{batchName}</TableCell>
-                                    <TableCell className="text-muted-foreground">{location || '-'}</TableCell>
-                                    <TableCell className="text-center">
-                                      <div className="flex flex-col">
-                                        <span>{pieces.length}</span>
-                                        {pieceNumbers !== '-' && <span className="text-xs text-muted-foreground">{pieceNumbers}</span>}
-                                      </div>
-                                    </TableCell>
-                                    <TableCell className="text-sm">
-                                      <Badge variant={sale.payment_type === 'Full' ? 'success' : 'secondary'} className="text-xs">
+                                      <Badge variant={sale.payment_type === 'Full' ? 'success' : 'secondary'} className="text-xs flex-shrink-0">
                                         {sale.payment_type === 'Full' ? 'بالحاضر' : 'بالتقسيط'}
                                       </Badge>
-                                    </TableCell>
-                                    <TableCell className="text-right font-medium">
-                                      {formatCurrency((sale.total_selling_price / pieceIds.length) * pieces.length)}
-                                    </TableCell>
-                                    <TableCell className="text-right">{sale.company_fee_percentage ? `${sale.company_fee_percentage}%` : '-'}</TableCell>
-                                    <TableCell className="text-right font-bold text-indigo-700">{formatCurrency(feeForThisBatch)}</TableCell>
-                                  </TableRow>
-                                )
-                              })
-                            ]
+                                    </div>
+                                    
+                                    <div className="space-y-1.5 text-xs">
+                                      <div>
+                                        <span className="text-muted-foreground">العميل:</span>
+                                        <div className="font-medium mt-0.5">{client?.name || 'غير معروف'}</div>
+                                        {client?.phone && <div className="text-xs text-muted-foreground">({client.phone})</div>}
+                                      </div>
+                                      <div className="grid grid-cols-2 gap-2">
+                                        <div>
+                                          <span className="text-muted-foreground">الدفعة:</span>
+                                          <div className="font-medium">{batchName}</div>
+                                        </div>
+                                        {location && (
+                                          <div>
+                                            <span className="text-muted-foreground">الموقع:</span>
+                                            <div className="font-medium">{location}</div>
+                                          </div>
+                                        )}
+                                        <div>
+                                          <span className="text-muted-foreground">القطع:</span>
+                                          <div className="font-medium">{pieces.length} {pieceNumbers !== '-' && `(${pieceNumbers})`}</div>
+                                        </div>
+                                        <div>
+                                          <span className="text-muted-foreground">سعر البيع:</span>
+                                          <div className="font-medium">{formatCurrency(salePriceForThisBatch)}</div>
+                                        </div>
+                                        {sale.company_fee_percentage && (
+                                          <div>
+                                            <span className="text-muted-foreground">نسبة العمولة:</span>
+                                            <div className="font-medium">{sale.company_fee_percentage}%</div>
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+                                </CardContent>
+                              </Card>
+                            )
                           })}
-                          {/* Grand Total Row */}
-                          <TableRow className="bg-primary/10 font-bold border-t-2">
-                            <TableCell colSpan={8} className="font-bold">الإجمالي:</TableCell>
-                            <TableCell className="text-right font-bold text-lg text-indigo-800">
-                              {formatCurrency(filteredData.companyFeesTotal)}
-                            </TableCell>
-                          </TableRow>
-                        </>
-                      )}
-                    </TableBody>
-                  </Table>
-                </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+
+                  {/* Desktop Table View */}
+                  <div className="hidden md:block overflow-x-auto -mx-4 sm:mx-0 px-4 sm:px-0" style={{ WebkitOverflowScrolling: 'touch' }}>
+                    <Table className="min-w-full">
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>التاريخ</TableHead>
+                          <TableHead>العميل</TableHead>
+                          <TableHead>اسم الدفعة</TableHead>
+                          <TableHead>الموقع</TableHead>
+                          <TableHead>عدد القطع</TableHead>
+                          <TableHead>نوع البيع</TableHead>
+                          <TableHead className="text-right">سعر البيع</TableHead>
+                          <TableHead className="text-right">نسبة العمولة</TableHead>
+                          <TableHead className="text-right">مبلغ العمولة</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {companyFeesByLand.flatMap((group, groupIndex) => {
+                          const totalGroupAmount = group.totalAmount
+                          
+                          return [
+                            <TableRow key={`summary-${groupIndex}`} className="bg-gray-50 font-bold">
+                              <TableCell colSpan={4} className="font-bold">
+                                {group.landBatchName} {group.location && `- ${group.location}`}
+                              </TableCell>
+                              <TableCell className="text-center">
+                                {group.sales.reduce((sum, s) => sum + (s.land_piece_ids?.length || 0), 0)}
+                              </TableCell>
+                              <TableCell className="text-sm">
+                                {group.saleCount} مبيعة
+                              </TableCell>
+                              <TableCell className="text-right font-bold">{formatCurrency(group.sales.reduce((sum, s) => sum + s.total_selling_price, 0))}</TableCell>
+                              <TableCell className="text-right">-</TableCell>
+                              <TableCell className="text-right font-bold">{formatCurrency(totalGroupAmount)}</TableCell>
+                            </TableRow>,
+                            ...group.sales.map((sale) => {
+                              const pieceIds = sale.land_piece_ids || []
+                              const pieces = landPieces.filter(p => pieceIds.includes(p.id))
+                              const pieceNumbers = pieces.map(p => `#${p.piece_number}`).join('، ') || '-'
+                              const batchName = pieces[0]?.land_batch?.name || 'غير محدد'
+                              const location = pieces[0]?.land_batch?.location || null
+                              const client = sale.client as any
+                              const feePerPiece = (sale.company_fee_amount || 0) / pieceIds.length
+                              const feeForThisBatch = pieces.length * feePerPiece
+                              
+                              return (
+                                <TableRow key={sale.id} className="bg-white">
+                                  <TableCell>{formatDate(sale.sale_date)}</TableCell>
+                                  <TableCell>
+                                    <div className="flex flex-col">
+                                      <span className="font-medium">{client?.name || 'غير معروف'}</span>
+                                      {client?.phone && <span className="text-xs text-muted-foreground">({client.phone})</span>}
+                                    </div>
+                                  </TableCell>
+                                  <TableCell className="text-muted-foreground">{batchName}</TableCell>
+                                  <TableCell className="text-muted-foreground">{location || '-'}</TableCell>
+                                  <TableCell className="text-center">
+                                    <div className="flex flex-col">
+                                      <span>{pieces.length}</span>
+                                      {pieceNumbers !== '-' && <span className="text-xs text-muted-foreground">{pieceNumbers}</span>}
+                                    </div>
+                                  </TableCell>
+                                  <TableCell className="text-sm">
+                                    <Badge variant={sale.payment_type === 'Full' ? 'success' : 'secondary'} className="text-xs">
+                                      {sale.payment_type === 'Full' ? 'بالحاضر' : 'بالتقسيط'}
+                                    </Badge>
+                                  </TableCell>
+                                  <TableCell className="text-right font-medium">
+                                    {formatCurrency((sale.total_selling_price / pieceIds.length) * pieces.length)}
+                                  </TableCell>
+                                  <TableCell className="text-right">{sale.company_fee_percentage ? `${sale.company_fee_percentage}%` : '-'}</TableCell>
+                                  <TableCell className="text-right font-bold text-indigo-700">{formatCurrency(feeForThisBatch)}</TableCell>
+                                </TableRow>
+                              )
+                            })
+                          ]
+                        })}
+                        <TableRow className="bg-primary/10 font-bold border-t-2">
+                          <TableCell colSpan={8} className="font-bold">الإجمالي:</TableCell>
+                          <TableCell className="text-right font-bold text-lg text-indigo-800">
+                            {formatCurrency(filteredData.companyFeesTotal)}
+                          </TableCell>
+                        </TableRow>
+                      </TableBody>
+                    </Table>
+                  </div>
+                </>
               )
             })()}
           </div>

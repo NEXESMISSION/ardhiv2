@@ -359,7 +359,7 @@ export function Clients() {
 
       {/* Clients - Mobile Card View / Desktop Table View */}
       {filteredClients.length === 0 ? (
-        <Card>
+      <Card>
           <CardContent className="p-6">
             <p className="text-center text-muted-foreground text-sm sm:text-base">لا توجد عملاء</p>
           </CardContent>
@@ -439,80 +439,80 @@ export function Clients() {
 
           {/* Desktop Table View */}
           <Card className="hidden md:block">
-            <CardContent className="p-0 sm:p-3 md:p-6 pt-3 sm:pt-4 md:pt-6">
+        <CardContent className="p-0 sm:p-3 md:p-6 pt-3 sm:pt-4 md:pt-6">
               <div className="overflow-x-auto" style={{ WebkitOverflowScrolling: 'touch' }}>
                 <Table className="min-w-full text-xs sm:text-sm md:text-base">
-                  <TableHeader>
-                    <TableRow>
+              <TableHeader>
+                <TableRow>
                       <TableHead className="text-xs sm:text-sm whitespace-nowrap">الاسم</TableHead>
                       <TableHead className="text-xs sm:text-sm whitespace-nowrap">رقم الهوية</TableHead>
                       <TableHead className="text-xs sm:text-sm whitespace-nowrap">الهاتف</TableHead>
                       <TableHead className="text-xs sm:text-sm whitespace-nowrap">النوع</TableHead>
                       <TableHead className="text-xs sm:text-sm whitespace-nowrap">المبيعات</TableHead>
                       <TableHead className="text-xs sm:text-sm whitespace-nowrap">إجراءات</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredClients.map((client) => (
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredClients.map((client) => (
                       <TableRow key={client.id} className="hover:bg-muted/50">
-                        <TableCell className="font-medium">
-                          <div className="flex items-center gap-2">
-                            <User className="h-4 w-4 text-muted-foreground" />
-                            {client.name}
-                          </div>
-                        </TableCell>
+                    <TableCell className="font-medium">
+                      <div className="flex items-center gap-2">
+                        <User className="h-4 w-4 text-muted-foreground" />
+                        {client.name}
+                      </div>
+                    </TableCell>
                         <TableCell className="text-xs sm:text-sm">{client.cin}</TableCell>
                         <TableCell className="text-xs sm:text-sm">{client.phone || '-'}</TableCell>
-                        <TableCell>
+                    <TableCell>
                           <Badge variant="secondary" className="text-xs">
-                            {client.client_type === 'Individual' ? 'فردي' : 'شركة'}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-1">
-                            <ShoppingCart className="h-4 w-4 text-muted-foreground" />
+                        {client.client_type === 'Individual' ? 'فردي' : 'شركة'}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-1">
+                        <ShoppingCart className="h-4 w-4 text-muted-foreground" />
                             <span className="text-xs sm:text-sm">{client.sales?.length || 0}</span>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-1">
-                            <Button
-                              variant="ghost"
-                              size="icon"
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
                               className="h-8 w-8"
-                              onClick={() => viewDetails(client)}
-                            >
-                              <Eye className="h-4 w-4" />
-                            </Button>
-                            {hasPermission('edit_clients') && (
-                              <Button
-                                variant="ghost"
-                                size="icon"
+                          onClick={() => viewDetails(client)}
+                        >
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                        {hasPermission('edit_clients') && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
                                 className="h-8 w-8"
-                                onClick={() => openDialog(client)}
-                              >
-                                <Edit className="h-4 w-4" />
-                              </Button>
-                            )}
-                            {hasPermission('delete_clients') && (
-                              <Button
-                                variant="ghost"
-                                size="icon"
+                            onClick={() => openDialog(client)}
+                          >
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                        )}
+                        {hasPermission('delete_clients') && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
                                 className="h-8 w-8"
-                                onClick={() => deleteClient(client.id)}
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            )}
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            </CardContent>
-          </Card>
+                            onClick={() => deleteClient(client.id)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+            </div>
+        </CardContent>
+      </Card>
         </>
       )}
 

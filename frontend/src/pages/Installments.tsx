@@ -1522,7 +1522,7 @@ export function Installments() {
 
       {/* Mobile Card View / Desktop Table View */}
       {dealsTableData.length === 0 ? (
-        <Card>
+      <Card>
           <CardContent className="p-6">
             <p className="text-center text-muted-foreground text-sm">لا توجد صفقات</p>
           </CardContent>
@@ -1630,11 +1630,11 @@ export function Installments() {
 
           {/* Desktop Table View */}
           <Card className="hidden md:block">
-            <CardContent className="p-0">
-              <div className="overflow-x-auto">
+        <CardContent className="p-0">
+          <div className="overflow-x-auto">
                 <Table className="min-w-full">
-                  <TableHeader>
-                    <TableRow className="bg-gray-50">
+              <TableHeader>
+                <TableRow className="bg-gray-50">
                       <TableHead className="font-semibold text-xs sm:text-sm whitespace-nowrap">العميل</TableHead>
                       <TableHead className="font-semibold text-xs sm:text-sm whitespace-nowrap">الصفقة</TableHead>
                       <TableHead className="font-semibold text-xs sm:text-sm whitespace-nowrap">القطع</TableHead>
@@ -1645,119 +1645,119 @@ export function Installments() {
                       <TableHead className="font-semibold text-xs sm:text-sm whitespace-nowrap">تاريخ الاستحقاق</TableHead>
                       <TableHead className="font-semibold text-xs sm:text-sm whitespace-nowrap">الحالة</TableHead>
                       <TableHead className="font-semibold text-xs sm:text-sm whitespace-nowrap">إجراء</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                     {dealsTableData.map((deal) => {
-                      let statusIndicator = '🟢'
-                      let statusText = 'على المسار'
-                      let statusColor = 'text-green-600'
-                      
-                      if (deal.isOverdue) {
-                        statusIndicator = '🔴'
-                        statusText = 'متأخر'
-                        statusColor = 'text-red-600'
-                      } else if (deal.daysUntilDue <= 7) {
-                        statusIndicator = '🟡'
-                        statusText = 'قريب الاستحقاق'
-                        statusColor = 'text-orange-600'
-                      }
-                      
-                      return (
-                        <TableRow 
-                          key={deal.saleId}
-                          className={`cursor-pointer hover:bg-blue-50/50 transition-colors ${
-                            deal.isOverdue ? 'bg-red-50/30' : deal.daysUntilDue <= 7 ? 'bg-orange-50/20' : ''
-                          }`}
-                          onClick={() => openSaleDetails(deal)}
-                        >
-                          <TableCell>
-                            <div>
+                    let statusIndicator = '🟢'
+                    let statusText = 'على المسار'
+                    let statusColor = 'text-green-600'
+                    
+                    if (deal.isOverdue) {
+                      statusIndicator = '🔴'
+                      statusText = 'متأخر'
+                      statusColor = 'text-red-600'
+                    } else if (deal.daysUntilDue <= 7) {
+                      statusIndicator = '🟡'
+                      statusText = 'قريب الاستحقاق'
+                      statusColor = 'text-orange-600'
+                    }
+                    
+                    return (
+                      <TableRow 
+                        key={deal.saleId}
+                        className={`cursor-pointer hover:bg-blue-50/50 transition-colors ${
+                          deal.isOverdue ? 'bg-red-50/30' : deal.daysUntilDue <= 7 ? 'bg-orange-50/20' : ''
+                        }`}
+                        onClick={() => openSaleDetails(deal)}
+                      >
+                        <TableCell>
+                          <div>
                               <div className="font-medium text-xs sm:text-sm">{deal.clientName}</div>
-                              {deal.clientCin && (
-                                <div className="text-xs text-muted-foreground">{deal.clientCin}</div>
+                            {deal.clientCin && (
+                              <div className="text-xs text-muted-foreground">{deal.clientCin}</div>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                            <div className="text-xs sm:text-sm">{formatDate(deal.saleDate)}</div>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className="text-xs">
+                            {deal.landPieces}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                            <div className="text-xs sm:text-sm">
+                            {deal.paidInstallments}/{deal.totalInstallments}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                            <div className="text-xs sm:text-sm font-medium text-green-600">
+                            {formatCurrency(deal.totalPaid)}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                            <div className="text-xs sm:text-sm font-medium">
+                            {formatCurrency(deal.totalUnpaid)}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          {deal.isOverdue ? (
+                              <div className="text-xs sm:text-sm font-semibold text-red-600">
+                              {formatCurrency(deal.overdueAmount)}
+                            </div>
+                          ) : (
+                              <div className="text-xs sm:text-sm text-muted-foreground">-</div>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {deal.nextDueDate ? (
+                              <div className="text-xs sm:text-sm">
+                              {formatDate(deal.nextDueDate)}
+                              {deal.daysUntilDue >= 0 && (
+                                <div className="text-xs text-muted-foreground">
+                                  ({deal.daysUntilDue} يوم)
+                                </div>
                               )}
                             </div>
-                          </TableCell>
-                          <TableCell>
-                            <div className="text-xs sm:text-sm">{formatDate(deal.saleDate)}</div>
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant="outline" className="text-xs">
-                              {deal.landPieces}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>
-                            <div className="text-xs sm:text-sm">
-                              {deal.paidInstallments}/{deal.totalInstallments}
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <div className="text-xs sm:text-sm font-medium text-green-600">
-                              {formatCurrency(deal.totalPaid)}
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <div className="text-xs sm:text-sm font-medium">
-                              {formatCurrency(deal.totalUnpaid)}
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            {deal.isOverdue ? (
-                              <div className="text-xs sm:text-sm font-semibold text-red-600">
-                                {formatCurrency(deal.overdueAmount)}
-                              </div>
-                            ) : (
+                          ) : (
                               <div className="text-xs sm:text-sm text-muted-foreground">-</div>
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            {deal.nextDueDate ? (
-                              <div className="text-xs sm:text-sm">
-                                {formatDate(deal.nextDueDate)}
-                                {deal.daysUntilDue >= 0 && (
-                                  <div className="text-xs text-muted-foreground">
-                                    ({deal.daysUntilDue} يوم)
-                                  </div>
-                                )}
-                              </div>
-                            ) : (
-                              <div className="text-xs sm:text-sm text-muted-foreground">-</div>
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex items-center gap-1">
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-1">
                               <span className="text-xs">{statusIndicator}</span>
                               <span className={`text-xs sm:text-sm font-medium ${statusColor}`}>
-                                {statusText}
-                              </span>
-                            </div>
-                          </TableCell>
-                          <TableCell onClick={(e) => e.stopPropagation()}>
-                            {hasPermission('record_payments') && deal.totalUnpaid > 0.01 && (
-                              <Button
-                                size="sm"
-                                variant={deal.isOverdue ? 'destructive' : 'default'}
+                              {statusText}
+                            </span>
+                          </div>
+                        </TableCell>
+                        <TableCell onClick={(e) => e.stopPropagation()}>
+                          {hasPermission('record_payments') && deal.totalUnpaid > 0.01 && (
+                            <Button
+                              size="sm"
+                              variant={deal.isOverdue ? 'destructive' : 'default'}
                                 className="text-xs px-2 sm:px-4"
-                                onClick={() => {
-                                  const nextInst = deal.installments.find(i => getRemainingAmount(i) > 0.01)
-                                  if (nextInst) {
-                                    openPaymentDialog(nextInst)
-                                  }
-                                }}
-                              >
-                                دفع
-                              </Button>
-                            )}
-                          </TableCell>
-                        </TableRow>
-                      )
+                              onClick={() => {
+                                const nextInst = deal.installments.find(i => getRemainingAmount(i) > 0.01)
+                                if (nextInst) {
+                                  openPaymentDialog(nextInst)
+                                }
+                              }}
+                            >
+                              دفع
+                            </Button>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    )
                     })}
-                  </TableBody>
-                </Table>
-              </div>
-            </CardContent>
-          </Card>
+              </TableBody>
+            </Table>
+          </div>
+        </CardContent>
+      </Card>
         </>
       )}
 
