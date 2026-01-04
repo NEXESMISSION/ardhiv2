@@ -55,10 +55,21 @@
   * {
     @apply border-border;
   }
-  body {
+  html, body {
     @apply bg-background text-foreground;
+    height: auto;
+    min-height: 100%;
+  }
+  
+  body {
     font-family: 'Tajawal', sans-serif;
     font-feature-settings: "rlig" 1, "calt" 1;
+  }
+  
+  #root {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
   }
   
   /* RTL Support */

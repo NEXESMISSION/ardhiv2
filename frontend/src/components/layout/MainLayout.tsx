@@ -8,18 +8,33 @@ export function MainLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const location = useLocation()
 
-  // Scroll to top on route change
+  // Scroll to top on route change - ensure it works reliably
   useEffect(() => {
-    window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
-    // Also scroll the main container on mobile
-    const mainElement = document.querySelector('main')
-    if (mainElement) {
-      mainElement.scrollTop = 0
-    }
+    // Use requestAnimationFrame to ensure DOM is ready
+    requestAnimationFrame(() => {
+      // Scroll window to top
+      window.scrollTo({ top: 0, left: 0, behavior: 'instant' })
+      
+      // Also scroll document element (for mobile browsers)
+      if (document.documentElement) {
+        document.documentElement.scrollTop = 0
+      }
+      
+      // Scroll body element
+      if (document.body) {
+        document.body.scrollTop = 0
+      }
+      
+      // Scroll main container if it exists
+      const mainElement = document.querySelector('main')
+      if (mainElement) {
+        mainElement.scrollTop = 0
+      }
+    })
   }, [location.pathname])
 
   return (
-    <div className="flex h-screen bg-background">
+    <div className="flex min-h-screen bg-background">
       {/* Mobile burger menu button */}
       <div className="fixed top-4 left-4 z-50 md:hidden">
         <Button
@@ -34,7 +49,7 @@ export function MainLayout() {
 
       {/* Sidebar - hidden on mobile, shown when sidebarOpen is true */}
       <div className={`
-        fixed md:static inset-y-0 left-0 z-40
+        fixed md:sticky md:top-0 inset-y-0 left-0 z-40 md:h-screen
         transition-transform duration-300 ease-in-out
         ${sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
       `}>
@@ -49,8 +64,8 @@ export function MainLayout() {
         />
       )}
 
-      <main className="flex-1 overflow-auto md:ml-0">
-        <div className="container mx-auto p-4 sm:p-6">
+      <main className="flex-1 w-full md:ml-0 min-h-screen">
+        <div className="container mx-auto p-4 sm:p-6 pb-8">
           <Outlet />
         </div>
       </main>
