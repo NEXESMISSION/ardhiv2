@@ -18,7 +18,69 @@ interface DialogProps {
 function Dialog({ open: controlledOpen, onOpenChange, children }: DialogProps) {
   const [uncontrolledOpen, setUncontrolledOpen] = React.useState(false)
   const open = controlledOpen ?? uncontrolledOpen
-  const setOpen = onOpenChange ?? setUncontrolledOpen
+  
+  const setOpen = React.useCallback((newOpen: boolean) => {
+    if (onOpenChange) {
+      onOpenChange(newOpen)
+    } else {
+      setUncontrolledOpen(newOpen)
+    }
+  }, [onOpenChange])
+
+  // Lock body scroll when dialog is open (mobile fix)
+  React.useEffect(() => {
+    if (open) {
+      // Save current scroll position for both window and main container
+      const scrollY = window.scrollY
+      const mainElement = document.querySelector('main')
+      const mainScrollTop = mainElement?.scrollTop || 0
+      
+      // Lock body scroll - mobile-friendly approach
+      const originalStyle = window.getComputedStyle(document.body).overflow
+      const originalPosition = window.getComputedStyle(document.body).position
+      const originalTop = window.getComputedStyle(document.body).top
+      const originalWidth = window.getComputedStyle(document.body).width
+      
+      document.body.style.overflow = 'hidden'
+      document.body.style.position = 'fixed'
+      document.body.style.top = `-${scrollY}px`
+      document.body.style.width = '100%'
+      
+      // Also lock main container scroll if it exists
+      if (mainElement) {
+        const mainOriginalOverflow = window.getComputedStyle(mainElement).overflow
+        mainElement.style.overflow = 'hidden'
+        
+        return () => {
+          // Restore body styles
+          document.body.style.overflow = originalStyle
+          document.body.style.position = originalPosition
+          document.body.style.top = originalTop
+          document.body.style.width = originalWidth
+          
+          // Restore main container styles
+          if (mainElement) {
+            mainElement.style.overflow = mainOriginalOverflow
+            mainElement.scrollTop = mainScrollTop
+          }
+          
+          // Restore window scroll position
+          window.scrollTo(0, scrollY)
+        }
+      } else {
+        return () => {
+          // Restore body styles
+          document.body.style.overflow = originalStyle
+          document.body.style.position = originalPosition
+          document.body.style.top = originalTop
+          document.body.style.width = originalWidth
+          
+          // Restore window scroll position
+          window.scrollTo(0, scrollY)
+        }
+      }
+    }
+  }, [open])
 
   return (
     <DialogContext.Provider value={{ open, setOpen }}>

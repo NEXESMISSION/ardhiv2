@@ -78,9 +78,12 @@
   
   /* Mobile Optimizations */
   @media (max-width: 640px) {
-    /* Prevent horizontal scrolling */
-    body {
+    /* Prevent horizontal scrolling and overscroll bounce */
+    html, body {
       overflow-x: hidden;
+      overscroll-behavior-y: none;
+      -webkit-overflow-scrolling: touch;
+      position: relative;
     }
     
     /* Ensure touch-friendly targets */
@@ -92,11 +95,19 @@
     /* Better table scrolling on mobile */
     .overflow-x-auto {
       -webkit-overflow-scrolling: touch;
+      overscroll-behavior-x: contain;
     }
     
     /* Prevent text size adjustment on iOS */
     input, select, textarea {
       font-size: 16px !important;
+    }
+    
+    /* Fix scrolling container - smooth momentum scrolling */
+    main {
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior-y: contain;
+      overscroll-behavior-block: contain;
     }
   }
 }
