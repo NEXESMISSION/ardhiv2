@@ -771,21 +771,21 @@ export function Financial() {
           <div className="space-y-4 sm:space-y-6">
             {/* Summary Card */}
             {paymentsByLand.length > 0 && (
-              <Card className="bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-950/20 dark:to-emerald-950/20 border-green-200 dark:border-green-800">
+              <Card className="bg-gradient-to-r from-green-50 to-emerald-50 border-green-200">
                 <CardHeader className="p-4 sm:p-6">
                   <CardTitle className="text-base sm:text-lg">الملخص</CardTitle>
                 </CardHeader>
                 <CardContent className="p-4 sm:p-6 pt-0">
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4">
-                    <div className="bg-white dark:bg-gray-900 p-3 rounded-lg">
+                    <div className="bg-white p-3 rounded-lg">
                       <p className="text-xs sm:text-sm text-muted-foreground mb-1">إجمالي المدفوعات</p>
                       <p className="text-lg sm:text-xl font-bold text-green-600">{formatCurrency(paymentsByLand.reduce((sum, g) => sum + g.totalAmount, 0))}</p>
                     </div>
-                    <div className="bg-white dark:bg-gray-900 p-3 rounded-lg">
+                    <div className="bg-white p-3 rounded-lg">
                       <p className="text-xs sm:text-sm text-muted-foreground mb-1">عدد الدفعات</p>
                       <p className="text-lg sm:text-xl font-bold text-blue-600">{paymentsByLand.length}</p>
                     </div>
-                    <div className="bg-white dark:bg-gray-900 p-3 rounded-lg col-span-2 sm:col-span-1">
+                    <div className="bg-white p-3 rounded-lg col-span-2 sm:col-span-1">
                       <p className="text-xs sm:text-sm text-muted-foreground mb-1">إجمالي عدد المدفوعات</p>
                       <p className="text-lg sm:text-xl font-bold text-purple-600">{paymentsByLand.reduce((sum, g) => sum + g.paymentCount, 0)}</p>
                     </div>
@@ -816,7 +816,7 @@ export function Financial() {
                     return (
                       <div key={groupIndex} className="space-y-2">
                         {/* Group Header Card */}
-                        <Card className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/20 dark:to-indigo-950/20 border-blue-200 dark:border-blue-800">
+                        <Card className="bg-gradient-to-r from-blue-50 to-indigo-50 border-blue-200">
                           <CardContent className="p-4">
                             <div className="space-y-3">
                               <div>
@@ -1063,25 +1063,25 @@ export function Financial() {
           <div className="space-y-4 sm:space-y-6">
             {/* Summary Card */}
             {filteredData.groupedCompanyFees.length > 0 && (
-              <Card className="bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-950/20 dark:to-purple-950/20 border-indigo-200 dark:border-indigo-800">
+                          <Card className="bg-gradient-to-r from-indigo-50 to-purple-50 border-indigo-200">
                 <CardHeader className="p-4 sm:p-6">
                   <CardTitle className="text-base sm:text-lg">الملخص</CardTitle>
                 </CardHeader>
                 <CardContent className="p-4 sm:p-6 pt-0">
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
-                    <div className="bg-white dark:bg-gray-900 p-3 rounded-lg">
+                    <div className="bg-white p-3 rounded-lg">
                       <p className="text-xs sm:text-sm text-muted-foreground mb-1">إجمالي العمولة</p>
                       <p className="text-lg sm:text-xl font-bold text-indigo-600">{formatCurrency(filteredData.companyFeesTotal)}</p>
                     </div>
-                    <div className="bg-white dark:bg-gray-900 p-3 rounded-lg">
+                    <div className="bg-white p-3 rounded-lg">
                       <p className="text-xs sm:text-sm text-muted-foreground mb-1">عدد المبيعات</p>
                       <p className="text-lg sm:text-xl font-bold text-blue-600">{filteredData.groupedCompanyFees.reduce((sum, g) => sum + g.sales.length, 0)}</p>
                     </div>
-                    <div className="bg-white dark:bg-gray-900 p-3 rounded-lg">
+                    <div className="bg-white p-3 rounded-lg">
                       <p className="text-xs sm:text-sm text-muted-foreground mb-1">عدد العملاء</p>
                       <p className="text-lg sm:text-xl font-bold text-purple-600">{filteredData.groupedCompanyFees.length}</p>
                     </div>
-                    <div className="bg-white dark:bg-gray-900 p-3 rounded-lg">
+                    <div className="bg-white p-3 rounded-lg">
                       <p className="text-xs sm:text-sm text-muted-foreground mb-1">عدد القطع</p>
                       <p className="text-lg sm:text-xl font-bold text-green-600">{filteredData.groupedCompanyFees.reduce((sum, g) => sum + g.piecesCount, 0)}</p>
                     </div>
@@ -1168,7 +1168,7 @@ export function Financial() {
                       return (
                         <div key={groupIndex} className="space-y-2">
                           {/* Group Header Card */}
-                          <Card className="bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-950/20 dark:to-purple-950/20 border-indigo-200 dark:border-indigo-800">
+                          <Card className="bg-gradient-to-r from-indigo-50 to-purple-50 border-indigo-200">
                             <CardContent className="p-4">
                               <div className="space-y-3">
                                 <div>
