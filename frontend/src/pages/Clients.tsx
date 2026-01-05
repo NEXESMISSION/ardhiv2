@@ -716,10 +716,10 @@ export function Clients() {
                                   }
                                   className="text-xs"
                                 >
-                                  {sale.status === 'Completed' ? 'مباع' :
-                                   sale.status === 'Cancelled' ? 'ملغي' :
-                                   (sale as any).is_confirmed || (sale as any).big_advance_confirmed ? 'قيد الدفع' :
-                                   'غير مؤكد'}
+                                  {(sale.status === 'Completed' || (sale as any).status === 'Completed') ? 'مباع' :
+                                   sale.payment_type === 'Installment' && (sale as any).status !== 'Completed' ? 'بالتقسيط' :
+                                   sale.payment_type === 'Full' && (sale as any).status !== 'Completed' ? 'بالحاضر' :
+                                   'محجوز'}
                                 </Badge>
                               </TableCell>
                             </TableRow>

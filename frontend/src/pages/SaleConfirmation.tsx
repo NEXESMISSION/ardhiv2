@@ -987,7 +987,7 @@ export function SaleConfirmation() {
                         return null
                       })()}
                       <Badge variant={sale.status === 'Pending' ? 'warning' : 'secondary'} className="text-xs">
-                        {sale.status === 'Pending' ? 'غير مؤكد' : 'قيد الدفع'}
+                        {sale.status === 'Pending' ? 'محجوز' : 'قيد الدفع'}
                       </Badge>
                       <Badge variant="outline" className="text-xs">
                         {sale.payment_type === 'Full' ? 'بالحاضر' : sale.payment_type === 'Installment' ? 'بالتقسيط' : sale.payment_type || '-'}
@@ -1361,10 +1361,10 @@ export function SaleConfirmation() {
                                     : 'warning'
                                 }
                               >
-                                {sale.status === 'Completed' ? 'مباع' :
-                                 sale.status === 'Cancelled' ? 'ملغي' :
-                                 sale.status === 'Pending' && (sale.big_advance_amount || 0) > 0 ? 'قيد الدفع' :
-                                 'غير مؤكد'}
+                                {(sale.status === 'Completed' || (sale as any).status === 'Completed') ? 'مباع' :
+                                 sale.payment_type === 'Installment' && (sale as any).status !== 'Completed' ? 'بالتقسيط' :
+                                 sale.payment_type === 'Full' && (sale as any).status !== 'Completed' ? 'بالحاضر' :
+                                 'محجوز'}
                               </Badge>
                             </TableCell>
                           </TableRow>

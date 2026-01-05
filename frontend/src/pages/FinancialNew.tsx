@@ -511,12 +511,15 @@ export function Financial() {
             group.pieces.push(pieceGroup)
           }
           
-          // Add payment to piece group
-          pieceGroup.totalAmount += payment.amount_paid
+          // Add payment to piece group (amount per piece = total payment / number of pieces)
+          const amountPerPiece = payment.amount_paid / pieces.length
+          pieceGroup.totalAmount += amountPerPiece
           if (payment.payment_type === 'Installment') {
             pieceGroup.installmentCount += 1
           }
-          pieceGroup.payments.push(payment)
+          if (!pieceGroup.payments.find(p => p.id === payment.id)) {
+            pieceGroup.payments.push(payment)
+          }
           
           // Track users
           if ((payment as any).recorded_by_user?.name) {
@@ -526,10 +529,10 @@ export function Financial() {
             pieceGroup.soldByUsers.add((payment.sale as any).created_by_user.name)
           }
           
-          // Also add to batch totals
-          group.totalAmount += payment.amount_paid
-          group.paymentCount += 1
+          // Also add to batch totals (only once per payment, not per piece)
           if (!group.payments.find(p => p.id === payment.id)) {
+            group.totalAmount += payment.amount_paid
+            group.paymentCount += 1
             group.payments.push(payment)
           }
         })
@@ -676,7 +679,7 @@ export function Financial() {
     'Installment': 'الأقساط',
     'SmallAdvance': 'العربون (مبلغ الحجز)',
     'Full': 'الدفع الكامل',
-    'BigAdvance': 'الدفعة الأولى (الكبيرة)',
+    'BigAdvance': 'الدفعة الأولى',
   }
   
   const getPaymentTypeLabel = (type: PaymentTypeFilter): string => {
@@ -716,10 +719,13 @@ export function Financial() {
         <CardContent className="pt-3 sm:pt-4 pb-3 sm:pb-4 px-3 sm:px-4 md:px-6">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-xs sm:text-sm font-medium text-green-100 mb-1">المجموع الإجمالي</p>
+              <p className="text-xs sm:text-sm font-medium text-green-100 mb-1">المجموع الإجمالي (المستلم + العمولة المستحقة)</p>
               <p className="text-2xl sm:text-3xl md:text-4xl font-bold">{formatCurrency(filteredData.cashReceived + filteredData.companyFeesTotal)}</p>
               <p className="text-xs text-green-100 mt-1">
-                المستلم ({formatCurrency(filteredData.cashReceived)}) + العمولة ({formatCurrency(filteredData.companyFeesTotal)})
+                المستلم نقداً: {formatCurrency(filteredData.cashReceived)} | العمولة المستحقة: {formatCurrency(filteredData.companyFeesTotal)}
+              </p>
+              <p className="text-xs text-green-200 mt-1 opacity-90">
+                ملاحظة: العمولة هي مبلغ مستحق يتم إضافته لسعر البيع، وليس مبلغاً مستلماً نقداً
               </p>
             </div>
             <div className="text-right hidden sm:block">
@@ -1065,7 +1071,7 @@ export function Financial() {
             <CardContent className="p-3">
               <div className="flex items-center justify-between">
                 <div>
-                  <h3 className="font-bold text-sm text-purple-700">الدفعة الأولى (الكبيرة)</h3>
+                  <h3 className="font-bold text-sm text-purple-700">الدفعة الأولى</h3>
                   {(() => {
                     const data = getPaymentsByLand('BigAdvance')
                     if (data.length > 0) {

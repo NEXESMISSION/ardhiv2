@@ -1915,10 +1915,11 @@ export function LandManagement() {
               onChange={(e) => setFilterStatus(e.target.value)}
             className="w-full sm:w-32 h-9 text-sm"
             >
-              <option value="Available">متاح</option>
+              <option value="all">الكل</option>
               <option value="Reserved">محجوز</option>
+              <option value="Installment">بالتقسيط</option>
+              <option value="Full">بالحاضر</option>
               <option value="Sold">مباع</option>
-              <option value="Cancelled">ملغي</option>
             </Select>
           </div>
       </div>
@@ -1933,7 +1934,7 @@ export function LandManagement() {
           <Card key={batch.id} className="border-gray-200">
             {/* Batch Header - Compact */}
             <div 
-              className="p-3 cursor-pointer hover:bg-gray-50 transition-colors"
+              className="p-3 cursor-pointer hover:bg-gray-50 active:bg-gray-100 transition-colors touch-manipulation"
               onClick={() => toggleBatch(batch.id)}
             >
             <div className="flex items-center justify-between">

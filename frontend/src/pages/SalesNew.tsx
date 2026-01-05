@@ -152,7 +152,7 @@ export function SalesNew() {
   }
 
   // UI/UX: Filter and sort states
-  const [statusFilter, setStatusFilter] = useState<'all' | 'Pending' | 'AwaitingPayment' | 'InstallmentsOngoing' | 'Completed'>('all')
+  const [statusFilter, setStatusFilter] = useState<'all' | 'Reserved' | 'Installment' | 'Full' | 'Completed'>('all')
   const [paymentTypeFilter, setPaymentTypeFilter] = useState<'all' | 'Full' | 'Installment'>('all')
   const [clientFilter, setClientFilter] = useState('')
   const [landBatchFilter, setLandBatchFilter] = useState<string>('all')
@@ -276,7 +276,7 @@ export function SalesNew() {
           if (sale.status === 'Completed') {
             status = 'Completed' // مباع - fully paid
           } else if (!isConfirmed) {
-            // Not confirmed yet - always show as Pending (غير مؤكد)
+            // Not confirmed yet - always show as Pending (محجوز)
             status = 'Pending'
           } else {
             // Confirmed - check payment status
@@ -296,7 +296,7 @@ export function SalesNew() {
           if (sale.status === 'Completed') {
             status = 'Completed'
           } else if (!isConfirmed) {
-            status = 'Pending' // غير مؤكد - not confirmed yet
+            status = 'Pending' // محجوز - not confirmed yet
           } else {
             status = 'AwaitingPayment' // قيد الدفع - confirmed but waiting for payment
           }
@@ -360,46 +360,6 @@ export function SalesNew() {
   const filteredAndSortedSales = useMemo(() => {
     let filtered = pieceSales.filter(s => s.status !== 'Cancelled')
 
-    // Apply status filter
-    if (statusFilter !== 'all') {
-      filtered = filtered.filter(s => s.status === statusFilter)
-    }
-
-    // Apply payment type filter
-    if (paymentTypeFilter !== 'all') {
-      filtered = filtered.filter(s => s.paymentType === paymentTypeFilter)
-    }
-
-    // Apply client filter
-    if (clientFilter) {
-      const search = clientFilter.toLowerCase()
-      filtered = filtered.filter(s => 
-        s.clientName.toLowerCase().includes(search) ||
-        s.clientId.toLowerCase().includes(search)
-      )
-    }
-
-    // Apply land batch filter
-    if (landBatchFilter !== 'all') {
-      filtered = filtered.filter(s => s.batchName === landBatchFilter)
-    }
-
-    // Apply land piece number search
-    if (landPieceSearch) {
-      const search = landPieceSearch.toLowerCase().trim()
-      filtered = filtered.filter(s => {
-        // Search in piece name (e.g., "#123")
-        const pieceName = s.pieceName.toLowerCase()
-        // Remove # and compare
-        const pieceNumber = pieceName.replace('#', '').replace(/\D/g, '')
-        const searchNumber = search.replace('#', '').replace(/\D/g, '')
-        
-        return pieceName.includes(search) || 
-               pieceNumber.includes(searchNumber) ||
-               s.batchName.toLowerCase().includes(search)
-      })
-    }
-
     // Sort - default to newest first (DESC by sale_date, then created_at)
     filtered = [...filtered].sort((a, b) => {
       let comparison = 0
@@ -426,29 +386,8 @@ export function SalesNew() {
     })
 
     return filtered
-  }, [pieceSales, statusFilter, paymentTypeFilter, clientFilter, landBatchFilter, landPieceSearch, sortBy, sortOrder])
+  }, [pieceSales, sortBy, sortOrder])
 
-  // Get unique land batch names for filter dropdown
-  const uniqueLandBatches = useMemo(() => {
-    const batches = new Set(pieceSales.map(s => s.batchName).filter(Boolean))
-    return Array.from(batches).sort()
-  }, [pieceSales])
-
-  // Clear all filters
-  const clearFilters = () => {
-    setStatusFilter('all')
-    setPaymentTypeFilter('all')
-    setClientFilter('')
-    setLandBatchFilter('all')
-    setLandPieceSearch('')
-  }
-
-  // Check if any filters are active
-  const hasActiveFilters = statusFilter !== 'all' || 
-                           paymentTypeFilter !== 'all' || 
-                           clientFilter !== '' || 
-                           landBatchFilter !== 'all' || 
-                           landPieceSearch !== ''
 
   // Calculate monthly summary per client
   const clientMonthlySummary = useMemo((): ClientMonthlySummary[] => {
@@ -1498,67 +1437,11 @@ export function SalesNew() {
       <div className="flex flex-wrap items-center gap-2 sm:gap-4 text-xs sm:text-sm">
         <span className="text-muted-foreground">إجمالي: <strong className="text-blue-600">{filteredAndSortedSales.length}</strong></span>
         <span className="text-muted-foreground">مباع: <strong className="text-green-600">{filteredAndSortedSales.filter(s => s.status === 'Completed').length}</strong></span>
-        <span className="text-muted-foreground">قيد الدفع: <strong className="text-yellow-600">{filteredAndSortedSales.filter(s => s.status === 'AwaitingPayment').length}</strong></span>
-        <span className="text-muted-foreground">بالتقسيط: <strong className="text-purple-600">{filteredAndSortedSales.filter(s => s.status === 'InstallmentsOngoing').length}</strong></span>
+        <span className="text-muted-foreground">بالحاضر: <strong className="text-blue-600">{filteredAndSortedSales.filter(s => s.paymentType === 'Full' && s.status !== 'Completed').length}</strong></span>
+        <span className="text-muted-foreground">بالتقسيط: <strong className="text-purple-600">{filteredAndSortedSales.filter(s => s.paymentType === 'Installment' && s.status !== 'Completed').length}</strong></span>
+        <span className="text-muted-foreground">محجوز: <strong className="text-orange-600">{filteredAndSortedSales.filter(s => s.status === 'Pending' && !(s as any).is_confirmed).length}</strong></span>
       </div>
 
-      {/* Compact Search and Filters */}
-      <div className="space-y-2">
-      <div className="flex flex-col sm:flex-row gap-2">
-        <Input
-          type="text"
-            placeholder="بحث عن العميل..."
-          value={clientFilter}
-          onChange={e => setClientFilter(e.target.value)}
-          className="flex-1"
-        />
-          <Input
-            type="text"
-            placeholder="بحث عن رقم القطعة..."
-            value={landPieceSearch}
-            onChange={e => setLandPieceSearch(e.target.value)}
-            className="flex-1"
-          />
-          <Select 
-            value={landBatchFilter} 
-            onChange={e => setLandBatchFilter(e.target.value)} 
-            className="w-full sm:w-48"
-          >
-            <option value="all">كل الدفعات</option>
-            {uniqueLandBatches.map(batch => (
-              <option key={batch} value={batch}>{batch}</option>
-            ))}
-          </Select>
-        <Select value={statusFilter} onChange={e => setStatusFilter(e.target.value as any)} className="w-full sm:w-40">
-            <option value="all">كل الحالات</option>
-          <option value="Pending">معلق</option>
-          <option value="AwaitingPayment">قيد الدفع</option>
-          <option value="InstallmentsOngoing">بالتقسيط</option>
-          <option value="Completed">مباع</option>
-        </Select>
-          <Select value={paymentTypeFilter} onChange={e => setPaymentTypeFilter(e.target.value as any)} className="w-full sm:w-40">
-            <option value="all">كل الأنواع</option>
-            <option value="Full">بالحاضر</option>
-            <option value="Installment">بالتقسيط</option>
-        </Select>
-        </div>
-        {hasActiveFilters && (
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-muted-foreground">
-              {filteredAndSortedSales.length} نتيجة من {pieceSales.filter(s => s.status !== 'Cancelled').length}
-            </span>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={clearFilters}
-              className="text-xs"
-            >
-              <X className="h-3 w-3 ml-1" />
-              مسح الفلاتر
-            </Button>
-          </div>
-        )}
-      </div>
 
       {/* Mobile Card View / Desktop Table View */}
       {filteredAndSortedSales.length === 0 ? (
@@ -1607,11 +1490,11 @@ export function SalesNew() {
                           }
                           className="text-xs flex-shrink-0"
                         >
-                          {sale.status === 'Completed' ? 'مباع' :
-                           sale.status === 'InstallmentsOngoing' ? 'بالتقسيط' :
-                           sale.status === 'Pending' && !(sale as any).is_confirmed ? 'غير مؤكد' :
-                           sale.status === 'AwaitingPayment' ? 'قيد الدفع' :
-                           sale.status === 'Pending' ? 'معلق' : 'ملغي'}
+                          {(sale.status === 'Completed' || (sale as any).status === 'Completed') ? 'مباع' :
+                           sale.paymentType === 'Installment' && (sale as any).status !== 'Completed' ? 'بالتقسيط' :
+                           sale.paymentType === 'Full' && (sale as any).status !== 'Completed' ? 'بالحاضر' :
+                           sale.status === 'Pending' && !(sale as any).is_confirmed ? 'محجوز' :
+                           'محجوز'}
                         </Badge>
                       </div>
                       
@@ -1780,11 +1663,11 @@ export function SalesNew() {
                           }
                           className="text-xs"
                         >
-                          {sale.status === 'Completed' ? 'مباع' :
-                           sale.status === 'InstallmentsOngoing' ? 'بالتقسيط' :
-                           sale.status === 'Pending' && !(sale as any).is_confirmed ? 'غير مؤكد' :
-                           sale.status === 'AwaitingPayment' ? 'قيد الدفع' :
-                           sale.status === 'Pending' ? 'معلق' : 'ملغي'}
+                          {(sale.status === 'Completed' || (sale as any).status === 'Completed') ? 'مباع' :
+                           sale.paymentType === 'Installment' && (sale as any).status !== 'Completed' ? 'بالتقسيط' :
+                           sale.paymentType === 'Full' && (sale as any).status !== 'Completed' ? 'بالحاضر' :
+                           sale.status === 'Pending' && !(sale as any).is_confirmed ? 'محجوز' :
+                           'محجوز'}
                         </Badge>
                       </TableCell>
                       {user?.role === 'Owner' && (() => {
@@ -1874,11 +1757,14 @@ export function SalesNew() {
                 }}
               >
                 <option value="">اختر العميل</option>
-                {filteredClients.map(client => (
-                  <option key={client.id} value={client.id}>
-                    {client.name} {client.phone ? `- ${client.phone}` : ''}
-                  </option>
-                ))}
+                {filteredClients.map(client => {
+                  if (!client || !client.id) return null
+                  return (
+                    <option key={client.id} value={client.id}>
+                      {client.name} {client.phone ? `- ${client.phone}` : ''}
+                    </option>
+                  )
+                })}
               </Select>
               {clientSearch && filteredClients.length === 0 && (
                 <p className="text-xs text-muted-foreground">لم يتم العثور على عميل</p>
@@ -2457,7 +2343,7 @@ export function SalesNew() {
                                 {sale.status === 'Completed' ? 'مباع' :
                                  sale.status === 'Cancelled' ? 'ملغي' :
                                  (sale as any).is_confirmed || (sale as any).big_advance_confirmed ? 'قيد الدفع' :
-                                 'غير مؤكد'}
+                                 'محجوز'}
                               </Badge>
                             </TableCell>
                           </TableRow>

@@ -2327,7 +2327,7 @@ export function Installments() {
                                 <div className="text-xs text-muted-foreground">
                                   {sale.landPieceCount || 0} قطعة • {sale.installments.length} قسط مستحق
                                   {!sale.isConfirmed && (
-                                    <Badge variant="outline" className="text-xs mr-2">غير مؤكد</Badge>
+                                    <Badge variant="outline" className="text-xs mr-2">محجوز</Badge>
                                   )}
                                 </div>
                               </div>
@@ -2850,10 +2850,10 @@ export function Installments() {
                                     }
                                     className="text-xs"
                                   >
-                                    {sale.status === 'Completed' ? 'مباع' :
-                                     sale.status === 'Cancelled' ? 'ملغي' :
-                                     sale.is_confirmed || sale.big_advance_confirmed ? 'قيد الدفع' :
-                                     'غير مؤكد'}
+                                    {(sale.status === 'Completed' || (sale as any).status === 'Completed') ? 'مباع' :
+                                     sale.payment_type === 'Installment' && (sale as any).status !== 'Completed' ? 'بالتقسيط' :
+                                     sale.payment_type === 'Full' && (sale as any).status !== 'Completed' ? 'بالحاضر' :
+                                     'محجوز'}
                                   </Badge>
                                 </TableCell>
                               </TableRow>
