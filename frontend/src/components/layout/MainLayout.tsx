@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
-import { Menu, X, ArrowRight } from 'lucide-react'
+import { Menu, X, ArrowLeft } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { PullToRefresh } from './PullToRefresh'
 import { useSwipeGesture } from '@/hooks/useSwipeGesture'
@@ -82,7 +82,7 @@ export function MainLayout() {
             onClick={() => navigate(-1)}
             className="bg-background"
           >
-            <ArrowRight className="h-5 w-5" />
+            <ArrowLeft className="h-5 w-5" />
           </Button>
         )}
       </div>

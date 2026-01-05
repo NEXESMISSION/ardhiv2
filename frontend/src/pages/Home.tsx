@@ -116,7 +116,7 @@ export function Home() {
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
           {[1, 2, 3, 4, 5, 6].map(i => (
             <div key={i} className="h-20 bg-gray-100 rounded-xl animate-pulse" />
-          ))}
+            ))}
         </div>
       </div>
     )
@@ -127,16 +127,16 @@ export function Home() {
       {/* Simple Grid of Navigation Items */}
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 sm:gap-3">
         {filteredItems.map((item) => {
-          const Icon = item.icon
-          return (
+                  const Icon = item.icon
+                  return (
             <button
-              key={item.route}
-              onClick={() => navigate(item.route)}
+                      key={item.route}
+                      onClick={() => navigate(item.route)}
               className="flex items-center gap-3 p-3 sm:p-4 bg-white border border-gray-200 rounded-xl hover:border-gray-300 hover:shadow-sm transition-all group text-right"
-            >
+                    >
               <div className={`${item.color} p-2 sm:p-2.5 rounded-lg flex-shrink-0`}>
                 <Icon className="h-5 w-5 sm:h-6 sm:w-6 text-white" />
-              </div>
+                      </div>
               <div className="flex-1 min-w-0">
                 <span className="font-semibold text-sm sm:text-base text-gray-800 block truncate">
                   {item.title}

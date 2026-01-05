@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo } from 'react'
 import { supabase } from '@/lib/supabase'
+import { useAuth } from '@/contexts/AuthContext'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -41,6 +42,7 @@ interface DebtPayment {
 }
 
 export function Debts() {
+  const { user } = useAuth()
   const [debts, setDebts] = useState<Debt[]>([])
   const [payments, setPayments] = useState<DebtPayment[]>([])
   const [loading, setLoading] = useState(true)
@@ -131,13 +133,18 @@ export function Debts() {
     }
 
     try {
-      const debtData = {
+      const debtData: any = {
         creditor_name: sanitizeText(form.creditor_name),
         amount_owed: parseFloat(form.amount_owed),
         due_date: form.due_date,
         check_number: form.check_number ? sanitizeText(form.check_number) : null,
         reference_number: form.reference_number ? sanitizeText(form.reference_number) : null,
         notes: form.notes ? sanitizeNotes(form.notes) : null,
+      }
+
+      // Only add created_by for new debts
+      if (!editingDebt) {
+        debtData.created_by = user?.id || null
       }
 
       if (editingDebt) {

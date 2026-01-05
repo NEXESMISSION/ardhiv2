@@ -1428,37 +1428,37 @@ export function LandManagement() {
       <div className="flex flex-col gap-3">
         <div className="flex items-center justify-between">
           <h1 className="text-xl sm:text-2xl font-bold">الأراضي</h1>
-          {hasPermission('edit_land') && (
+        {hasPermission('edit_land') && (
             <Button onClick={() => openBatchDialog()} size="sm">
               <Plus className="ml-1 h-4 w-4" />
               إضافة
-            </Button>
-          )}
-        </div>
-        
+          </Button>
+        )}
+      </div>
+
         {/* Inline Filters - Compact */}
         <div className="flex flex-col sm:flex-row gap-2">
-          <Input
+              <Input
             placeholder="بحث..."
-            value={searchTerm}
-            maxLength={50}
-            onChange={(e) => {
-              setSearchTerm(e.target.value)
-              debouncedSearchFn(e.target.value)
-            }}
+                value={searchTerm}
+                maxLength={50}
+                onChange={(e) => {
+                  setSearchTerm(e.target.value)
+                  debouncedSearchFn(e.target.value)
+                }}
             className="flex-1 h-9 text-sm"
-          />
-          <Select
-            value={filterStatus}
-            onChange={(e) => setFilterStatus(e.target.value)}
+              />
+            <Select
+              value={filterStatus}
+              onChange={(e) => setFilterStatus(e.target.value)}
             className="w-full sm:w-32 h-9 text-sm"
-          >
-            <option value="Available">متاح</option>
-            <option value="Reserved">محجوز</option>
-            <option value="Sold">مباع</option>
-            <option value="Cancelled">ملغي</option>
-          </Select>
-        </div>
+            >
+              <option value="Available">متاح</option>
+              <option value="Reserved">محجوز</option>
+              <option value="Sold">مباع</option>
+              <option value="Cancelled">ملغي</option>
+            </Select>
+          </div>
       </div>
 
       {/* Batches - Compact Design */}
@@ -1474,20 +1474,20 @@ export function LandManagement() {
               className="p-3 cursor-pointer hover:bg-gray-50 transition-colors"
               onClick={() => toggleBatch(batch.id)}
             >
-              <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 flex-1 min-w-0">
-                  {expandedBatches.has(batch.id) ? (
+                {expandedBatches.has(batch.id) ? (
                     <ChevronDown className="h-4 w-4 flex-shrink-0 text-gray-500" />
-                  ) : (
+                ) : (
                     <ChevronRight className="h-4 w-4 flex-shrink-0 text-gray-500" />
-                  )}
+                )}
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-bold text-sm truncate">{batch.name}</span>
                       {batch.location && (
                         <span className="text-xs text-primary font-medium">{batch.location}</span>
-                      )}
-                    </div>
+                    )}
+                </div>
                     <div className="flex items-center gap-3 text-xs text-muted-foreground mt-0.5">
                       <span>{batch.total_surface} م²</span>
                       <span className="flex items-center gap-1">
@@ -1495,47 +1495,47 @@ export function LandManagement() {
                         {soldCount > 0 && <span>• {soldCount} مباع</span>}
                         {reservedCount > 0 && <span>• {reservedCount} محجوز</span>}
                       </span>
-                    </div>
+              </div>
                   </div>
                 </div>
                 <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                  {hasPermission('edit_land') && (
-                    <>
+                {hasPermission('edit_land') && (
+                  <>
                       <Button variant="ghost" size="icon" onClick={() => openBatchDialog(batch)} className="h-7 w-7">
                         <Edit className="h-3.5 w-3.5" />
-                      </Button>
-                      {hasPermission('delete_land') && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => deleteBatch(batch.id)}
+                    </Button>
+                    {hasPermission('delete_land') && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => deleteBatch(batch.id)}
                           className="h-7 w-7 text-red-500 hover:text-red-600"
-                        >
+                      >
                           <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      )}
-                    </>
-                  )}
-                </div>
+                      </Button>
+                    )}
+                  </>
+                )}
               </div>
+            </div>
             </div>
 
             {/* Expanded Content */}
-            {expandedBatches.has(batch.id) && (
+          {expandedBatches.has(batch.id) && (
               <div className="border-t">
                 {/* Add Piece Button */}
                 {hasPermission('edit_land') && (
                   <div className="p-2 bg-gray-50 border-b">
                     <Button variant="outline" size="sm" onClick={() => openPieceDialog(batch.id)} className="w-full h-8 text-xs">
                       <Plus className="ml-1 h-3.5 w-3.5" />
-                      إضافة قطعة
-                    </Button>
-                  </div>
+                    إضافة قطعة
+                  </Button>
+              </div>
                 )}
 
-                {(!batch.land_pieces || batch.land_pieces.length === 0) ? (
+              {(!batch.land_pieces || batch.land_pieces.length === 0) ? (
                   <p className="text-center text-muted-foreground py-4 text-sm">لا توجد قطع</p>
-                ) : (
+              ) : (
                   <>
                     {/* Mobile: Compact Grid */}
                     <div className="grid grid-cols-2 gap-2 p-2 md:hidden">
@@ -1601,7 +1601,7 @@ export function LandManagement() {
                     {/* Desktop: Compact Table */}
                     <div className="hidden md:block">
                       <Table>
-                        <TableHeader>
+                    <TableHeader>
                           <TableRow className="text-xs">
                             <TableHead className="py-2">قطعة</TableHead>
                             <TableHead className="py-2">م²</TableHead>
@@ -1609,10 +1609,10 @@ export function LandManagement() {
                             <TableHead className="py-2">أقساط</TableHead>
                             <TableHead className="py-2">الحالة</TableHead>
                             <TableHead className="py-2">إجراءات</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {batch.land_pieces.map((piece) => (
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {batch.land_pieces.map((piece) => (
                             <TableRow key={piece.id} className="text-sm">
                               <TableCell className="py-2 font-medium">{piece.piece_number}</TableCell>
                               <TableCell className="py-2">{piece.surface_area}</TableCell>
@@ -1620,11 +1620,11 @@ export function LandManagement() {
                               <TableCell className="py-2 text-blue-600">{formatCurrency(piece.selling_price_installment || 0)}</TableCell>
                               <TableCell className="py-2">
                                 <Badge variant={statusColors[piece.status]} className="text-xs">
-                                  {piece.status === 'Available' ? 'متاح' :
-                                   piece.status === 'Reserved' ? 'محجوز' :
-                                   piece.status === 'Sold' ? 'مباع' : 'ملغي'}
-                                </Badge>
-                              </TableCell>
+                              {piece.status === 'Available' ? 'متاح' :
+                               piece.status === 'Reserved' ? 'محجوز' :
+                               piece.status === 'Sold' ? 'مباع' : 'ملغي'}
+                            </Badge>
+                          </TableCell>
                               <TableCell className="py-2">
                                 <div className="flex items-center gap-0.5">
                                   {piece.status === 'Available' && hasPermission('create_sales') && (
@@ -1637,38 +1637,38 @@ export function LandManagement() {
                                       بيع
                                     </Button>
                                   )}
-                                  {hasPermission('edit_land') && (
-                                    <Button
-                                      variant="ghost"
-                                      size="icon"
-                                      onClick={() => openPieceDialog(batch.id, piece)}
+                          {hasPermission('edit_land') && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => openPieceDialog(batch.id, piece)}
                                       className="h-7 w-7"
-                                    >
+                              >
                                       <Edit className="h-3.5 w-3.5" />
-                                    </Button>
+                              </Button>
                                   )}
-                                  {user?.role === 'Owner' && (
-                                    <Button
-                                      variant="ghost"
-                                      size="icon"
-                                      onClick={() => openPriceEditDialog(batch.id, piece)}
+                                {user?.role === 'Owner' && (
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => openPriceEditDialog(batch.id, piece)}
                                       className="h-7 w-7 text-blue-600"
-                                    >
+                                  >
                                       <DollarSign className="h-3.5 w-3.5" />
-                                    </Button>
-                                  )}
-                                </div>
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </div>
+                                  </Button>
+                                )}
+                              </div>
+                            </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
                   </>
-                )}
+              )}
               </div>
-            )}
-          </Card>
+          )}
+        </Card>
         )
       })}
 

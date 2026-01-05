@@ -666,7 +666,16 @@ export function Clients() {
                         .sort((a, b) => new Date(b.sale_date).getTime() - new Date(a.sale_date).getTime()) // Sort by date descending (newest first)
                         .map((sale) => {
                           const landPieces = (sale as any)._landPieces || []
-                          const pieceNumbers = landPieces.map((p: any) => p?.piece_number).filter(Boolean).join('، ')
+                          // Format: "#6 (tanyour)" or just "#6" if no batch
+                          const pieceDisplay = landPieces.map((p: any) => {
+                            if (!p?.piece_number) return null
+                            const batchName = p?.land_batch?.name
+                            return batchName ? `#${p.piece_number} (${batchName})` : `#${p.piece_number}`
+                          }).filter(Boolean).join('، ')
+                          
+                          // Fallback: if no piece data, show count
+                          const pieceCount = sale.land_piece_ids?.length || 0
+                          const displayText = pieceDisplay || (pieceCount > 0 ? `${pieceCount} قطعة` : '-')
                           
                           return (
                             <TableRow key={sale.id} className="hover:bg-blue-50/50 transition-colors">
@@ -677,10 +686,20 @@ export function Clients() {
                                 </Badge>
                               </TableCell>
                               <TableCell>
-                                {pieceNumbers ? (
-                                  <Badge variant="outline" className="text-xs">
-                                    {pieceNumbers}
-                                  </Badge>
+                                {pieceDisplay ? (
+                                  <div className="flex flex-wrap gap-1">
+                                    {landPieces.map((p: any, idx: number) => {
+                                      if (!p?.piece_number) return null
+                                      const batchName = p?.land_batch?.name
+                                      return (
+                                        <Badge key={idx} variant="outline" className="text-xs">
+                                          #{p.piece_number}{batchName ? ` (${batchName})` : ''}
+                                        </Badge>
+                                      )
+                                    })}
+                                  </div>
+                                ) : pieceCount > 0 ? (
+                                  <span className="text-muted-foreground text-xs">{pieceCount} قطعة</span>
                                 ) : (
                                   <span className="text-muted-foreground text-xs">-</span>
                                 )}

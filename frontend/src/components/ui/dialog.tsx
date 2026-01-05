@@ -144,20 +144,22 @@ const DialogContent = React.forwardRef<
       <div
         ref={ref}
         className={cn(
-          "fixed left-[50%] top-[50%] z-50 grid w-full max-w-[95vw] sm:max-w-lg md:max-w-2xl lg:max-w-3xl translate-x-[-50%] translate-y-[-50%] gap-3 sm:gap-4 border bg-background p-3 sm:p-4 md:p-6 shadow-lg duration-200 rounded-lg sm:rounded-lg max-h-[95vh] sm:max-h-[90vh] overflow-y-auto",
+          "fixed left-[50%] top-[50%] z-50 grid w-full max-w-[95vw] sm:max-w-lg md:max-w-2xl lg:max-w-3xl translate-x-[-50%] translate-y-[-50%] gap-3 sm:gap-4 border bg-background p-3 sm:p-4 md:p-6 shadow-lg duration-200 rounded-lg sm:rounded-lg max-h-[95vh] sm:max-h-[90vh] overflow-y-auto relative",
           className
         )}
         {...props}
       >
-        {children}
         <button
-          className="absolute right-2 sm:right-4 top-2 sm:top-4 rounded-full bg-red-500 hover:bg-red-600 text-white transition-colors focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 disabled:pointer-events-none p-1.5 flex items-center justify-center"
+          className="absolute left-2 sm:left-4 top-2 sm:top-4 z-10 rounded-full bg-red-500 hover:bg-red-600 text-white transition-colors focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 disabled:pointer-events-none p-1.5 sm:p-2 flex items-center justify-center shadow-md"
           onClick={() => context.setOpen(false)}
           type="button"
+          aria-label="إغلاق"
         >
-          <X className="h-4 w-4" />
-          <span className="sr-only">Close</span>
+          <X className="h-4 w-4 sm:h-5 sm:w-5" />
         </button>
+        <div className="pr-8 sm:pr-10">
+          {children}
+        </div>
       </div>
     </DialogPortal>
   )
@@ -170,7 +172,7 @@ const DialogHeader = ({
 }: React.HTMLAttributes<HTMLDivElement>) => (
   <div
     className={cn(
-      "flex flex-col space-y-1 sm:space-y-1.5 text-center sm:text-left pb-2 sm:pb-3",
+      "flex flex-col space-y-1 sm:space-y-1.5 text-center sm:text-left pb-2 sm:pb-3 pr-0",
       className
     )}
     {...props}

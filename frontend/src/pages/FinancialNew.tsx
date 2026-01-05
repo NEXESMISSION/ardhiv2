@@ -683,7 +683,7 @@ export function Financial() {
     if (type === null) return 'الكل'
     return paymentTypeLabels[type]
   }
-  
+
   const paymentsByLand = getPaymentsByLand(expandedPaymentType)
   
   const openPaymentDetailsDialog = (paymentType: PaymentTypeFilter) => {
@@ -732,18 +732,18 @@ export function Financial() {
       </Card>
 
       {/* Cash Received Summary - Single Card (العمولة is in the table below) */}
-      <Card className="bg-purple-50 border-purple-200">
-        <CardContent className="pt-4">
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex-1">
-              <p className="text-sm font-medium text-purple-700 mb-1">المستلم نقداً</p>
-              <p className="text-xl sm:text-2xl font-bold text-purple-800">{formatCurrency(filteredData.cashReceived)}</p>
+        <Card className="bg-purple-50 border-purple-200">
+          <CardContent className="pt-4">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex-1">
+                <p className="text-sm font-medium text-purple-700 mb-1">المستلم نقداً</p>
+                <p className="text-xl sm:text-2xl font-bold text-purple-800">{formatCurrency(filteredData.cashReceived)}</p>
+              </div>
+              <TrendingUp className="h-6 w-6 sm:h-8 sm:w-8 text-purple-500 flex-shrink-0" />
             </div>
-            <TrendingUp className="h-6 w-6 sm:h-8 sm:w-8 text-purple-500 flex-shrink-0" />
-          </div>
-          <p className="text-xs text-purple-600">{filteredData.payments.length} عملية دفع</p>
-        </CardContent>
-      </Card>
+            <p className="text-xs text-purple-600">{filteredData.payments.length} عملية دفع</p>
+          </CardContent>
+        </Card>
 
       {/* Payments & Commission - 5 Categories */}
       <div className="space-y-4">
@@ -950,7 +950,7 @@ export function Financial() {
                           <Button 
                             variant="ghost" 
                             size="sm" 
-                            onClick={() => setCompanyFeeDialogOpen(true)}
+          onClick={() => setCompanyFeeDialogOpen(true)}
                             className="text-indigo-600 hover:text-indigo-800"
                           >
                             <ChevronDown className="h-4 w-4" />
@@ -976,10 +976,10 @@ export function Financial() {
                   </TableRow>
                 </TableBody>
               </Table>
-            </CardContent>
-          </Card>
-        </div>
-        
+          </CardContent>
+        </Card>
+      </div>
+
         {/* Mobile: Card View for all 5 categories */}
         <div className="md:hidden grid grid-cols-1 gap-3">
           {/* الأقساط */}
@@ -998,11 +998,11 @@ export function Financial() {
                     }
                     return null
                   })()}
-                </div>
-                <div className="flex items-center gap-2">
+              </div>
+                        <div className="flex items-center gap-2">
                   <span className="text-lg font-bold text-blue-600">{formatCurrency(filteredData.installmentPaymentsTotal)}</span>
                   <ChevronDown className="h-4 w-4 text-blue-600" />
-                </div>
+                        </div>
               </div>
             </CardContent>
           </Card>
@@ -1023,12 +1023,12 @@ export function Financial() {
                     }
                     return null
                   })()}
-                </div>
-                <div className="flex items-center gap-2">
+              </div>
+                      <div className="flex items-center gap-2">
                   <span className="text-lg font-bold text-orange-600">{formatCurrency(filteredData.smallAdvanceTotal)}</span>
                   <ChevronDown className="h-4 w-4 text-orange-600" />
-                </div>
-              </div>
+                      </div>
+                    </div>
             </CardContent>
           </Card>
 
@@ -1048,12 +1048,12 @@ export function Financial() {
                     }
                     return null
                   })()}
-                </div>
-                <div className="flex items-center gap-2">
+                  </div>
+                        <div className="flex items-center gap-2">
                   <span className="text-lg font-bold text-green-600">{formatCurrency(filteredData.fullPaymentsTotal)}</span>
                   <ChevronDown className="h-4 w-4 text-green-600" />
-                </div>
-              </div>
+                        </div>
+            </div>
             </CardContent>
           </Card>
 
@@ -1073,11 +1073,11 @@ export function Financial() {
                     }
                     return null
                   })()}
-                </div>
-                <div className="flex items-center gap-2">
+              </div>
+                        <div className="flex items-center gap-2">
                   <span className="text-lg font-bold text-purple-600">{formatCurrency(filteredData.bigAdvanceTotal)}</span>
                   <ChevronDown className="h-4 w-4 text-purple-600" />
-                </div>
+                        </div>
               </div>
             </CardContent>
           </Card>
@@ -1098,11 +1098,11 @@ export function Financial() {
                     }
                     return null
                   })()}
-                </div>
-                <div className="flex items-center gap-2">
+              </div>
+                        <div className="flex items-center gap-2">
                   <span className="text-lg font-bold text-indigo-600">{formatCurrency(filteredData.companyFeesTotal)}</span>
                   <ChevronDown className="h-4 w-4 text-indigo-600" />
-                </div>
+                        </div>
               </div>
             </CardContent>
           </Card>
@@ -1117,7 +1117,7 @@ export function Financial() {
               <DollarSign className="h-4 w-4 sm:h-5 sm:w-5" />
               <span>تفاصيل {selectedPaymentTypeForDialog ? getPaymentTypeLabel(selectedPaymentTypeForDialog) : 'المدفوعات'}</span>
               {dateFilter !== 'all' && <span className="text-xs sm:text-sm text-muted-foreground font-normal">- {filterLabels[dateFilter]}</span>}
-            </DialogTitle>
+              </DialogTitle>
           </DialogHeader>
           
           {(() => {
@@ -1130,19 +1130,19 @@ export function Financial() {
               <>
                 {/* Desktop Table View - Grouped by land piece and date */}
                 <div className="hidden md:block overflow-x-auto -mx-4 sm:mx-0 px-4 sm:px-0" style={{ WebkitOverflowScrolling: 'touch' }}>
-                  <Table className="min-w-full">
-                    <TableHeader>
-                      <TableRow>
+              <Table className="min-w-full">
+                <TableHeader>
+                  <TableRow>
                         <TableHead>المكان</TableHead>
                         <TableHead>رقم القطعة</TableHead>
-                        <TableHead>العميل</TableHead>
+                    <TableHead>العميل</TableHead>
                         <TableHead className="text-center">عدد الأقساط</TableHead>
-                        <TableHead className="text-right">المبلغ</TableHead>
+                    <TableHead className="text-right">المبلغ</TableHead>
                         <TableHead>المستخدم</TableHead>
                         <TableHead className="text-center">تفاصيل</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                       {paymentsByLand.flatMap((group, groupIndex) => {
                         return [
                           // Land Batch Summary Row
@@ -1192,20 +1192,20 @@ export function Financial() {
                                 >
                                   <TableCell className="text-muted-foreground">{group.landBatchName}</TableCell>
                                   <TableCell className="font-medium">#{piece.pieceNumber}</TableCell>
-                                  <TableCell>
+                                <TableCell>
                                     <div className="text-sm">{Array.from(uniqueClients).join('، ')}</div>
                                   </TableCell>
                                   <TableCell className="text-center font-medium">{piece.installmentCount} قسط</TableCell>
                                   <TableCell className="text-right font-bold">{formatCurrency(piece.totalAmount)}</TableCell>
                                   <TableCell className="text-xs">
-                                    <div className="flex flex-col">
+                                  <div className="flex flex-col">
                                       {soldByUsers.length > 0 && <span>باع: {soldByUsers.join('، ')}</span>}
                                       {recordedByUsers.length > 0 && recordedByUsers.join('') !== soldByUsers.join('') && <span>سجل: {recordedByUsers.join('، ')}</span>}
-                                    </div>
-                                  </TableCell>
-                                  <TableCell className="text-center">
+                                  </div>
+                                </TableCell>
+                                <TableCell className="text-center">
                                     {isPieceExpanded ? <ChevronUp className="h-4 w-4 inline text-gray-600" /> : <ChevronDown className="h-4 w-4 inline text-gray-600" />}
-                                  </TableCell>
+                                </TableCell>
                                 </TableRow>
                                 {/* Expanded details for this piece */}
                                 {isPieceExpanded && Array.from(paymentsByDate.entries()).map(([date, datePayments]) => {
@@ -1219,7 +1219,7 @@ export function Financial() {
                                       <TableCell className="text-center text-muted-foreground">{datePayments.length}x</TableCell>
                                       <TableCell className="text-right">{formatCurrency(totalForDate)}</TableCell>
                                       <TableCell colSpan={2}></TableCell>
-                                    </TableRow>
+                              </TableRow>
                                   )
                                 })}
                               </React.Fragment>
@@ -1234,9 +1234,9 @@ export function Financial() {
                         </TableCell>
                         <TableCell>-</TableCell>
                       </TableRow>
-                    </TableBody>
-                  </Table>
-                </div>
+                </TableBody>
+              </Table>
+              </div>
 
                 {/* Mobile Card View - Compact with all hidden by default */}
                 <div className="md:hidden space-y-2">
@@ -1265,7 +1265,7 @@ export function Financial() {
                             <div className="flex-1 min-w-0">
                               <div className="font-semibold text-sm text-gray-800 truncate">{landGroup.landBatchName}</div>
                               {landGroup.location && <div className="text-xs text-gray-600 truncate">{landGroup.location}</div>}
-                            </div>
+          </div>
                             <div className="flex items-center gap-2 ml-2 flex-shrink-0">
                               <div className="text-right">
                                 <div className="text-sm font-bold text-gray-700">{formatCurrency(landGroup.totalAmount)}</div>
