@@ -1291,29 +1291,24 @@ export function Messages() {
       ) : (
         // Only show empty state for owners, non-owners just see conversation list
         profile?.role === 'Owner' ? (
-          <div className="flex-1 flex items-center justify-center bg-background md:bg-muted/30 p-4 md:p-8">
-            <div className="text-center max-w-md w-full">
-              <div className="mb-6 flex justify-center">
-                <div className="relative">
-                  <div className="h-20 w-20 rounded-full bg-primary/10 flex items-center justify-center">
-                    <MessageSquare className="h-10 w-10 text-primary" />
-                  </div>
-                  <div className="absolute -bottom-1 -right-1 h-8 w-8 rounded-full bg-primary flex items-center justify-center shadow-lg">
-                    <Plus className="h-5 w-5 text-primary-foreground" />
-                  </div>
+          <div className="flex-1 flex items-center justify-center bg-background md:bg-muted/30 p-6 md:p-8">
+            <div className="text-center w-full max-w-sm">
+              <div className="mb-4 md:mb-6 flex justify-center">
+                <div className="h-16 w-16 md:h-20 md:w-20 rounded-full bg-primary/10 flex items-center justify-center">
+                  <MessageSquare className="h-8 w-8 md:h-10 md:w-10 text-primary" />
                 </div>
               </div>
-              <h3 className="text-xl font-bold mb-2 text-foreground">ابدأ محادثة جديدة</h3>
-              <p className="text-sm text-muted-foreground mb-6">
-                اختر محادثة من القائمة أو أنشئ محادثة جديدة للتواصل مع العمال
+              <h3 className="text-lg md:text-xl font-semibold mb-2 md:mb-3 text-foreground">ابدأ محادثة جديدة</h3>
+              <p className="text-xs md:text-sm text-muted-foreground mb-5 md:mb-6 px-2">
+                اختر محادثة من القائمة أو أنشئ محادثة جديدة
               </p>
               <Button 
                 onClick={() => setNewConversationOpen(true)}
-                className="w-full md:w-auto px-6 py-6 md:py-2 h-auto text-base md:text-sm"
-                size="lg"
+                className="w-full md:w-auto px-5 md:px-6 py-2.5 md:py-2 text-sm md:text-sm"
+                size="default"
               >
-                <Plus className="h-5 w-5 ml-2" />
-                إنشاء محادثة جديدة
+                <Plus className="h-4 w-4 md:h-5 md:w-5 ml-2" />
+                محادثة جديدة
               </Button>
             </div>
           </div>
