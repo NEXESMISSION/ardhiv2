@@ -953,17 +953,13 @@ export function Expenses() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
               <div className="space-y-1.5 sm:space-y-2">
                 <Label htmlFor="category_id" className="text-xs sm:text-sm">الفئة *</Label>
-                <Select
+                <Input
                   id="category_id"
                   value={expenseForm.category_id}
                   onChange={(e) => setExpenseForm({ ...expenseForm, category_id: e.target.value })}
+                  placeholder="أدخل اسم الفئة"
                   className="text-xs sm:text-sm"
-                >
-                  <option value="">اختر الفئة</option>
-                  {categories.map(cat => (
-                    <option key={cat.id} value={cat.id}>{cat.name}</option>
-                  ))}
-                </Select>
+                />
               </div>
               <div className="space-y-1.5 sm:space-y-2">
                 <Label htmlFor="amount" className="text-xs sm:text-sm">المبلغ (DT) *</Label>
