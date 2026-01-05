@@ -11,6 +11,7 @@ export type UserStatus = 'Active' | 'Inactive'
 export type WorkerAvailabilityStatus = 'Available' | 'Busy' | 'Unavailable'
 export type ConversationStatus = 'open' | 'closed'
 export type NotificationType = 'new_message' | 'task_update' | 'system'
+export type RecurrenceType = 'Daily' | 'Weekly' | 'Monthly' | 'Yearly'
 
 export interface Role {
   id: string
@@ -307,6 +308,37 @@ export interface Expense {
   approved_at: string | null
   rejection_reason: string | null
   notes: string | null
+  created_at: string
+  updated_at: string
+  // Recurring expense fields
+  is_recurring?: boolean
+  is_revenue?: boolean
+  recurrence_type?: RecurrenceType | null
+  recurrence_day?: number | null
+  recurrence_time?: string | null // TIME format (HH:MM:SS)
+  recurrence_template_id?: string | null
+  next_occurrence_date?: string | null
+  last_generated_date?: string | null
+}
+
+export interface RecurringExpenseTemplate {
+  id: string
+  name: string
+  category_id: string
+  amount: number
+  description: string | null
+  payment_method: PaymentMethod
+  is_revenue: boolean
+  recurrence_type: RecurrenceType
+  recurrence_day: number
+  recurrence_time: string // TIME format (HH:MM:SS)
+  is_active: boolean
+  next_occurrence_date: string
+  last_generated_date: string | null
+  related_batch_id: string | null
+  related_sale_id: string | null
+  tags: string[] | null
+  created_by: string
   created_at: string
   updated_at: string
 }

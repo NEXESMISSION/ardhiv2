@@ -25,8 +25,9 @@ import {
 } from '@/components/ui/dialog'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { retryWithBackoff } from '@/lib/retry'
-import { Plus, Edit, Trash2, CheckCircle, XCircle, Filter, ChevronDown, ChevronUp, User } from 'lucide-react'
+import { Plus, Edit, Trash2, CheckCircle, XCircle, Filter, ChevronDown, ChevronUp, User, Repeat } from 'lucide-react'
 import type { Expense, ExpenseCategory, LandBatch, Sale, PaymentMethod } from '@/types/database'
+import { RecurringExpensesManager } from '@/components/RecurringExpensesManager'
 
 interface ExpenseWithUser extends Expense {
   submitted_by_user?: { id: string; name: string; email?: string }
@@ -85,6 +86,7 @@ export function Expenses() {
   const [amountMax, setAmountMax] = useState('')
   const [searchTerm, setSearchTerm] = useState('')
   const [dateFilter, setDateFilter] = useState<'today' | 'week' | 'month' | 'all'>('today')
+  const [activeTab, setActiveTab] = useState<'expenses' | 'recurring'>('expenses')
 
   useEffect(() => {
     fetchData()
@@ -395,13 +397,43 @@ export function Expenses() {
           <h1 className="text-2xl sm:text-3xl font-bold">المصاريف</h1>
           <p className="text-muted-foreground text-sm sm:text-base">إدارة وتتبع مصاريف الشركة</p>
         </div>
-        {canEditExpenses && (
+        {canEditExpenses && activeTab === 'expenses' && (
           <Button onClick={() => openExpenseDialog()} size="lg">
             <Plus className="ml-2 h-4 w-4" />
             إضافة مصروف جديد
           </Button>
         )}
       </div>
+
+      {/* Tabs */}
+      <div className="flex gap-2 border-b">
+        <button
+          onClick={() => setActiveTab('expenses')}
+          className={`px-4 py-2 font-medium transition-colors ${
+            activeTab === 'expenses'
+              ? 'border-b-2 border-primary text-primary'
+              : 'text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          المصاريف
+        </button>
+        <button
+          onClick={() => setActiveTab('recurring')}
+          className={`px-4 py-2 font-medium transition-colors flex items-center gap-2 ${
+            activeTab === 'recurring'
+              ? 'border-b-2 border-primary text-primary'
+              : 'text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          <Repeat className="h-4 w-4" />
+          المتكررة
+        </button>
+      </div>
+
+      {activeTab === 'recurring' ? (
+        <RecurringExpensesManager categories={categories} />
+      ) : (
+        <>
 
       {error && (
         <Card className="border-destructive">
@@ -1036,6 +1068,8 @@ export function Expenses() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+        </>
+      )}
     </div>
   )
 }
