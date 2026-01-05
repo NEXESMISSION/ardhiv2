@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Select } from '@/components/ui/select'
+import { Textarea } from '@/components/ui/textarea'
 import {
   Table,
   TableBody,
@@ -654,10 +655,15 @@ export function SalesNew() {
     setApplyCompanyFee(false)
     setCompanyFeePercentage('2')
     setDeadlineDate('')
-    setNewClientName('')
-    setNewClientPhone('')
-    setNewClientAddress('')
-    setNewClientCin('')
+    setNewClientForm({
+      name: '',
+      cin: '',
+      phone: '',
+      email: '',
+      address: '',
+      client_type: 'Individual',
+      notes: '',
+    })
   }
   
   // Calculate total price based on selected pieces and payment type
