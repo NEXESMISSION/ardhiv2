@@ -891,9 +891,19 @@ export function LandManagement() {
                     ? (pieceConfig.surface / effectiveTotalSurface) * totalCost 
                     : 0
                   
-                  // Format number (support P001, 001, or just number)
+                  // Format number - support alphanumeric patterns (B1, R1, P001, etc.)
                   let formattedNumber = String(currentNumber)
-                  if (startNumber.toString().includes('P') || startNumber.toString().startsWith('0')) {
+                  
+                  // Check if startNumber is alphanumeric (e.g., B1, R1, P001)
+                  const alphanumericMatch = startNumber.toString().match(/^([A-Za-z\u0600-\u06FF]+)(\d+)$/i)
+                  if (alphanumericMatch) {
+                    const prefix = alphanumericMatch[1]
+                    const startNum = parseInt(alphanumericMatch[2], 10)
+                    const numDigits = alphanumericMatch[2].length
+                    const newNumber = startNum + i
+                    formattedNumber = `${prefix}${String(newNumber).padStart(numDigits, '0')}`
+                  } else if (startNumber.toString().includes('P') || startNumber.toString().startsWith('0')) {
+                    // Legacy P001 format
                     formattedNumber = `P${String(currentNumber).padStart(3, '0')}`
                   }
                   
@@ -1187,8 +1197,8 @@ export function LandManagement() {
     
     if (piece) {
       setEditingPiece(piece)
-      // Extract just the number from piece_number (remove any formatting like "P001")
-      const pieceNumber = piece.piece_number.replace(/\D/g, '') || piece.piece_number
+      // Keep the full alphanumeric piece number (B1, R1, P001, etc.)
+      const pieceNumber = piece.piece_number || ''
       setPieceForm({
         piece_number: pieceNumber,
         surface_area: piece.surface_area.toString(),
@@ -1198,9 +1208,40 @@ export function LandManagement() {
       })
     } else {
       setEditingPiece(null)
-      // Get next piece number (just the number, no formatting)
-      const existingPieces = batch?.land_pieces.length || 0
-      const nextNumber = existingPieces + 1
+      // Get next piece number - support alphanumeric patterns (B1, R1, P001, 1, etc.)
+      let nextPieceNumber = '1'
+      
+      if (batch?.land_pieces && batch.land_pieces.length > 0) {
+        // Analyze existing piece numbers to detect pattern
+        const pieceNumbers = batch.land_pieces
+          .map(p => p.piece_number)
+          .filter(Boolean)
+          .sort()
+        
+        if (pieceNumbers.length > 0) {
+          const lastPiece = pieceNumbers[pieceNumbers.length - 1]
+          
+          // Check if last piece uses alphanumeric pattern (e.g., B1, R1, P001)
+          const alphanumericMatch = lastPiece.match(/^([A-Za-z\u0600-\u06FF]+)(\d+)$/i)
+          
+          if (alphanumericMatch) {
+            // Extract prefix and number
+            const prefix = alphanumericMatch[1]
+            const lastNumber = parseInt(alphanumericMatch[2], 10)
+            nextPieceNumber = `${prefix}${lastNumber + 1}`
+          } else {
+            // Check if it's just a number
+            const numberMatch = lastPiece.match(/^(\d+)$/)
+            if (numberMatch) {
+              const lastNumber = parseInt(numberMatch[1], 10)
+              nextPieceNumber = (lastNumber + 1).toString()
+            } else {
+              // Default: use count + 1
+              nextPieceNumber = (pieceNumbers.length + 1).toString()
+            }
+          }
+        }
+      }
       
       // Get average surface area from existing pieces, or use default
       let avgSurface = defaultSurfaceArea
@@ -1211,7 +1252,7 @@ export function LandManagement() {
       }
       
       setPieceForm({
-        piece_number: nextNumber.toString(),
+        piece_number: nextPieceNumber,
         surface_area: avgSurface,
         selling_price_full: '',
         selling_price_installment: '',
@@ -1221,13 +1262,14 @@ export function LandManagement() {
     setPieceDialogOpen(true)
   }
 
-  // Handle piece number or surface area change - auto-format piece number
+  // Handle piece number or surface area change - allow alphanumeric (B1, R1, P001, etc.)
   const handlePieceNumberChange = (value: string) => {
-    // Just keep the number, remove any formatting
-    const numberOnly = value.replace(/\D/g, '')
+    // Allow alphanumeric: letters, numbers, and common separators
+    // Remove only special characters that aren't useful, keep letters and numbers
+    const cleaned = value.replace(/[^a-zA-Z0-9\u0600-\u06FF]/g, '')
     setPieceForm({
       ...pieceForm,
-      piece_number: numberOnly,
+      piece_number: cleaned,
     })
   }
   
@@ -1799,15 +1841,15 @@ export function LandManagement() {
               <Label htmlFor="piece_number">رقم القطعة *</Label>
               <Input
                 id="piece_number"
-                type="number"
+                type="text"
                 value={pieceForm.piece_number}
                 onChange={(e) => handlePieceNumberChange(e.target.value)}
-                placeholder="مثال: 1 أو 2 أو 99"
-                min="1"
+                placeholder="مثال: 1، B1، R1، P001"
                 autoFocus
+                maxLength={20}
               />
               <p className="text-xs text-muted-foreground">
-                أدخل رقم القطعة فقط (مثال: 1، 2، 99). سيتم حساب باقي القيم تلقائياً.
+                أدخل رقم القطعة (يمكن أن يكون رقم فقط مثل 1، أو حروف وأرقام مثل B1، R1، P001). سيتم حساب باقي القيم تلقائياً.
               </p>
             </div>
             
