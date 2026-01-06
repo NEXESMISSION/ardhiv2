@@ -29,7 +29,7 @@ import { sanitizeText, sanitizeNotes, sanitizeEmail, sanitizePhone, sanitizeCIN 
 import { showNotification } from '@/components/ui/notification'
 import { debounce } from '@/lib/throttle'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Plus, Edit, Trash2, Map, ChevronDown, ChevronRight, Calculator, X, DollarSign, AlertTriangle, ShoppingCart, Upload, Image as ImageIcon, Settings } from 'lucide-react'
+import { Plus, Edit, Trash2, Map, ChevronDown, ChevronRight, Calculator, X, DollarSign, AlertTriangle, ShoppingCart, Upload, Image as ImageIcon, Settings, RotateCcw } from 'lucide-react'
 import type { LandBatch, LandPiece, LandStatus, Client, PaymentOffer } from '@/types/database'
 
 interface LandBatchWithPieces extends LandBatch {
@@ -78,17 +78,45 @@ function ImageZoomViewer({ src, alt, onError }: { src: string; alt: string; onEr
   const [isDragging, setIsDragging] = useState(false)
   const [lastTouch, setLastTouch] = useState<{ x: number; y: number } | null>(null)
   const [lastDistance, setLastDistance] = useState<number | null>(null)
+  const [initialScale, setInitialScale] = useState(1)
   const imageRef = useRef<HTMLImageElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768)
+  const animationFrameRef = useRef<number | null>(null)
 
   useEffect(() => {
     const handleResize = () => {
       setIsMobile(window.innerWidth < 768)
     }
     window.addEventListener('resize', handleResize)
-    return () => window.removeEventListener('resize', handleResize)
+    return () => {
+      window.removeEventListener('resize', handleResize)
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current)
+      }
+    }
   }, [])
+
+  // Constrain position to keep image within bounds
+  const constrainPosition = (newX: number, newY: number, currentScale: number) => {
+    if (!imageRef.current || !containerRef.current) return { x: newX, y: newY }
+    
+    const img = imageRef.current
+    const container = containerRef.current
+    const imgRect = img.getBoundingClientRect()
+    const containerRect = container.getBoundingClientRect()
+    
+    const scaledWidth = imgRect.width * currentScale
+    const scaledHeight = imgRect.height * currentScale
+    
+    const maxX = Math.max(0, (scaledWidth - containerRect.width) / 2)
+    const maxY = Math.max(0, (scaledHeight - containerRect.height) / 2)
+    
+    return {
+      x: Math.max(-maxX, Math.min(maxX, newX)),
+      y: Math.max(-maxY, Math.min(maxY, newY))
+    }
+  }
 
   const handleTouchStart = (e: React.TouchEvent) => {
     if (!isMobile) return
@@ -102,7 +130,9 @@ function ImageZoomViewer({ src, alt, onError }: { src: string; alt: string; onEr
         touch2.clientY - touch1.clientY
       )
       setLastDistance(distance)
+      setInitialScale(scale)
       setLastTouch(null)
+      setIsDragging(false)
     } else if (e.touches.length === 1) {
       // Single touch - prepare for pan
       const touch = e.touches[0]
@@ -114,58 +144,82 @@ function ImageZoomViewer({ src, alt, onError }: { src: string; alt: string; onEr
   const handleTouchMove = (e: React.TouchEvent) => {
     if (!isMobile) return
     
-    if (e.touches.length === 2 && lastDistance !== null) {
-      // Pinch zoom
-      e.preventDefault()
-      const touch1 = e.touches[0]
-      const touch2 = e.touches[1]
-      const distance = Math.hypot(
-        touch2.clientX - touch1.clientX,
-        touch2.clientY - touch1.clientY
-      )
-      
-      const scaleChange = distance / lastDistance
-      const newScale = Math.max(1, Math.min(scale * scaleChange, 5))
-      setScale(newScale)
-      setLastDistance(distance)
-    } else if (e.touches.length === 1 && isDragging && lastTouch && scale > 1) {
-      // Pan
-      e.preventDefault()
-      const touch = e.touches[0]
-      const deltaX = touch.clientX - lastTouch.x
-      const deltaY = touch.clientY - lastTouch.y
-      
-      setPosition(prev => ({
-        x: prev.x + deltaX,
-        y: prev.y + deltaY
-      }))
-      setLastTouch({ x: touch.clientX, y: touch.clientY })
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current)
     }
+    
+    animationFrameRef.current = requestAnimationFrame(() => {
+      if (e.touches.length === 2 && lastDistance !== null) {
+        // Pinch zoom - smoother calculation
+        e.preventDefault()
+        const touch1 = e.touches[0]
+        const touch2 = e.touches[1]
+        const distance = Math.hypot(
+          touch2.clientX - touch1.clientX,
+          touch2.clientY - touch1.clientY
+        )
+        
+        const scaleChange = distance / lastDistance
+        const newScale = Math.max(1, Math.min(initialScale * scaleChange, 10))
+        setScale(newScale)
+        setLastDistance(distance)
+        
+        // Constrain position when zooming
+        if (newScale > 1) {
+          const constrained = constrainPosition(position.x, position.y, newScale)
+          setPosition(constrained)
+        } else {
+          setPosition({ x: 0, y: 0 })
+        }
+      } else if (e.touches.length === 1 && isDragging && lastTouch && scale > 1) {
+        // Pan - smoother movement
+        e.preventDefault()
+        const touch = e.touches[0]
+        const deltaX = touch.clientX - lastTouch.x
+        const deltaY = touch.clientY - lastTouch.y
+        
+        const newX = position.x + deltaX
+        const newY = position.y + deltaY
+        const constrained = constrainPosition(newX, newY, scale)
+        
+        setPosition(constrained)
+        setLastTouch({ x: touch.clientX, y: touch.clientY })
+      }
+    })
   }
 
   const handleTouchEnd = () => {
     if (!isMobile) return
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current)
+    }
     setIsDragging(false)
     setLastTouch(null)
     setLastDistance(null)
+    setInitialScale(scale)
   }
 
   const handleDoubleClick = () => {
     if (!isMobile) return
     if (scale > 1) {
       // Reset zoom
-      setScale(1)
-      setPosition({ x: 0, y: 0 })
+      resetZoom()
     } else {
       // Zoom in
-      setScale(2)
+      setScale(3)
     }
+  }
+
+  const resetZoom = () => {
+    setScale(1)
+    setPosition({ x: 0, y: 0 })
+    setInitialScale(1)
   }
 
   return (
     <div 
       ref={containerRef}
-      className="w-full h-full flex items-center justify-center overflow-hidden"
+      className="w-full h-full flex items-center justify-center overflow-hidden relative"
       style={{ touchAction: isMobile ? 'none' : 'auto' }}
     >
       <img
@@ -173,13 +227,15 @@ function ImageZoomViewer({ src, alt, onError }: { src: string; alt: string; onEr
         src={src}
         alt={alt}
         onError={onError}
-        className={`max-w-full max-h-[70vh] object-contain rounded-lg shadow-lg transition-transform duration-200 ${
+        className={`max-w-full max-h-[70vh] object-contain rounded-lg shadow-lg ${
           isMobile ? 'select-none' : ''
         }`}
         style={{
           transform: isMobile ? `translate(${position.x}px, ${position.y}px) scale(${scale})` : undefined,
           transformOrigin: 'center center',
           touchAction: isMobile ? 'none' : 'auto',
+          transition: isMobile && scale === 1 && position.x === 0 && position.y === 0 ? 'transform 0.3s ease-out' : 'none',
+          willChange: isMobile ? 'transform' : 'auto',
         }}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
@@ -187,6 +243,18 @@ function ImageZoomViewer({ src, alt, onError }: { src: string; alt: string; onEr
         onDoubleClick={handleDoubleClick}
         draggable={false}
       />
+      {isMobile && (scale > 1 || position.x !== 0 || position.y !== 0) && (
+        <Button
+          onClick={resetZoom}
+          size="sm"
+          variant="secondary"
+          className="absolute top-4 left-4 z-10 shadow-lg bg-white/90 hover:bg-white backdrop-blur-sm"
+          aria-label="إعادة تعيين التكبير"
+        >
+          <RotateCcw className="h-4 w-4 ml-1" />
+          إعادة تعيين
+        </Button>
+      )}
     </div>
   )
 }
