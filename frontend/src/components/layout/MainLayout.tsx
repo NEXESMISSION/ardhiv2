@@ -7,7 +7,7 @@ import { PullToRefresh } from './PullToRefresh'
 import { useSwipeGesture } from '@/hooks/useSwipeGesture'
 import { NotificationBell } from '@/components/ui/notification-bell'
 
-export function MainLayout() {
+function MainLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const location = useLocation()
   const navigate = useNavigate()
@@ -127,3 +127,6 @@ export function MainLayout() {
     </div>
   )
 }
+
+export { MainLayout }
+export default MainLayout
