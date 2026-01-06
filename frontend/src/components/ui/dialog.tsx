@@ -148,7 +148,7 @@ const DialogContent = React.forwardRef<
       onClick(e)
     }
   }
-  
+
   return (
     <DialogPortal>
       <DialogOverlay />

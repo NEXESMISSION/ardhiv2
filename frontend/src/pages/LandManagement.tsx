@@ -71,6 +71,126 @@ const statusColors: Record<LandStatus, 'success' | 'warning' | 'default' | 'seco
   Cancelled: 'secondary',
 }
 
+// Image Zoom Viewer Component (Mobile only)
+function ImageZoomViewer({ src, alt, onError }: { src: string; alt: string; onError: (e: React.SyntheticEvent<HTMLImageElement>) => void }) {
+  const [scale, setScale] = useState(1)
+  const [position, setPosition] = useState({ x: 0, y: 0 })
+  const [isDragging, setIsDragging] = useState(false)
+  const [lastTouch, setLastTouch] = useState<{ x: number; y: number } | null>(null)
+  const [lastDistance, setLastDistance] = useState<number | null>(null)
+  const imageRef = useRef<HTMLImageElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 768)
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(window.innerWidth < 768)
+    }
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [])
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (!isMobile) return
+    
+    if (e.touches.length === 2) {
+      // Pinch zoom
+      const touch1 = e.touches[0]
+      const touch2 = e.touches[1]
+      const distance = Math.hypot(
+        touch2.clientX - touch1.clientX,
+        touch2.clientY - touch1.clientY
+      )
+      setLastDistance(distance)
+      setLastTouch(null)
+    } else if (e.touches.length === 1) {
+      // Single touch - prepare for pan
+      const touch = e.touches[0]
+      setLastTouch({ x: touch.clientX, y: touch.clientY })
+      setIsDragging(true)
+    }
+  }
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (!isMobile) return
+    
+    if (e.touches.length === 2 && lastDistance !== null) {
+      // Pinch zoom
+      e.preventDefault()
+      const touch1 = e.touches[0]
+      const touch2 = e.touches[1]
+      const distance = Math.hypot(
+        touch2.clientX - touch1.clientX,
+        touch2.clientY - touch1.clientY
+      )
+      
+      const scaleChange = distance / lastDistance
+      const newScale = Math.max(1, Math.min(scale * scaleChange, 5))
+      setScale(newScale)
+      setLastDistance(distance)
+    } else if (e.touches.length === 1 && isDragging && lastTouch && scale > 1) {
+      // Pan
+      e.preventDefault()
+      const touch = e.touches[0]
+      const deltaX = touch.clientX - lastTouch.x
+      const deltaY = touch.clientY - lastTouch.y
+      
+      setPosition(prev => ({
+        x: prev.x + deltaX,
+        y: prev.y + deltaY
+      }))
+      setLastTouch({ x: touch.clientX, y: touch.clientY })
+    }
+  }
+
+  const handleTouchEnd = () => {
+    if (!isMobile) return
+    setIsDragging(false)
+    setLastTouch(null)
+    setLastDistance(null)
+  }
+
+  const handleDoubleClick = () => {
+    if (!isMobile) return
+    if (scale > 1) {
+      // Reset zoom
+      setScale(1)
+      setPosition({ x: 0, y: 0 })
+    } else {
+      // Zoom in
+      setScale(2)
+    }
+  }
+
+  return (
+    <div 
+      ref={containerRef}
+      className="w-full h-full flex items-center justify-center overflow-hidden"
+      style={{ touchAction: isMobile ? 'none' : 'auto' }}
+    >
+      <img
+        ref={imageRef}
+        src={src}
+        alt={alt}
+        onError={onError}
+        className={`max-w-full max-h-[70vh] object-contain rounded-lg shadow-lg transition-transform duration-200 ${
+          isMobile ? 'select-none' : ''
+        }`}
+        style={{
+          transform: isMobile ? `translate(${position.x}px, ${position.y}px) scale(${scale})` : undefined,
+          transformOrigin: 'center center',
+          touchAction: isMobile ? 'none' : 'auto',
+        }}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        onDoubleClick={handleDoubleClick}
+        draggable={false}
+      />
+    </div>
+  )
+}
+
 export function LandManagement() {
   const { hasPermission, user } = useAuth()
   const navigate = useNavigate()
@@ -5036,12 +5156,11 @@ export function LandManagement() {
           <DialogHeader className="px-6 py-4 border-b">
             <DialogTitle>{viewingImageName}</DialogTitle>
           </DialogHeader>
-          <div className="p-6 flex items-center justify-center bg-gray-50 min-h-[400px]">
+          <div className="p-6 flex items-center justify-center bg-gray-50 min-h-[400px] overflow-hidden relative">
             {viewingImageUrl && (
-              <img 
+              <ImageZoomViewer 
                 src={viewingImageUrl} 
                 alt={viewingImageName}
-                className="max-w-full max-h-[70vh] object-contain rounded-lg shadow-lg"
                 onError={(e) => {
                   (e.target as HTMLImageElement).src = ''
                   ;(e.target as HTMLImageElement).alt = 'خطأ في تحميل الصورة'

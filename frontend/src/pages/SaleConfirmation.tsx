@@ -19,6 +19,7 @@ import { formatCurrency, formatDate } from '@/lib/utils'
 import { retryWithBackoff, isRetryableError } from '@/lib/retry'
 import { CheckCircle, XCircle, Clock, DollarSign, AlertTriangle } from 'lucide-react'
 import { showNotification } from '@/components/ui/notification'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import {
   Table,
   TableBody,
@@ -45,6 +46,8 @@ export function SaleConfirmation() {
   const [selectedPiece, setSelectedPiece] = useState<LandPiece | null>(null)
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false)
   const [confirming, setConfirming] = useState(false)
+  const [confirmBeforeConfirmOpen, setConfirmBeforeConfirmOpen] = useState(false)
+  const [pendingConfirmationType, setPendingConfirmationType] = useState<'full' | 'bigAdvance' | null>(null)
   
   // Search state
   const [searchTerm, setSearchTerm] = useState('')
@@ -1241,7 +1244,12 @@ export function SaleConfirmation() {
                                 </Button>
                                 {sale.payment_type === 'Full' && (
                                   <Button
-                                    onClick={() => openConfirmDialog(sale, piece, 'full')}
+                                    onClick={() => {
+                                      setSelectedSale(sale)
+                                      setSelectedPiece(piece)
+                                      setPendingConfirmationType('full')
+                                      setConfirmBeforeConfirmOpen(true)
+                                    }}
                                     className="bg-green-600 hover:bg-green-700 text-xs h-8 flex-1"
                                     size="sm"
                                   >
@@ -1251,7 +1259,12 @@ export function SaleConfirmation() {
                                 )}
                                 {sale.payment_type === 'Installment' && (
                                   <Button
-                                    onClick={() => openConfirmDialog(sale, piece, 'bigAdvance')}
+                                    onClick={() => {
+                                      setSelectedSale(sale)
+                                      setSelectedPiece(piece)
+                                      setPendingConfirmationType('bigAdvance')
+                                      setConfirmBeforeConfirmOpen(true)
+                                    }}
                                     className="bg-blue-600 hover:bg-blue-700 text-xs h-8 flex-1"
                                     size="sm"
                                   >
@@ -1309,7 +1322,12 @@ export function SaleConfirmation() {
                                   </Button>
                                   {sale.payment_type === 'Full' && (
                                     <Button
-                                      onClick={() => openConfirmDialog(sale, piece, 'full')}
+                                      onClick={() => {
+                                        setSelectedSale(sale)
+                                        setSelectedPiece(piece)
+                                        setPendingConfirmationType('full')
+                                        setConfirmBeforeConfirmOpen(true)
+                                      }}
                                       className="bg-green-600 hover:bg-green-700 text-xs px-2 h-7"
                                       size="sm"
                                     >
@@ -1320,7 +1338,12 @@ export function SaleConfirmation() {
                                   {sale.payment_type === 'Installment' && (
                                     <>
                                       <Button
-                                        onClick={() => openConfirmDialog(sale, piece, 'bigAdvance')}
+                                        onClick={() => {
+                                          setSelectedSale(sale)
+                                          setSelectedPiece(piece)
+                                          setPendingConfirmationType('bigAdvance')
+                                          setConfirmBeforeConfirmOpen(true)
+                                        }}
                                         className="bg-blue-600 hover:bg-blue-700 text-xs px-2 h-7"
                                         size="sm"
                                       >
@@ -1621,6 +1644,41 @@ export function SaleConfirmation() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Pre-Confirmation Dialog */}
+      <ConfirmDialog
+        open={confirmBeforeConfirmOpen}
+        onOpenChange={setConfirmBeforeConfirmOpen}
+        onConfirm={() => {
+          if (selectedSale && selectedPiece && pendingConfirmationType) {
+            setConfirmBeforeConfirmOpen(false)
+            openConfirmDialog(selectedSale, selectedPiece, pendingConfirmationType)
+          }
+        }}
+        title={pendingConfirmationType === 'full' ? 'تأكيد البيع بالحاضر' : 'تأكيد البيع بالتقسيط'}
+        description={
+          selectedSale && selectedPiece && (() => {
+            const offerToUse = selectedOffer || ((selectedSale as any).selected_offer as PaymentOffer | null)
+            const { pricePerPiece, reservationPerPiece, companyFeePerPiece, totalPayablePerPiece } = calculatePieceValues(selectedSale, selectedPiece, offerToUse)
+            
+            let amountToReceive = 0
+            if (pendingConfirmationType === 'full') {
+              amountToReceive = totalPayablePerPiece - reservationPerPiece
+            } else if (pendingConfirmationType === 'bigAdvance' && selectedSale.payment_type === 'Installment') {
+              const calculatedOffer = offerToUse
+              if (calculatedOffer) {
+                amountToReceive = calculatedOffer.advance_is_percentage
+                  ? (pricePerPiece * calculatedOffer.advance_amount) / 100
+                  : calculatedOffer.advance_amount
+              }
+            }
+            
+            return `هل أنت متأكد أنك ستحصل على مبلغ ${formatCurrency(amountToReceive)} من العميل ${selectedSale.client?.name || 'غير معروف'}؟`
+          })() || ''
+        }
+        confirmText="نعم، متأكد"
+        cancelText="إلغاء"
+      />
     </div>
   )
 }

@@ -132,6 +132,72 @@ function DeadlineCountdown({ deadlineDate }: { deadlineDate: string }) {
   )
 }
 
+// Installment Countdown Component (for individual installments)
+function InstallmentCountdown({ dueDate }: { dueDate: string }) {
+  const [countdown, setCountdown] = useState<{
+    days: number
+    hours: number
+    minutes: number
+    isOverdue: boolean
+  } | null>(null)
+  
+  useEffect(() => {
+    const updateCountdown = () => {
+      const due = new Date(dueDate)
+      const now = new Date()
+      due.setHours(23, 59, 59, 999)
+      
+      const diffMs = due.getTime() - now.getTime()
+      const days = Math.floor(diffMs / (1000 * 60 * 60 * 24))
+      const hours = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60))
+      const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60))
+      const isOverdue = diffMs < 0
+      
+      setCountdown({ days: Math.abs(days), hours: Math.abs(hours), minutes: Math.abs(minutes), isOverdue })
+    }
+    
+    updateCountdown()
+    const interval = setInterval(updateCountdown, 60000) // Update every minute
+    
+    return () => clearInterval(interval)
+  }, [dueDate])
+  
+  if (!countdown) return null
+  
+  const isToday = countdown.days === 0 && !countdown.isOverdue
+  const isClose = countdown.days > 0 && countdown.days <= 3 && !countdown.isOverdue
+  
+  let countdownText = ''
+  if (countdown.isOverdue) {
+    countdownText = `⚠ تجاوز بـ ${countdown.days} ${countdown.days === 1 ? 'يوم' : 'أيام'}`
+    if (countdown.hours > 0) {
+      countdownText += ` و ${countdown.hours} ${countdown.hours === 1 ? 'ساعة' : 'ساعات'}`
+    }
+  } else if (isToday) {
+    if (countdown.hours > 0) {
+      countdownText = `⚠ متبقي: ${countdown.hours} ${countdown.hours === 1 ? 'ساعة' : 'ساعات'} و ${countdown.minutes} ${countdown.minutes === 1 ? 'دقيقة' : 'دقائق'}`
+    } else if (countdown.minutes > 0) {
+      countdownText = `⚠ متبقي: ${countdown.minutes} ${countdown.minutes === 1 ? 'دقيقة' : 'دقائق'}`
+    } else {
+      countdownText = '⚠ اليوم'
+    }
+  } else {
+    countdownText = `⏰ متبقي: ${countdown.days} ${countdown.days === 1 ? 'يوم' : 'أيام'}`
+    if (countdown.hours > 0) {
+      countdownText += ` و ${countdown.hours} ${countdown.hours === 1 ? 'ساعة' : 'ساعات'}`
+    }
+  }
+  
+  return (
+    <Badge 
+      variant={countdown.isOverdue ? "destructive" : isToday || isClose ? "warning" : "default"} 
+      className="text-xs font-medium mt-1"
+    >
+      {countdownText}
+    </Badge>
+  )
+}
+
 export function Installments() {
   const { hasPermission, user } = useAuth()
   const [installments, setInstallments] = useState<InstallmentWithRelations[]>([])
@@ -3169,9 +3235,7 @@ export function Installments() {
                                 <div>
                                   <span className="text-muted-foreground">تاريخ الاستحقاق:</span>
                                   <div className="font-medium">{formatDate(freshInst.due_date)}</div>
-                                  {!isPaid && daysLeft >= 0 && (
-                                    <div className="text-xs text-muted-foreground">({daysLeft} يوم)</div>
-                                  )}
+                                  {!isPaid && <InstallmentCountdown dueDate={freshInst.due_date} />}
                                 </div>
                               </div>
                               {hasPermission('record_payments') && !isPaid && (
@@ -3232,12 +3296,8 @@ export function Installments() {
                                 {formatCurrency(remaining)}
                               </TableCell>
                               <TableCell>
-                                {formatDate(freshInst.due_date)}
-                                {!isPaid && daysLeft >= 0 && (
-                                  <div className="text-xs text-muted-foreground">
-                                    ({daysLeft} يوم)
-                                  </div>
-                                )}
+                                <div>{formatDate(freshInst.due_date)}</div>
+                                {!isPaid && <InstallmentCountdown dueDate={freshInst.due_date} />}
                               </TableCell>
                               <TableCell>
                                 <Badge
