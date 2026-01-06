@@ -861,7 +861,7 @@ export function LandManagement() {
       advance_is_percentage: offer.advance_is_percentage || false,
       monthly_payment: offer.monthly_payment?.toString() || '',
       number_of_months: offer.number_of_months?.toString() || '',
-      calculation_method: hasMonthly ? 'monthly' : 'months',
+      calculation_method: calculationMethod,
       offer_name: offer.offer_name || '',
       notes: offer.notes || '',
       is_default: offer.is_default || false,
@@ -889,9 +889,9 @@ export function LandManagement() {
       : 0
     const finalNumberOfMonths = offerForm.calculation_method === 'months' && offerForm.number_of_months
       ? parseFloat(offerForm.number_of_months)
-      : null
+      : 0 // Use 0 instead of null to satisfy NOT NULL constraint
 
-    if (finalMonthlyPayment <= 0 && !finalNumberOfMonths) {
+    if (finalMonthlyPayment <= 0 && finalNumberOfMonths <= 0) {
       setError('يرجى إدخال المبلغ الشهري أو عدد الأشهر')
       return
     }
@@ -904,8 +904,8 @@ export function LandManagement() {
         company_fee_percentage: offerForm.company_fee_percentage ? parseFloat(offerForm.company_fee_percentage) : 0,
         advance_amount: offerForm.advance_amount ? parseFloat(offerForm.advance_amount) : 0,
         advance_is_percentage: offerForm.advance_is_percentage,
-        monthly_payment: finalMonthlyPayment > 0 ? finalMonthlyPayment : null,
-        number_of_months: finalNumberOfMonths,
+        monthly_payment: finalMonthlyPayment > 0 ? finalMonthlyPayment : 0, // Use 0 instead of null
+        number_of_months: finalNumberOfMonths > 0 ? finalNumberOfMonths : 0, // Use 0 instead of null
         offer_name: offerForm.offer_name.trim() || null,
         notes: offerForm.notes.trim() || null,
         is_default: offerForm.is_default,
@@ -2280,7 +2280,7 @@ export function LandManagement() {
       advance_is_percentage: offer.advance_is_percentage || false,
       monthly_payment: offer.monthly_payment?.toString() || '',
       number_of_months: offer.number_of_months?.toString() || '',
-      calculation_method: hasMonthly ? 'monthly' : 'months',
+      calculation_method: calculationMethod,
       offer_name: offer.offer_name || '',
       notes: offer.notes || '',
       is_default: offer.is_default || false,
@@ -2308,9 +2308,9 @@ export function LandManagement() {
       : 0
     const finalNumberOfMonths = offerForm.calculation_method === 'months' && offerForm.number_of_months
       ? parseFloat(offerForm.number_of_months)
-      : null
+      : 0 // Use 0 instead of null to satisfy NOT NULL constraint
 
-    if (finalMonthlyPayment <= 0 && !finalNumberOfMonths) {
+    if (finalMonthlyPayment <= 0 && finalNumberOfMonths <= 0) {
       setError('يرجى إدخال المبلغ الشهري أو عدد الأشهر')
       return
     }
@@ -2323,8 +2323,8 @@ export function LandManagement() {
         company_fee_percentage: offerForm.company_fee_percentage ? parseFloat(offerForm.company_fee_percentage) : 0,
         advance_amount: offerForm.advance_amount ? parseFloat(offerForm.advance_amount) : 0,
         advance_is_percentage: offerForm.advance_is_percentage,
-        monthly_payment: finalMonthlyPayment > 0 ? finalMonthlyPayment : null,
-        number_of_months: finalNumberOfMonths,
+        monthly_payment: finalMonthlyPayment > 0 ? finalMonthlyPayment : 0, // Use 0 instead of null
+        number_of_months: finalNumberOfMonths > 0 ? finalNumberOfMonths : 0, // Use 0 instead of null
         offer_name: offerForm.offer_name.trim() || null,
         notes: offerForm.notes.trim() || null,
         is_default: offerForm.is_default,
