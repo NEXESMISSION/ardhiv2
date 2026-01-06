@@ -480,7 +480,7 @@ export function SaleConfirmation() {
           if (selectedSale.payment_type === 'Installment') {
             const installments = parseInt(numberOfInstallments) || selectedSale.number_of_installments || 12
             if (installments <= 0) {
-              setError('عدد الأشهر يجب أن يكون أكبر من صفر')
+              setError('Le nombre de mois doit être supérieur à zéro')
               setConfirming(false)
               return
             }
@@ -611,7 +611,7 @@ export function SaleConfirmation() {
           if (selectedSale.payment_type === 'Installment') {
             const installments = parseInt(numberOfInstallments) || selectedSale.number_of_installments || 12
             if (installments <= 0) {
-              setError('عدد الأشهر يجب أن يكون أكبر من صفر')
+              setError('Le nombre de mois doit être supérieur à zéro')
               setConfirming(false)
               return
             }
@@ -956,23 +956,23 @@ export function SaleConfirmation() {
                               <div className="flex items-start justify-between">
                                 <div>
                                   <div className="font-medium text-sm">
-                                    {piece.land_batch?.name || 'دفعة'} - #{piece.piece_number}
+                                    {piece.land_batch?.name || 'Lot'} - #{piece.piece_number}
                                   </div>
-                                  <div className="text-xs text-muted-foreground">{piece.surface_area} م²</div>
+                                  <div className="text-xs text-muted-foreground">{piece.surface_area} m²</div>
                                 </div>
                               </div>
                               
                               <div className="grid grid-cols-2 gap-2 text-xs">
                                 <div>
-                                  <span className="text-muted-foreground">السعر:</span>
+                                  <span className="text-muted-foreground">Prix:</span>
                                   <div className="font-medium">{formatCurrency(pricePerPiece)}</div>
                                 </div>
                                 <div>
-                                  <span className="text-muted-foreground">العمولة:</span>
+                                  <span className="text-muted-foreground">Commission:</span>
                                   <div className="font-medium text-blue-600">{formatCurrency(companyFeePerPiece)}</div>
                                 </div>
                                 <div>
-                                  <span className="text-muted-foreground">الإجمالي:</span>
+                                  <span className="text-muted-foreground">Total:</span>
                                   <div className="font-bold text-green-600">{formatCurrency(totalPayablePerPiece)}</div>
                                 </div>
                                 <div>
@@ -1026,10 +1026,10 @@ export function SaleConfirmation() {
                         <TableRow>
                           <TableHead className="text-xs">القطعة</TableHead>
                           <TableHead className="text-right text-xs">السعر</TableHead>
-                          <TableHead className="text-right text-xs">العمولة</TableHead>
-                          <TableHead className="text-right text-xs">الإجمالي</TableHead>
-                          <TableHead className="text-right text-xs">العربون</TableHead>
-                          <TableHead className="text-xs">إجراء</TableHead>
+                          <TableHead className="text-right text-xs">Commission</TableHead>
+                          <TableHead className="text-right text-xs">Total</TableHead>
+                          <TableHead className="text-right text-xs">Acompte</TableHead>
+                          <TableHead className="text-xs">Action</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -1114,11 +1114,11 @@ export function SaleConfirmation() {
                   return (
                     <>
                       <div className="flex justify-between text-xs sm:text-sm">
-                        <span className="text-muted-foreground">سعر القطعة:</span>
+                        <span className="text-muted-foreground">Prix de la parcelle:</span>
                         <span className="font-medium">{formatCurrency(pricePerPiece)}</span>
                       </div>
                       <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2">
-                        <Label htmlFor="companyFeePercentage" className="text-xs sm:text-sm whitespace-nowrap">عمولة الشركة (%):</Label>
+                        <Label htmlFor="companyFeePercentage" className="text-xs sm:text-sm whitespace-nowrap">Commission de l'entreprise (%):</Label>
                         <Input
                           id="companyFeePercentage"
                           type="number"
@@ -1207,9 +1207,9 @@ export function SaleConfirmation() {
                   onChange={e => setPaymentMethod(e.target.value)}
                   className="text-xs sm:text-sm"
                 >
-                  <option value="cash">نقدي</option>
-                  <option value="check">شيك</option>
-                  <option value="transfer">تحويل بنكي</option>
+                  <option value="cash">Espèces</option>
+                  <option value="check">Chèque</option>
+                  <option value="transfer">Virement bancaire</option>
                 </Select>
               </div>
 
@@ -1248,7 +1248,7 @@ export function SaleConfirmation() {
             <div className="space-y-4 sm:space-y-6">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                 <div>
-                  <p className="text-xs sm:text-sm text-muted-foreground">الاسم</p>
+                  <p className="text-xs sm:text-sm text-muted-foreground">Nom</p>
                   <p className="font-medium text-sm sm:text-base">{selectedClientForDetails.name}</p>
                 </div>
                 <div>
