@@ -115,7 +115,7 @@ export function SaleConfirmation() {
 
   useEffect(() => {
     if (!canAccess) {
-      setError('ليس لديك صلاحية للوصول إلى هذه الصفحة')
+      setError('Vous n\'avez pas la permission d\'accéder à cette page')
       setLoading(false)
       return
     }
@@ -263,9 +263,9 @@ export function SaleConfirmation() {
       const error = err as Error
       console.error('Error fetching sales:', error)
       if (isRetryableError(error)) {
-        setError('خطأ في الاتصال. يرجى المحاولة مرة أخرى.')
+        setError('Erreur de connexion. Veuillez réessayer.')
       } else {
-        setError('حدث خطأ أثناء تحميل المبيعات')
+        setError('Une erreur s\'est produite lors du chargement des ventes')
       }
     } finally {
       setLoading(false)
@@ -320,7 +320,7 @@ export function SaleConfirmation() {
   }
 
   const handleCancelPiece = async (sale: SaleWithDetails, piece: LandPiece) => {
-    if (!confirm('هل أنت متأكد من إلغاء هذه القطعة وإعادتها إلى الحالة المتاحة؟ سيتم استرداد المبلغ المدفوع لهذه القطعة.')) {
+    if (!confirm('Êtes-vous sûr de vouloir annuler cette parcelle et la remettre en état disponible ? Le montant payé pour cette parcelle sera remboursé.')) {
       return
     }
 
@@ -355,7 +355,7 @@ export function SaleConfirmation() {
             amount_paid: -totalPaid,
             payment_type: 'Refund',
             payment_date: new Date().toISOString().split('T')[0],
-            notes: `استرداد لإلغاء البيع #${sale.id.slice(0, 8)}`,
+            notes: `Remboursement pour annulation de la vente #${sale.id.slice(0, 8)}`,
             recorded_by: user?.id || null,
           }] as any)
         }
@@ -388,7 +388,7 @@ export function SaleConfirmation() {
             monthly_installment_amount: null,
             status: 'Cancelled',
             sale_date: sale.sale_date,
-            notes: `إلغاء قطعة من البيع #${sale.id.slice(0, 8)}`,
+            notes: `Annulation d'une parcelle de la vente #${sale.id.slice(0, 8)}`,
           }] as any)
           .select()
           .single()
@@ -403,7 +403,7 @@ export function SaleConfirmation() {
             amount_paid: -paidPerPiece,
             payment_type: 'Refund',
             payment_date: new Date().toISOString().split('T')[0],
-            notes: `استرداد لإلغاء القطعة #${piece.piece_number}`,
+            notes: `Remboursement pour annulation de la parcelle #${piece.piece_number}`,
             recorded_by: user?.id || null,
           }] as any)
         }
@@ -439,7 +439,7 @@ export function SaleConfirmation() {
       fetchSales()
     } catch (err) {
       console.error('Error cancelling piece:', err)
-      setError('حدث خطأ أثناء إلغاء القطعة: ' + ((err as Error).message || 'خطأ غير معروف'))
+      setError('Une erreur s\'est produite lors de l\'annulation de la parcelle: ' + ((err as Error).message || 'Erreur inconnue'))
     }
   }
 
@@ -457,7 +457,7 @@ export function SaleConfirmation() {
       // For full payment, check against remaining amount (not total)
       const remainingAmount = totalPayablePerPiece - reservationPerPiece
       if (confirmationType === 'full' && received < remainingAmount) {
-        setError(`المبلغ المستلم (${formatCurrency(received)}) أقل من المبلغ المتبقي (${formatCurrency(remainingAmount)})`)
+        setError(`Le montant reçu (${formatCurrency(received)}) est inférieur au montant restant (${formatCurrency(remainingAmount)})`)
         setConfirming(false)
         return
       }
@@ -487,7 +487,7 @@ export function SaleConfirmation() {
             
             const remainingAfterAdvance = pricePerPiece - reservationPerPiece - received
             if (remainingAfterAdvance <= 0) {
-              setError('المبلغ المتبقي بعد الدفعة الأولى والعربون يجب أن يكون أكبر من صفر')
+              setError('Le montant restant après le premier versement et l\'acompte doit être supérieur à zéro')
               setConfirming(false)
               return
             }
@@ -596,7 +596,7 @@ export function SaleConfirmation() {
           monthly_installment_amount: null,
           status: confirmationType === 'full' ? 'Completed' : 'Pending',
           sale_date: selectedSale.sale_date,
-          notes: `تأكيد قطعة من البيع #${selectedSale.id.slice(0, 8)}`,
+          notes: `Confirmation d'une parcelle de la vente #${selectedSale.id.slice(0, 8)}`,
           created_by: selectedSale.created_by || user?.id || null, // Keep original creator
         }
 
@@ -618,7 +618,7 @@ export function SaleConfirmation() {
             
             const remainingAfterAdvance = pricePerPiece - reservationPerPiece - received
             if (remainingAfterAdvance <= 0) {
-              setError('المبلغ المتبقي بعد الدفعة الأولى والعربون يجب أن يكون أكبر من صفر')
+              setError('Le montant restant après le premier versement et l\'acompte doit être supérieur à zéro')
               setConfirming(false)
               return
             }
@@ -649,7 +649,7 @@ export function SaleConfirmation() {
           console.error('Error inserting sale:', insertError)
           console.error('Error details:', JSON.stringify(insertError, null, 2))
           console.error('Sale data attempted:', saleDataToInsert)
-          throw new Error(`فشل في إنشاء البيع الجديد: ${insertError.message || insertError.code || 'خطأ غير معروف'}`)
+          throw new Error(`Échec de la création de la nouvelle vente: ${insertError.message || insertError.code || 'Erreur inconnue'}`)
         }
         
         if (newSaleDataArray && newSaleDataArray.length > 0) {
@@ -673,11 +673,11 @@ export function SaleConfirmation() {
           
           if (fetchError) {
             console.error('Error fetching inserted sale:', fetchError)
-            throw new Error('فشل في إنشاء البيع الجديد: تم الإدراج لكن فشل في جلب البيانات')
+            throw new Error('Échec de la création de la nouvelle vente: insertion réussie mais échec de la récupération des données')
           }
           
           if (!fetchedSales || fetchedSales.length === 0) {
-            throw new Error('فشل في إنشاء البيع الجديد: لم يتم إرجاع بيانات من قاعدة البيانات. يرجى التحقق من قاعدة البيانات.')
+            throw new Error('Échec de la création de la nouvelle vente: aucune donnée renvoyée par la base de données. Veuillez vérifier la base de données.')
           }
           
           newSale = fetchedSales[0]
@@ -772,8 +772,8 @@ export function SaleConfirmation() {
       // Show success message
       showNotification(
         confirmationType === 'full' 
-          ? 'تم تأكيد البيع بنجاح (دفع كامل)' 
-          : 'تم تأكيد الدفعة الكبيرة بنجاح',
+          ? 'Vente confirmée avec succès (paiement complet)' 
+          : 'Premier versement confirmé avec succès',
         'success'
       )
       
@@ -790,8 +790,8 @@ export function SaleConfirmation() {
     } catch (err) {
       const error = err as Error
       console.error('Error confirming sale:', error)
-      setError('حدث خطأ أثناء تأكيد البيع: ' + error.message)
-      showNotification('حدث خطأ أثناء تأكيد البيع: ' + error.message, 'error')
+      setError('Une erreur s\'est produite lors de la confirmation de la vente: ' + error.message)
+      showNotification('Une erreur s\'est produite lors de la confirmation de la vente: ' + error.message, 'error')
     } finally {
       setConfirming(false)
     }
@@ -804,7 +804,7 @@ export function SaleConfirmation() {
           <CardContent className="pt-6">
             <div className="text-center">
               <XCircle className="h-12 w-12 text-destructive mx-auto mb-4" />
-              <p className="text-destructive font-medium">ليس لديك صلاحية للوصول إلى هذه الصفحة</p>
+              <p className="text-destructive font-medium">Vous n'avez pas la permission d'accéder à cette page</p>
             </div>
           </CardContent>
         </Card>
@@ -815,7 +815,7 @@ export function SaleConfirmation() {
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center">
-        <div className="text-muted-foreground">جاري التحميل...</div>
+        <div className="text-muted-foreground">Chargement...</div>
       </div>
     )
   }
@@ -840,8 +840,8 @@ export function SaleConfirmation() {
     <div className="space-y-4">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-bold">تأكيد المبيعات</h1>
-          <p className="text-muted-foreground text-sm sm:text-base">تأكيد المبيعات المعلقة وتحديث الحالة</p>
+          <h1 className="text-2xl sm:text-3xl font-bold">Confirmation des ventes</h1>
+          <p className="text-muted-foreground text-sm sm:text-base">Confirmer les ventes en attente et mettre à jour le statut</p>
         </div>
       </div>
 
@@ -850,7 +850,7 @@ export function SaleConfirmation() {
         <CardContent className="pt-4">
           <div className="flex flex-col sm:flex-row gap-3">
             <Input
-              placeholder="بحث (اسم العميل، رقم الهاتف، رقم البيع، رقم القطعة)..."
+              placeholder="Rechercher (nom du client, téléphone, numéro de vente, numéro de parcelle)..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="flex-1"
@@ -858,7 +858,7 @@ export function SaleConfirmation() {
             {searchTerm && (
               <div className="flex items-center gap-2">
                 <span className="text-sm text-muted-foreground">
-                  {filteredSales.length} نتيجة من {sales.length}
+                  {filteredSales.length} résultat(s) sur {sales.length}
                 </span>
                 <Button
                   variant="outline"
@@ -866,7 +866,7 @@ export function SaleConfirmation() {
                   onClick={() => setSearchTerm('')}
                   className="text-xs"
                 >
-                  مسح
+                  Effacer
                 </Button>
               </div>
             )}
@@ -886,7 +886,7 @@ export function SaleConfirmation() {
         <Card>
           <CardContent className="py-8 text-center">
             <CheckCircle className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-            <p className="text-muted-foreground">لا توجد مبيعات معلقة</p>
+            <p className="text-muted-foreground">Aucune vente en attente</p>
           </CardContent>
         </Card>
       ) : (
@@ -926,17 +926,17 @@ export function SaleConfirmation() {
                         return null
                       })()}
                       <Badge variant={sale.status === 'Pending' ? 'warning' : 'secondary'} className="text-xs">
-                        {sale.status === 'Pending' ? 'محجوز' : 'قيد الدفع'}
+                        {sale.status === 'Pending' ? 'Réservé' : 'En attente de paiement'}
                       </Badge>
                       <Badge variant="outline" className="text-xs">
-                        {sale.payment_type === 'Full' ? 'بالحاضر' : sale.payment_type === 'Installment' ? 'بالتقسيط' : sale.payment_type || '-'}
+                        {sale.payment_type === 'Full' ? 'Comptant' : sale.payment_type === 'Installment' ? 'Versements' : sale.payment_type || '-'}
                       </Badge>
                       {sale.payment_type === 'Installment' && sale.big_advance_amount && sale.big_advance_amount > 0 && (
                         <Badge 
                           variant={((sale._totalBigAdvancePaid || 0) >= sale.big_advance_amount) ? 'default' : 'secondary'} 
                           className="text-xs"
                         >
-                          دفعة كبيرة: {formatCurrency(sale._totalBigAdvancePaid || 0)} / {formatCurrency(sale.big_advance_amount)}
+                          Premier versement: {formatCurrency(sale._totalBigAdvancePaid || 0)} / {formatCurrency(sale.big_advance_amount)}
                         </Badge>
                       )}
                       <span className="text-xs text-muted-foreground">{formatDate(sale.sale_date)}</span>
@@ -1008,7 +1008,7 @@ export function SaleConfirmation() {
                                     size="sm"
                                   >
                                     <DollarSign className="ml-1 h-3 w-3" />
-                                    دفعة
+                                    Versement
                                   </Button>
                                 )}
                               </div>
@@ -1057,7 +1057,7 @@ export function SaleConfirmation() {
                                     className="text-xs px-2 h-7"
                                   >
                                     <XCircle className="ml-1 h-3 w-3" />
-                                    إلغاء
+                                    Annuler
                                   </Button>
                                   {sale.payment_type === 'Full' && (
                                     <Button
@@ -1077,7 +1077,7 @@ export function SaleConfirmation() {
                                         size="sm"
                                       >
                                         <DollarSign className="ml-1 h-3 w-3" />
-                                        دفعة
+                                        Versement
                                       </Button>
                                     </>
                                   )}
@@ -1101,8 +1101,8 @@ export function SaleConfirmation() {
         <DialogContent className="w-[95vw] sm:w-full max-w-2xl max-h-[95vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
-              {confirmationType === 'full' && 'تأكيد الدفع الكامل'}
-              {confirmationType === 'bigAdvance' && 'تأكيد الدفعة الكبيرة'}
+              {confirmationType === 'full' && 'Confirmer le paiement complet'}
+              {confirmationType === 'bigAdvance' && 'Confirmer le premier versement'}
               {selectedPiece && ` - #${selectedPiece.piece_number}`}
             </DialogTitle>
           </DialogHeader>
@@ -1135,15 +1135,15 @@ export function SaleConfirmation() {
                         <span className="font-medium text-blue-600">{formatCurrency(companyFeePerPiece)}</span>
                       </div>
                       <div className="flex justify-between font-bold text-sm sm:text-lg pt-2 border-t">
-                        <span>المبلغ الإجمالي المستحق:</span>
+                        <span>Montant total dû:</span>
                         <span className="text-green-600">{formatCurrency(totalPayablePerPiece)}</span>
                       </div>
                       <div className="flex justify-between text-xs sm:text-sm">
-                        <span className="text-muted-foreground">المدفوع مسبقاً:</span>
+                        <span className="text-muted-foreground">Payé à l'avance:</span>
                         <span className="text-green-600">{formatCurrency(reservationPerPiece)}</span>
                       </div>
                       <div className="flex justify-between font-bold text-sm sm:text-base pt-2 border-t">
-                        <span>المتبقي:</span>
+                        <span>Restant:</span>
                         <span className="text-orange-600">
                           {formatCurrency(totalPayablePerPiece - reservationPerPiece)}
                         </span>
@@ -1155,23 +1155,23 @@ export function SaleConfirmation() {
 
               {confirmationType === 'bigAdvance' && selectedSale?.payment_type === 'Installment' && (
                 <div className="space-y-3 sm:space-y-4 p-3 sm:p-4 bg-blue-50 rounded-lg border border-blue-200">
-                  <p className="text-xs sm:text-sm font-medium text-blue-800 mb-2 sm:mb-3">إعدادات الأقساط</p>
+                  <p className="text-xs sm:text-sm font-medium text-blue-800 mb-2 sm:mb-3">Paramètres des versements</p>
                   
                   <div className="space-y-1.5 sm:space-y-2">
-                    <Label htmlFor="numberOfInstallments" className="text-xs sm:text-sm">عدد الأشهر *</Label>
+                    <Label htmlFor="numberOfInstallments" className="text-xs sm:text-sm">Nombre de mois *</Label>
                     <Input
                       id="numberOfInstallments"
                       type="number"
                       min="1"
                       value={numberOfInstallments}
                       onChange={e => setNumberOfInstallments(e.target.value)}
-                      placeholder="أدخل عدد الأشهر"
+                      placeholder="Entrez le nombre de mois"
                       className="text-xs sm:text-sm"
                     />
                   </div>
                   
                   <div className="space-y-1.5 sm:space-y-2">
-                    <Label htmlFor="installmentStartDate" className="text-xs sm:text-sm">تاريخ بداية الأقساط *</Label>
+                    <Label htmlFor="installmentStartDate" className="text-xs sm:text-sm">Date de début des versements *</Label>
                     <Input
                       id="installmentStartDate"
                       type="date"
@@ -1181,20 +1181,20 @@ export function SaleConfirmation() {
                       className="text-xs sm:text-sm"
                     />
                     <p className="text-xs text-muted-foreground">
-                      سيتم إنشاء جدول الأقساط تلقائياً بعد تأكيد الدفعة الكبيرة
+                      Le calendrier des versements sera créé automatiquement après la confirmation du premier versement
                     </p>
                   </div>
                 </div>
               )}
 
               <div className="space-y-1.5 sm:space-y-2">
-                <Label htmlFor="receivedAmount" className="text-xs sm:text-sm">المبلغ المستلم *</Label>
+                <Label htmlFor="receivedAmount" className="text-xs sm:text-sm">Montant reçu *</Label>
                 <Input
                   id="receivedAmount"
                   type="number"
                   value={receivedAmount}
                   onChange={e => setReceivedAmount(e.target.value)}
-                  placeholder="أدخل المبلغ المستلم"
+                  placeholder="Entrez le montant reçu"
                   className="text-xs sm:text-sm"
                 />
               </div>
@@ -1214,12 +1214,12 @@ export function SaleConfirmation() {
               </div>
 
               <div className="space-y-1.5 sm:space-y-2">
-                <Label htmlFor="confirmationNotes" className="text-xs sm:text-sm">ملاحظات</Label>
+                <Label htmlFor="confirmationNotes" className="text-xs sm:text-sm">Notes</Label>
                 <Textarea
                   id="confirmationNotes"
                   value={confirmationNotes}
                   onChange={e => setConfirmationNotes(e.target.value)}
-                  placeholder="ملاحظات إضافية..."
+                  placeholder="Notes supplémentaires..."
                   rows={3}
                   className="text-xs sm:text-sm min-h-[80px] sm:min-h-[100px]"
                 />
@@ -1230,7 +1230,7 @@ export function SaleConfirmation() {
                   إلغاء
                 </Button>
                 <Button onClick={handleConfirmation} disabled={confirming} className="w-full sm:w-auto">
-                  {confirming ? 'جاري التأكيد...' : 'اتمام البيع'}
+                  {confirming ? 'Confirmation en cours...' : 'Finaliser la vente'}
                 </Button>
               </DialogFooter>
             </div>
@@ -1242,7 +1242,7 @@ export function SaleConfirmation() {
       <Dialog open={clientDetailsOpen} onOpenChange={setClientDetailsOpen}>
         <DialogContent className="w-[95vw] sm:w-full max-w-2xl max-h-[95vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>تفاصيل العميل</DialogTitle>
+            <DialogTitle>Détails du client</DialogTitle>
           </DialogHeader>
           {selectedClientForDetails && (
             <div className="space-y-4 sm:space-y-6">
@@ -1252,20 +1252,20 @@ export function SaleConfirmation() {
                   <p className="font-medium text-sm sm:text-base">{selectedClientForDetails.name}</p>
                 </div>
                 <div>
-                  <p className="text-sm text-muted-foreground">رقم CIN</p>
+                  <p className="text-sm text-muted-foreground">Numéro CIN</p>
                   <p className="font-medium">{selectedClientForDetails.cin}</p>
                 </div>
                 <div>
-                  <p className="text-sm text-muted-foreground">رقم الهاتف</p>
+                  <p className="text-sm text-muted-foreground">Téléphone</p>
                   <p className="font-medium">{selectedClientForDetails.phone || '-'}</p>
                 </div>
                 <div>
-                  <p className="text-sm text-muted-foreground">البريد الإلكتروني</p>
+                  <p className="text-sm text-muted-foreground">Email</p>
                   <p className="font-medium">{selectedClientForDetails.email || '-'}</p>
                 </div>
                 {selectedClientForDetails.address && (
                   <div className="sm:col-span-2">
-                    <p className="text-sm text-muted-foreground">العنوان</p>
+                    <p className="text-sm text-muted-foreground">Adresse</p>
                     <p className="font-medium">{selectedClientForDetails.address}</p>
                   </div>
                 )}
@@ -1273,22 +1273,22 @@ export function SaleConfirmation() {
 
               {clientSales.length > 0 && (
                 <div>
-                  <h4 className="font-semibold mb-2">سجل المبيعات</h4>
+                  <h4 className="font-semibold mb-2">Historique des ventes</h4>
                   <div className="overflow-x-auto">
                     <Table>
                       <TableHeader>
                         <TableRow>
-                          <TableHead>التاريخ</TableHead>
-                          <TableHead>النوع</TableHead>
-                          <TableHead>السعر</TableHead>
-                          <TableHead>الحالة</TableHead>
+                          <TableHead>Date</TableHead>
+                          <TableHead>Type</TableHead>
+                          <TableHead>Prix</TableHead>
+                          <TableHead>Statut</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {clientSales.map((sale) => (
                           <TableRow key={sale.id}>
                             <TableCell>{formatDate(sale.sale_date)}</TableCell>
-                            <TableCell>{sale.payment_type === 'Full' ? 'بالحاضر' : 'بالتقسيط'}</TableCell>
+                            <TableCell>{sale.payment_type === 'Full' ? 'Comptant' : 'Versements'}</TableCell>
                             <TableCell>{formatCurrency(sale.total_selling_price)}</TableCell>
                             <TableCell>
                               <Badge
@@ -1300,10 +1300,10 @@ export function SaleConfirmation() {
                                     : 'warning'
                                 }
                               >
-                                {(sale.status === 'Completed' || (sale as any).status === 'Completed') ? 'مباع' :
-                                 sale.payment_type === 'Installment' && (sale as any).status !== 'Completed' ? 'بالتقسيط' :
-                                 sale.payment_type === 'Full' && (sale as any).status !== 'Completed' ? 'بالحاضر' :
-                                 'محجوز'}
+                                {(sale.status === 'Completed' || (sale as any).status === 'Completed') ? 'Vendu' :
+                                 sale.payment_type === 'Installment' && (sale as any).status !== 'Completed' ? 'Versements' :
+                                 sale.payment_type === 'Full' && (sale as any).status !== 'Completed' ? 'Comptant' :
+                                 'Réservé'}
                               </Badge>
                             </TableCell>
                           </TableRow>
