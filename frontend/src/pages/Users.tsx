@@ -1434,6 +1434,9 @@ export function Users() {
         <DialogContent className="w-[95vw] sm:w-full max-w-5xl max-h-[95vh] overflow-hidden flex flex-col">
           {selectedUserForDetails && (
             <>
+              <DialogHeader>
+                <DialogTitle className="sr-only">تفاصيل المستخدم</DialogTitle>
+              </DialogHeader>
               {/* Header with User Info */}
               <div className="flex items-center gap-4 p-4 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border">
                 <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-full flex items-center justify-center text-white text-2xl font-bold shadow-lg">

@@ -4978,7 +4978,6 @@ export function LandManagement() {
                   await loadOffersForSelectedPieces()
                   
                   setSaleDialogOpen(true)
-                  showNotification('تم استخدام بيانات العميل الموجود', 'success')
                 } else {
                   await handleCreateClient()
                 }
@@ -5156,6 +5155,42 @@ export function LandManagement() {
                   <p className="text-xs text-muted-foreground">
                     اختر عرضاً لملء الحقول تلقائياً، أو املأها يدوياً
                   </p>
+                  
+                  {/* Reservation Amount Field - Only for Installment */}
+                  <div className="space-y-2 mt-3">
+                    <Label htmlFor="reservationAmount">العربون (مبلغ الحجز) *</Label>
+                    <Input
+                      id="reservationAmount"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={saleForm.reservation_amount}
+                      onChange={(e) => setSaleForm({ ...saleForm, reservation_amount: e.target.value })}
+                      placeholder="أدخل مبلغ العربون"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      دفعة صغيرة للحجز حتى يأتي العميل لتأكيد البيع. سيتم احتسابها كمدفوع مسبقاً عند التأكيد.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Reservation Amount Field - Show for Installment even if no offers */}
+              {saleForm.payment_type === 'Installment' && availableOffers.length === 0 && (
+                <div className="space-y-2">
+                  <Label htmlFor="reservationAmountInstallment">العربون (مبلغ الحجز) *</Label>
+                  <Input
+                    id="reservationAmountInstallment"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={saleForm.reservation_amount}
+                    onChange={(e) => setSaleForm({ ...saleForm, reservation_amount: e.target.value })}
+                    placeholder="أدخل مبلغ العربون"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    دفعة صغيرة للحجز حتى يأتي العميل لتأكيد البيع. سيتم احتسابها كمدفوع مسبقاً عند التأكيد.
+                  </p>
                 </div>
               )}
 
@@ -5180,6 +5215,25 @@ export function LandManagement() {
                   <option value="Installment">بالتقسيط</option>
                 </Select>
               </div>
+
+              {/* Reservation Amount Field - Show for Full Payment */}
+              {saleForm.payment_type === 'Full' && (
+                <div className="space-y-2">
+                  <Label htmlFor="reservationAmountFull">العربون (مبلغ الحجز) *</Label>
+                  <Input
+                    id="reservationAmountFull"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={saleForm.reservation_amount}
+                    onChange={(e) => setSaleForm({ ...saleForm, reservation_amount: e.target.value })}
+                    placeholder="أدخل مبلغ العربون"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    دفعة صغيرة للحجز حتى يأتي العميل لتأكيد البيع. سيتم احتسابها كمدفوع مسبقاً عند التأكيد.
+                  </p>
+                </div>
+              )}
 
               {/* Sale Details Summary - Different for Full vs Installment */}
               {(() => {
@@ -5229,6 +5283,10 @@ export function LandManagement() {
                     )
                   }
                   
+                  // Get reservation amount and calculate per piece
+                  const reservation = parseFloat(saleForm.reservation_amount) || 0
+                  const reservationPerPiece = reservation / selectedPiecesData.length
+                  
                   // Calculate per piece
                   const piecesCalculations = selectedPiecesData.map(p => {
                     const piecePrice = selectedOffer.price_per_m2_installment 
@@ -5243,7 +5301,8 @@ export function LandManagement() {
                       ? (piecePrice * selectedOffer.advance_amount) / 100
                       : selectedOffer.advance_amount
                     
-                    const remainingPerPiece = totalPayablePerPiece - advancePerPiece
+                    // Remaining after reservation (paid at sale creation) and advance (paid at confirmation)
+                    const remainingPerPiece = totalPayablePerPiece - reservationPerPiece - advancePerPiece
                     const monthsPerPiece = selectedOffer.monthly_payment > 0 && remainingPerPiece > 0
                       ? Math.ceil(remainingPerPiece / selectedOffer.monthly_payment)
                       : 0
@@ -5253,6 +5312,7 @@ export function LandManagement() {
                       piecePrice,
                       companyFeePerPiece,
                       totalPayablePerPiece,
+                      reservationPerPiece,
                       advancePerPiece,
                       remainingPerPiece,
                       monthsPerPiece
@@ -5264,8 +5324,9 @@ export function LandManagement() {
                   const companyFeePercentage = selectedOffer.company_fee_percentage || 0
                   const companyFeeAmount = piecesCalculations.reduce((sum, calc) => sum + calc.companyFeePerPiece, 0)
                   const totalPayable = piecesCalculations.reduce((sum, calc) => sum + calc.totalPayablePerPiece, 0)
+                  const totalReservation = piecesCalculations.reduce((sum, calc) => sum + calc.reservationPerPiece, 0)
                   const advanceAmount = piecesCalculations.reduce((sum, calc) => sum + calc.advancePerPiece, 0)
-                  const remainingAfterAdvance = piecesCalculations.reduce((sum, calc) => sum + calc.remainingPerPiece, 0)
+                  const remainingAfterPayments = piecesCalculations.reduce((sum, calc) => sum + calc.remainingPerPiece, 0)
                   const monthlyAmount = selectedOffer.monthly_payment
                   const maxMonths = Math.max(...piecesCalculations.map(calc => calc.monthsPerPiece), 0)
                   
@@ -5288,8 +5349,9 @@ export function LandManagement() {
                                 <div className="text-xs text-muted-foreground space-y-0.5 pl-2">
                                   <div>عمولة ({companyFeePercentage}%): {formatCurrency(calc.companyFeePerPiece)}</div>
                                   <div>المستحق: {formatCurrency(calc.totalPayablePerPiece)}</div>
-                                  <div>التسبقة: {formatCurrency(calc.advancePerPiece)}</div>
-                                  <div>المتبقي: {formatCurrency(calc.remainingPerPiece)}</div>
+                                  <div className="text-green-700">العربون (مدفوع): {formatCurrency(calc.reservationPerPiece)}</div>
+                                  <div>التسبقة (عند التأكيد): {formatCurrency(calc.advancePerPiece)}</div>
+                                  <div>المتبقي للتقسيط: {formatCurrency(calc.remainingPerPiece)}</div>
                                   <div>المبلغ الشهري: {formatCurrency(monthlyAmount)}</div>
                                   {calc.monthsPerPiece > 0 && (
                                     <div className="font-medium text-blue-700">عدد الأشهر: {calc.monthsPerPiece} شهر</div>
@@ -5300,10 +5362,10 @@ export function LandManagement() {
                           })}
                           {/* Total Summary */}
                           <div className="border-t border-blue-200 pt-2 mt-2 space-y-1">
-                            <div className="flex justify-between items-center">
+                            <div className="flex justify-between items-center mb-1">
                               <span className="text-xs font-semibold text-blue-800">الإجمالي:</span>
                             </div>
-                            <div className="text-xs text-muted-foreground space-y-0.5 pl-2">
+                            <div className="text-xs text-muted-foreground space-y-1 pl-2 bg-blue-50 rounded p-2">
                               <div className="flex justify-between">
                                 <span>السعر الإجمالي:</span>
                                 <span className="font-medium">{formatCurrency(totalPrice)}</span>
@@ -5312,24 +5374,40 @@ export function LandManagement() {
                                 <span>عمولة الشركة ({companyFeePercentage}%):</span>
                                 <span className="font-medium">{formatCurrency(companyFeeAmount)}</span>
                               </div>
-                              <div className="flex justify-between">
-                                <span>المبلغ الإجمالي المستحق:</span>
-                                <span className="font-medium">{formatCurrency(totalPayable)}</span>
+                              <div className="flex justify-between border-t border-blue-100 pt-1 mt-1">
+                                <span className="font-medium">المبلغ الإجمالي المستحق:</span>
+                                <span className="font-semibold text-blue-800">{formatCurrency(totalPayable)}</span>
+                              </div>
+                              <div className="flex justify-between text-green-700">
+                                <span>العربون (مدفوع عند الحجز):</span>
+                                <span className="font-medium">{formatCurrency(totalReservation)}</span>
                               </div>
                               <div className="flex justify-between">
-                                <span>التسبقة:</span>
+                                <span>التسبقة (عند التأكيد):</span>
                                 <span className="font-medium">{formatCurrency(advanceAmount)}</span>
                               </div>
-                              <div className="flex justify-between">
-                                <span>المبلغ المتبقي بعد التسبقة:</span>
-                                <span className="font-medium">{formatCurrency(remainingAfterAdvance)}</span>
+                              <div className="flex justify-between border-t border-blue-100 pt-1 mt-1">
+                                <span className="font-medium">المبلغ المتبقي للتقسيط:</span>
+                                <span className="font-semibold text-blue-800">{formatCurrency(remainingAfterPayments)}</span>
                               </div>
                               {maxMonths > 0 && (
-                                <div className="flex justify-between">
-                                  <span>عدد الأشهر:</span>
-                                  <span className="font-medium">{maxMonths} شهر</span>
-                                </div>
+                                <>
+                                  <div className="flex justify-between">
+                                    <span>المبلغ الشهري:</span>
+                                    <span className="font-medium">{formatCurrency(monthlyAmount)}</span>
+                                  </div>
+                                  <div className="flex justify-between border-t border-blue-100 pt-1 mt-1">
+                                    <span className="font-medium">عدد الأشهر:</span>
+                                    <span className="font-semibold text-blue-800">{maxMonths} شهر</span>
+                                  </div>
+                                </>
                               )}
+                              <div className="text-xs text-muted-foreground mt-2 pt-2 border-t border-blue-100">
+                                <p className="font-medium mb-1">ملاحظة:</p>
+                                <p>• العربون: مبلغ يتم دفعه عند إنشاء البيع (الحجز)</p>
+                                <p>• التسبقة: مبلغ يتم دفعه عند تأكيد البيع</p>
+                                <p>• المبلغ المتبقي: يتم تقسيطه على {maxMonths} شهر بمبلغ {formatCurrency(monthlyAmount)} شهرياً</p>
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -5338,22 +5416,6 @@ export function LandManagement() {
                   )
                 }
               })()}
-
-              <div className="space-y-2">
-                <Label htmlFor="reservationAmount">العربون (مبلغ الحجز) *</Label>
-                <Input
-                  id="reservationAmount"
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={saleForm.reservation_amount}
-                  onChange={(e) => setSaleForm({ ...saleForm, reservation_amount: e.target.value })}
-                  placeholder="أدخل مبلغ العربون"
-                />
-                <p className="text-xs text-muted-foreground">
-                  دفعة صغيرة للحجز حتى يأتي العميل لتأكيد البيع. سيتم احتسابها كمدفوع مسبقاً عند التأكيد.
-                </p>
-              </div>
 
               <div className="space-y-2">
                 <Label htmlFor="deadlineDate">آخر أجل لإتمام الإجراءات (اختياري)</Label>
