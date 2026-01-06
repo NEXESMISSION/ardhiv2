@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useCallback } from 'react'
+import { useEffect, useState, useMemo, useCallback, memo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
@@ -78,7 +78,64 @@ export function LandManagement() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [expandedBatches, setExpandedBatches] = useState<Set<string>>(new Set())
-  const [filterStatus, setFilterStatus] = useState<string>('all')
+  
+  // Track touch events to prevent accidental clicks during scrolling
+  const touchStateRef = useRef<{
+    startX: number
+    startY: number
+    hasMoved: boolean
+    target: HTMLElement | null
+  }>({
+    startX: 0,
+    startY: 0,
+    hasMoved: false,
+    target: null,
+  })
+  
+  // Helper function to handle button clicks with scroll detection
+  const createButtonHandler = (handler: () => void) => {
+    return {
+      onTouchStart: (e: React.TouchEvent) => {
+        const touch = e.touches[0]
+        touchStateRef.current = {
+          startX: touch.clientX,
+          startY: touch.clientY,
+          hasMoved: false,
+          target: e.currentTarget as HTMLElement,
+        }
+      },
+      onTouchMove: (e: React.TouchEvent) => {
+        if (!touchStateRef.current.target) return
+        const touch = e.touches[0]
+        const deltaX = Math.abs(touch.clientX - touchStateRef.current.startX)
+        const deltaY = Math.abs(touch.clientY - touchStateRef.current.startY)
+        // If moved more than 10px, consider it a scroll
+        if (deltaX > 10 || deltaY > 10) {
+          touchStateRef.current.hasMoved = true
+        }
+      },
+      onTouchEnd: (e: React.TouchEvent) => {
+        // Only execute if it wasn't a scroll
+        if (!touchStateRef.current.hasMoved && touchStateRef.current.target === e.currentTarget) {
+          e.preventDefault()
+          e.stopPropagation()
+          handler()
+        }
+        // Reset
+        touchStateRef.current = {
+          startX: 0,
+          startY: 0,
+          hasMoved: false,
+          target: null,
+        }
+      },
+      onClick: (e: React.MouseEvent) => {
+        // For desktop/mouse clicks, always execute
+        handler()
+      },
+    }
+  }
+  // Filter status removed - only search is used now
   const [searchTerm, setSearchTerm] = useState('')
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('')
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
@@ -110,10 +167,60 @@ export function LandManagement() {
   })
   const [savingClient, setSavingClient] = useState(false)
   const [creatingSale, setCreatingSale] = useState(false)
+  const [searchingClient, setSearchingClient] = useState(false)
+  const [foundClient, setFoundClient] = useState<Client | null>(null)
   
   // Debounced search
   const debouncedSearchFn = useCallback(
     debounce((value: string) => setDebouncedSearchTerm(value), 300),
+    []
+  )
+
+  // Debounced CIN search
+  const debouncedCINSearch = useCallback(
+    debounce(async (cin: string) => {
+      if (!cin || cin.trim().length < 3) {
+        setFoundClient(null)
+        return
+      }
+
+      const sanitizedCIN = sanitizeCIN(cin)
+      if (!sanitizedCIN) {
+        setFoundClient(null)
+        return
+      }
+
+      setSearchingClient(true)
+      try {
+        const { data, error } = await supabase
+          .from('clients')
+          .select('*')
+          .eq('cin', sanitizedCIN)
+          .limit(1)
+          .single()
+
+        if (!error && data) {
+          setFoundClient(data)
+          // Auto-fill form with found client data
+          setClientForm({
+            name: data.name,
+            cin: data.cin,
+            phone: data.phone || '',
+            email: data.email || '',
+            address: data.address || '',
+            client_type: data.client_type,
+            notes: data.notes || '',
+          })
+          setNewClient(data) // Set as selected client
+        } else {
+          setFoundClient(null)
+        }
+      } catch (error) {
+        setFoundClient(null)
+      } finally {
+        setSearchingClient(false)
+      }
+    }, 500),
     []
   )
 
@@ -130,6 +237,9 @@ export function LandManagement() {
     real_estate_tax_number: '',
     price_per_m2_full: '',
     price_per_m2_installment: '',
+    company_fee_percentage: '',
+    received_amount: '',
+    number_of_months: '',
     image_url: '',
   })
   const [imageFile, setImageFile] = useState<File | null>(null)
@@ -211,6 +321,11 @@ export function LandManagement() {
     surface_area: '', // Optional - will use default if empty
     selling_price_full: '',
     selling_price_installment: '',
+    price_per_m2_full: '',
+    price_per_m2_installment: '',
+    company_fee_percentage: '',
+    received_amount: '',
+    number_of_months: '',
     notes: '',
   })
 
@@ -357,6 +472,9 @@ export function LandManagement() {
         real_estate_tax_number: (batch as any).real_estate_tax_number || '',
         price_per_m2_full: (batch as any).price_per_m2_full?.toString() || '',
         price_per_m2_installment: (batch as any).price_per_m2_installment?.toString() || '',
+        company_fee_percentage: (batch as any).company_fee_percentage?.toString() || '',
+        received_amount: (batch as any).received_amount?.toString() || '',
+        number_of_months: (batch as any).number_of_months?.toString() || '',
         image_url: (batch as any).image_url || '',
       })
       setImagePreview((batch as any).image_url || null)
@@ -374,6 +492,9 @@ export function LandManagement() {
         real_estate_tax_number: '',
         price_per_m2_full: '',
         price_per_m2_installment: '',
+        company_fee_percentage: '',
+        received_amount: '',
+        number_of_months: '',
         image_url: '',
       })
       setImagePreview(null)
@@ -852,6 +973,28 @@ export function LandManagement() {
       // Always include these fields in batchData (even if null) to ensure they're saved
       batchData.price_per_m2_full = pricePerM2Full !== null && !isNaN(pricePerM2Full) ? pricePerM2Full : null
       batchData.price_per_m2_installment = pricePerM2Installment !== null && !isNaN(pricePerM2Installment) ? pricePerM2Installment : null
+
+      // Add company fee, received amount, and number of months
+      const companyFeePercentage = batchForm.company_fee_percentage && batchForm.company_fee_percentage.trim()
+        ? parseFloat(batchForm.company_fee_percentage)
+        : null
+      const receivedAmount = batchForm.received_amount && batchForm.received_amount.trim()
+        ? parseFloat(batchForm.received_amount)
+        : null
+      const numberOfMonths = batchForm.number_of_months && batchForm.number_of_months.trim()
+        ? parseInt(batchForm.number_of_months, 10)
+        : null
+      
+      // Add these fields to batchData (even if null)
+      if (companyFeePercentage !== null && !isNaN(companyFeePercentage)) {
+        batchData.company_fee_percentage = companyFeePercentage
+      }
+      if (receivedAmount !== null && !isNaN(receivedAmount)) {
+        batchData.received_amount = receivedAmount
+      }
+      if (numberOfMonths !== null && !isNaN(numberOfMonths)) {
+        batchData.number_of_months = numberOfMonths
+      }
 
       // Handle image upload
       let imageUrl = batchForm.image_url || null
@@ -1447,6 +1590,11 @@ export function LandManagement() {
         surface_area: piece.surface_area.toString(),
         selling_price_full: piece.selling_price_full?.toString() || '',
         selling_price_installment: piece.selling_price_installment?.toString() || '',
+        price_per_m2_full: (piece as any).price_per_m2_full?.toString() || '',
+        price_per_m2_installment: (piece as any).price_per_m2_installment?.toString() || '',
+        company_fee_percentage: (piece as any).company_fee_percentage?.toString() || '',
+        received_amount: (piece as any).received_amount?.toString() || '',
+        number_of_months: (piece as any).number_of_months?.toString() || '',
         notes: piece.notes || '',
       })
     } else {
@@ -1526,6 +1674,11 @@ export function LandManagement() {
         surface_area: avgSurface,
         selling_price_full: '',
         selling_price_installment: '',
+        price_per_m2_full: '',
+        price_per_m2_installment: '',
+        company_fee_percentage: '',
+        received_amount: '',
+        number_of_months: '',
         notes: '',
       })
     }
@@ -1615,7 +1768,7 @@ export function LandManagement() {
       }
       
       // Sanitize inputs
-      const pieceData = {
+      const pieceData: any = {
         land_batch_id: selectedBatchId,
         piece_number: pieceNumber,
         surface_area: surfaceArea,
@@ -1623,6 +1776,40 @@ export function LandManagement() {
         selling_price_full: sellingPriceFull,
         selling_price_installment: sellingPriceInstallment,
         notes: pieceForm.notes ? sanitizeNotes(pieceForm.notes) : null,
+      }
+
+      // Add price per m², company fee, received amount, and number of months
+      const pricePerM2Full = pieceForm.price_per_m2_full && pieceForm.price_per_m2_full.trim()
+        ? parseFloat(pieceForm.price_per_m2_full)
+        : null
+      const pricePerM2Installment = pieceForm.price_per_m2_installment && pieceForm.price_per_m2_installment.trim()
+        ? parseFloat(pieceForm.price_per_m2_installment)
+        : null
+      const companyFeePercentage = pieceForm.company_fee_percentage && pieceForm.company_fee_percentage.trim()
+        ? parseFloat(pieceForm.company_fee_percentage)
+        : null
+      const receivedAmount = pieceForm.received_amount && pieceForm.received_amount.trim()
+        ? parseFloat(pieceForm.received_amount)
+        : null
+      const numberOfMonths = pieceForm.number_of_months && pieceForm.number_of_months.trim()
+        ? parseInt(pieceForm.number_of_months, 10)
+        : null
+      
+      // Add these fields to pieceData (even if null)
+      if (pricePerM2Full !== null && !isNaN(pricePerM2Full)) {
+        pieceData.price_per_m2_full = pricePerM2Full
+      }
+      if (pricePerM2Installment !== null && !isNaN(pricePerM2Installment)) {
+        pieceData.price_per_m2_installment = pricePerM2Installment
+      }
+      if (companyFeePercentage !== null && !isNaN(companyFeePercentage)) {
+        pieceData.company_fee_percentage = companyFeePercentage
+      }
+      if (receivedAmount !== null && !isNaN(receivedAmount)) {
+        pieceData.received_amount = receivedAmount
+      }
+      if (numberOfMonths !== null && !isNaN(numberOfMonths)) {
+        pieceData.number_of_months = numberOfMonths
       }
 
       if (editingPiece) {
@@ -1661,6 +1848,11 @@ export function LandManagement() {
         surface_area: '',
         selling_price_full: '',
         selling_price_installment: '',
+        price_per_m2_full: '',
+        price_per_m2_installment: '',
+        company_fee_percentage: '',
+        received_amount: '',
+        number_of_months: '',
         notes: '',
       })
       setEditingPiece(null)
@@ -1842,7 +2034,7 @@ export function LandManagement() {
     ...batch,
       land_pieces: (Array.isArray(batch.land_pieces) ? batch.land_pieces : [])
         .filter((piece) => {
-        const matchesStatus = filterStatus === 'all' || filterStatus === '' || piece.status === filterStatus
+        const matchesStatus = true // All statuses shown - filter removed
       const matchesSearch =
             !debouncedSearchTerm || debouncedSearchTerm.trim() === '' ||
             piece.piece_number?.toLowerCase().includes(debouncedSearchTerm.toLowerCase().trim())
@@ -2094,57 +2286,75 @@ export function LandManagement() {
   }
 
   return (
-    <div className="space-y-3 sm:space-y-4">
-      {/* Compact Header with inline filters */}
-      <div className="flex flex-col gap-3">
-        <div className="flex items-center justify-between">
-          <h1 className="text-xl sm:text-2xl font-bold">الأراضي</h1>
-          <div className="flex items-center gap-2">
-            {selectedPieces.size > 0 && hasPermission('create_sales') && (
-              <Button 
-                onClick={() => setClientDialogOpen(true)} 
-                size="sm"
-                className="bg-green-600 hover:bg-green-700 hidden md:flex"
-              >
-                <ShoppingCart className="ml-1 h-4 w-4" />
-                بيع ({selectedPieces.size})
-              </Button>
-            )}
-            {hasPermission('edit_land') && (
-              <Button onClick={() => openBatchDialog()} size="sm">
-                <Plus className="ml-1 h-4 w-4" />
-                إضافة
-              </Button>
-            )}
+    <div className="space-y-3 sm:space-y-4 pb-20 md:pb-4">
+      {/* Desktop/Tablet: Sticky Header Container */}
+      <div className="hidden md:block sticky top-0 z-30 bg-background border-b shadow-sm mb-4 -mt-6 -mx-3 md:-mx-6">
+        <div className="px-3 md:px-6 pt-6 pb-4 space-y-3">
+          {/* Header Row */}
+          <div className="flex items-center justify-between">
+            <h1 className="text-2xl font-bold">الأراضي</h1>
+            <div className="flex items-center gap-2">
+              {hasPermission('edit_land') && (
+                <Button onClick={() => openBatchDialog()} size="sm">
+                  <Plus className="ml-1 h-4 w-4" />
+                  إضافة
+                </Button>
+              )}
+            </div>
+          </div>
+          
+          {/* Search Bar */}
+          <div>
+            <Input
+              placeholder="بحث في الأراضي..."
+              value={searchTerm}
+              maxLength={50}
+              onChange={(e) => {
+                setSearchTerm(e.target.value)
+                debouncedSearchFn(e.target.value)
+              }}
+              className="w-full h-10 text-base shadow-sm focus:shadow-md transition-shadow border-2 focus:border-primary"
+            />
           </div>
         </div>
-
-        {/* Inline Filters - Compact */}
-        <div className="flex flex-col sm:flex-row gap-2">
-              <Input
-            placeholder="بحث..."
-                value={searchTerm}
-                maxLength={50}
-                onChange={(e) => {
-                  setSearchTerm(e.target.value)
-                  debouncedSearchFn(e.target.value)
-                }}
-            className="flex-1 h-9 text-sm"
-              />
-            <Select
-              value={filterStatus}
-              onChange={(e) => setFilterStatus(e.target.value)}
-            className="w-full sm:w-32 h-9 text-sm"
-            >
-              <option value="all">الكل</option>
-              <option value="Reserved">محجوز</option>
-              <option value="Installment">بالتقسيط</option>
-              <option value="Full">بالحاضر</option>
-              <option value="Sold">مباع</option>
-            </Select>
-          </div>
       </div>
 
+      {/* Mobile: Floating Search Bar with Header */}
+      <div className="md:hidden">
+        {/* Mobile Floating Search - Fixed at top after header buttons (top-2 + h-9 = ~36px, so top-14 = 56px) */}
+        <div className="fixed top-14 left-0 right-0 z-30 bg-background/98 backdrop-blur-md border-b border-border/50 shadow-lg">
+          <div className="px-3 py-2.5">
+            <Input
+              placeholder="بحث في الأراضي..."
+              value={searchTerm}
+              maxLength={50}
+              onChange={(e) => {
+                setSearchTerm(e.target.value)
+                debouncedSearchFn(e.target.value)
+              }}
+              className="w-full h-10 text-sm shadow-sm focus:shadow-md transition-shadow border-2 focus:border-primary"
+            />
+          </div>
+        </div>
+        
+        {/* Header - Below search bar */}
+        <div className="flex flex-col gap-3 mb-3 pt-20">
+          <div className="flex items-center justify-between">
+            <h1 className="text-xl font-bold">الأراضي</h1>
+            <div className="flex items-center gap-2">
+              {hasPermission('edit_land') && (
+                <Button onClick={() => openBatchDialog()} size="sm">
+                  <Plus className="ml-1 h-4 w-4" />
+                  إضافة
+                </Button>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Content */}
+      <div>
       {/* Batches - Compact Design */}
       {filteredBatches.map((batch) => {
         const availableCount = batch.land_pieces.filter(p => p.status === 'Available').length
@@ -2263,74 +2473,172 @@ export function LandManagement() {
                   <>
                     {/* Mobile: Compact Grid */}
                     <div className="grid grid-cols-2 gap-2 p-2 md:hidden">
-                      {batch.land_pieces.map((piece) => (
-                        <div 
-                          key={piece.id} 
-                          className={`p-2 rounded-lg border text-xs ${
-                            piece.status === 'Available' ? 'bg-green-50 border-green-200' :
-                            piece.status === 'Reserved' ? 'bg-orange-50 border-orange-200' :
-                            piece.status === 'Sold' ? 'bg-gray-100 border-gray-200' : 'bg-gray-50 border-gray-200'
-                          } ${selectedPieces.has(piece.id) ? 'ring-2 ring-green-500' : ''}`}
-                        >
-                          <div className="flex items-center justify-between mb-1">
-                            <div className="flex items-center gap-1">
-                              {piece.status === 'Available' && hasPermission('create_sales') && (
-                                <input
-                                  type="checkbox"
-                                  checked={selectedPieces.has(piece.id)}
-                                  onChange={(e) => {
-                                    e.stopPropagation()
-                                    const newSelected = new Set(selectedPieces)
-                                    if (e.target.checked) {
-                                      newSelected.add(piece.id)
-                                    } else {
-                                      newSelected.delete(piece.id)
-                                    }
-                                    setSelectedPieces(newSelected)
-                                  }}
-                                  onClick={(e) => e.stopPropagation()}
-                                  className="h-5 w-5 text-green-600 rounded cursor-pointer touch-manipulation"
-                                  style={{ WebkitTapHighlightColor: 'transparent' }}
-                                />
-                              )}
-                              <span className="font-bold">{piece.piece_number}</span>
+                      {batch.land_pieces.map((piece) => {
+                        const isAvailable = piece.status === 'Available' && hasPermission('create_sales')
+                        const isSelected = selectedPieces.has(piece.id)
+                        
+                        // Track touch start position to detect scrolling
+                        let touchStartX = 0
+                        let touchStartY = 0
+                        let hasMoved = false
+                        
+                        const handleTouchStart = (e: React.TouchEvent) => {
+                          const touch = e.touches[0]
+                          touchStartX = touch.clientX
+                          touchStartY = touch.clientY
+                          hasMoved = false
+                        }
+                        
+                        const handleTouchMove = (e: React.TouchEvent) => {
+                          if (!touchStartX || !touchStartY) return
+                          const touch = e.touches[0]
+                          const deltaX = Math.abs(touch.clientX - touchStartX)
+                          const deltaY = Math.abs(touch.clientY - touchStartY)
+                          // If moved more than 10px, consider it a scroll
+                          if (deltaX > 10 || deltaY > 10) {
+                            hasMoved = true
+                          }
+                        }
+                        
+                        const handleTouchEnd = (e: React.TouchEvent) => {
+                          // Only toggle if it wasn't a scroll
+                          if (!hasMoved && isAvailable && !(e.target as HTMLElement).closest('button') && !(e.target as HTMLElement).closest('input')) {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            setSelectedPieces(prev => {
+                              const newSelected = new Set(prev)
+                              if (prev.has(piece.id)) {
+                                newSelected.delete(piece.id)
+                              } else {
+                                newSelected.add(piece.id)
+                              }
+                              return newSelected
+                            })
+                          }
+                          // Reset
+                          touchStartX = 0
+                          touchStartY = 0
+                          hasMoved = false
+                        }
+                        
+                        const handleClick = (e: React.MouseEvent) => {
+                          // Only handle click if not from touch event
+                          if (isAvailable && !(e.target as HTMLElement).closest('button') && !(e.target as HTMLElement).closest('input')) {
+                            setSelectedPieces(prev => {
+                              const newSelected = new Set(prev)
+                              if (prev.has(piece.id)) {
+                                newSelected.delete(piece.id)
+                              } else {
+                                newSelected.add(piece.id)
+                              }
+                              return newSelected
+                            })
+                          }
+                        }
+                        
+                        const handleCheckboxChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+                          e.stopPropagation()
+                          setSelectedPieces(prev => {
+                            const newSelected = new Set(prev)
+                            if (e.target.checked) {
+                              newSelected.add(piece.id)
+                            } else {
+                              newSelected.delete(piece.id)
+                            }
+                            return newSelected
+                          })
+                        }
+                        
+                        return (
+                          <div 
+                            key={piece.id} 
+                            className={`p-2.5 rounded-lg border text-xs ${
+                              piece.status === 'Available' ? 'bg-green-50 border-green-200' :
+                              piece.status === 'Reserved' ? 'bg-orange-50 border-orange-200' :
+                              piece.status === 'Sold' ? 'bg-gray-100 border-gray-200' : 'bg-gray-50 border-gray-200'
+                            } ${isSelected ? 'ring-2 ring-green-500 border-green-500 bg-green-100' : ''} ${isAvailable ? 'cursor-pointer' : ''}`}
+                            onClick={handleClick}
+                            onTouchStart={handleTouchStart}
+                            onTouchMove={handleTouchMove}
+                            onTouchEnd={handleTouchEnd}
+                            style={{ touchAction: 'pan-y', WebkitTapHighlightColor: 'transparent' }}
+                          >
+                            {/* Header with Checkbox and Badge */}
+                            <div className="flex items-start justify-between mb-2 gap-2">
+                              <div className="flex items-center gap-2 flex-1 min-w-0">
+                                {isAvailable && (
+                                  <input
+                                    type="checkbox"
+                                    checked={isSelected}
+                                    onChange={handleCheckboxChange}
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      e.preventDefault()
+                                    }}
+                                    onTouchStart={(e) => {
+                                      e.stopPropagation()
+                                    }}
+                                    onTouchEnd={(e) => {
+                                      e.stopPropagation()
+                                      e.preventDefault()
+                                    }}
+                                    className="h-5 w-5 min-h-[20px] min-w-[20px] text-green-600 rounded cursor-pointer flex-shrink-0"
+                                    style={{ 
+                                      WebkitTapHighlightColor: 'transparent',
+                                      accentColor: '#16a34a',
+                                      cursor: 'pointer',
+                                      touchAction: 'none'
+                                    }}
+                                  />
+                                )}
+                                <div className="flex-1 min-w-0">
+                                  <div className="font-bold text-sm truncate">{piece.piece_number}</div>
+                                  <div className="text-xs text-muted-foreground mt-0.5">{piece.surface_area} م²</div>
+                                </div>
+                              </div>
+                              <Badge variant={statusColors[piece.status]} className="text-xs px-1.5 py-0.5 flex-shrink-0">
+                                {piece.status === 'Available' ? 'متاح' :
+                                 piece.status === 'Reserved' ? 'محجوز' :
+                                 piece.status === 'Sold' ? 'مباع' : 'ملغي'}
+                              </Badge>
                             </div>
-                            <Badge variant={statusColors[piece.status]} className="text-xs px-1.5 py-0">
-                              {piece.status === 'Available' ? 'متاح' :
-                               piece.status === 'Reserved' ? 'محجوز' :
-                               piece.status === 'Sold' ? 'مباع' : 'ملغي'}
-                            </Badge>
-                          </div>
-                          <div className="text-muted-foreground">{piece.surface_area} م²</div>
-                          <div className="font-semibold text-green-600 mt-1">{formatCurrency(piece.selling_price_full || 0)}</div>
-                          
-                          {/* Sell Button for Available */}
-                          {piece.status === 'Available' && hasPermission('create_sales') && (
-                            <Button
-                              size="sm"
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                setSelectedPieces(new Set([piece.id]))
-                                setClientDialogOpen(true)
-                              }}
-                              className="w-full mt-2 h-7 text-xs bg-green-600 hover:bg-green-700"
-                            >
-                              <ShoppingCart className="h-3 w-3 ml-1" />
-                              بيع
-                            </Button>
-                          )}
+                            
+                            <div className="font-semibold text-green-600 text-sm mb-2">{formatCurrency(piece.selling_price_full || 0)}</div>
+                            
+                            {/* Sell Button for Available - Only show if not using multi-select */}
+                            {isAvailable && !isSelected && (
+                              <Button
+                                size="sm"
+                                {...createButtonHandler(() => {
+                                  setSelectedPieces(new Set([piece.id]))
+                                  setClientDialogOpen(true)
+                                })}
+                                className="w-full h-8 text-xs bg-green-600 hover:bg-green-700 active:bg-green-800 mb-1 touch-manipulation"
+                                style={{ touchAction: 'manipulation' }}
+                              >
+                                <ShoppingCart className="h-3.5 w-3.5 ml-1" />
+                                بيع
+                              </Button>
+                            )}
+                            
+                            {/* Selected indicator */}
+                            {isSelected && (
+                              <div className="w-full h-8 flex items-center justify-center text-xs font-semibold text-green-700 bg-green-200 rounded border border-green-400 mb-1">
+                                ✓ مختارة
+                              </div>
+                            )}
                           
                           {/* Edit buttons */}
                           {hasPermission('edit_land') && (
-                            <div className="flex gap-1 mt-1">
+                            <div className="flex gap-1">
                               <Button
                                 variant="outline"
                                 size="sm"
-                                onClick={(e) => {
-                                  e.stopPropagation()
+                                {...createButtonHandler(() => {
                                   openPieceDialog(batch.id, piece)
-                                }}
-                                className="flex-1 h-6 text-xs"
+                                })}
+                                className="flex-1 h-7 text-xs touch-manipulation"
+                                style={{ touchAction: 'manipulation' }}
                               >
                                 <Edit className="h-3 w-3" />
                               </Button>
@@ -2338,30 +2646,31 @@ export function LandManagement() {
                                 <Button
                                   variant="outline"
                                   size="sm"
-                                  onClick={(e) => {
-                                    e.stopPropagation()
+                                  {...createButtonHandler(() => {
                                     openPriceEditDialog(batch.id, piece)
-                                  }}
-                                  className="h-6 text-xs text-blue-600"
+                                  })}
+                                  className="h-7 w-7 text-blue-600 p-0 touch-manipulation"
+                                  style={{ touchAction: 'manipulation' }}
                                 >
-                                  <DollarSign className="h-3 w-3" />
+                                  <DollarSign className="h-3.5 w-3.5" />
                                 </Button>
                               )}
                               <Button
                                 variant="outline"
                                 size="sm"
-                                onClick={(e) => {
-                                  e.stopPropagation()
+                                {...createButtonHandler(() => {
                                   deletePiece(piece, batch.id)
-                                }}
-                                className="h-6 text-xs text-red-600 hover:bg-red-50"
+                                })}
+                                className="h-7 w-7 text-red-600 hover:bg-red-50 p-0 touch-manipulation"
+                                style={{ touchAction: 'manipulation' }}
                               >
-                                <Trash2 className="h-3 w-3" />
+                                <Trash2 className="h-3.5 w-3.5" />
                               </Button>
                             </div>
                           )}
-                        </div>
-                      ))}
+                          </div>
+                        )
+                      })}
                     </div>
 
                     {/* Desktop: Compact Table */}
@@ -2422,10 +2731,10 @@ export function LandManagement() {
                                   {piece.status === 'Available' && hasPermission('create_sales') && (
                                     <Button
                                       size="sm"
-                                      onClick={() => {
+                                      {...createButtonHandler(() => {
                                         setSelectedPieces(new Set([piece.id]))
                                         setClientDialogOpen(true)
-                                      }}
+                                      })}
                                       className="h-7 text-xs bg-green-600 hover:bg-green-700"
                                     >
                                       <ShoppingCart className="h-3 w-3 ml-1" />
@@ -2437,7 +2746,9 @@ export function LandManagement() {
                               <Button
                                 variant="ghost"
                                 size="icon"
-                                onClick={() => openPieceDialog(batch.id, piece)}
+                                {...createButtonHandler(() => {
+                                  openPieceDialog(batch.id, piece)
+                                })}
                                       className="h-7 w-7"
                               >
                                       <Edit className="h-3.5 w-3.5" />
@@ -2445,7 +2756,9 @@ export function LandManagement() {
                                 <Button
                                   variant="ghost"
                                   size="icon"
-                                  onClick={() => deletePiece(piece, batch.id)}
+                                  {...createButtonHandler(() => {
+                                    deletePiece(piece, batch.id)
+                                  })}
                                   className="h-7 w-7 text-red-600 hover:text-red-700 hover:bg-red-50"
                                 >
                                   <Trash2 className="h-3.5 w-3.5" />
@@ -2456,7 +2769,9 @@ export function LandManagement() {
                                   <Button
                                     variant="ghost"
                                     size="icon"
-                                    onClick={() => openPriceEditDialog(batch.id, piece)}
+                                    {...createButtonHandler(() => {
+                                      openPriceEditDialog(batch.id, piece)
+                                    })}
                                       className="h-7 w-7 text-blue-600"
                                   >
                                       <DollarSign className="h-3.5 w-3.5" />
@@ -2482,6 +2797,7 @@ export function LandManagement() {
           لا توجد أراضي
         </div>
       )}
+      </div>
 
       {/* Batch Dialog */}
       <Dialog open={batchDialogOpen} onOpenChange={setBatchDialogOpen}>
@@ -2552,6 +2868,49 @@ export function LandManagement() {
                     placeholder="12.00"
                   />
                   <p className="text-xs text-muted-foreground">سيتم تطبيق هذا السعر على القطع الجديدة فقط. القطع الموجودة والمبيعات السابقة لن تتأثر.</p>
+                </div>
+              </div>
+            </div>
+            
+            {/* Company Fee and Payment Settings */}
+            <div className="bg-green-50 border border-green-200 rounded-lg p-4 space-y-4">
+              <p className="text-sm font-medium text-green-800">إعدادات الدفع والأقساط</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="company_fee_percentage">عمولة الشركة (%)</Label>
+                  <Input
+                    id="company_fee_percentage"
+                    type="number"
+                    step="0.01"
+                    value={batchForm.company_fee_percentage}
+                    onChange={(e) => setBatchForm({ ...batchForm, company_fee_percentage: e.target.value })}
+                    placeholder="2.00"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="received_amount">المبلغ المستلم *</Label>
+                  <Input
+                    id="received_amount"
+                    type="number"
+                    step="0.01"
+                    value={batchForm.received_amount}
+                    onChange={(e) => setBatchForm({ ...batchForm, received_amount: e.target.value })}
+                    placeholder="0.00"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="number_of_months">عدد الأشهر *</Label>
+                  <Input
+                    id="number_of_months"
+                    type="number"
+                    value={batchForm.number_of_months}
+                    onChange={(e) => setBatchForm({ ...batchForm, number_of_months: e.target.value })}
+                    placeholder="12"
+                    min="1"
+                  />
+                  <p className="text-xs text-muted-foreground">إعدادات الأقساط</p>
                 </div>
               </div>
             </div>
@@ -2686,6 +3045,39 @@ export function LandManagement() {
                   </p>
               </div>
             
+            {/* Price per m² fields - show when editing */}
+            {editingPiece && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-4">
+                <p className="text-sm font-medium text-blue-800">أسعار البيع لكل متر مربع</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="price_per_m2_full">سعر المتر المربع (بالحاضر) *</Label>
+                    <Input
+                      id="price_per_m2_full"
+                      type="number"
+                      step="0.01"
+                      value={pieceForm.price_per_m2_full}
+                      onChange={(e) => setPieceForm({ ...pieceForm, price_per_m2_full: e.target.value })}
+                      placeholder="10.00"
+                    />
+                    <p className="text-xs text-muted-foreground">سيتم تطبيق هذا السعر على القطع الجديدة فقط. القطع الموجودة والمبيعات السابقة لن تتأثر.</p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="price_per_m2_installment">سعر المتر المربع (بالتقسيط) *</Label>
+                    <Input
+                      id="price_per_m2_installment"
+                      type="number"
+                      step="0.01"
+                      value={pieceForm.price_per_m2_installment}
+                      onChange={(e) => setPieceForm({ ...pieceForm, price_per_m2_installment: e.target.value })}
+                      placeholder="12.00"
+                    />
+                    <p className="text-xs text-muted-foreground">سيتم تطبيق هذا السعر على القطع الجديدة فقط. القطع الموجودة والمبيعات السابقة لن تتأثر.</p>
+                  </div>
+                </div>
+              </div>
+            )}
+            
             {/* Price fields - show when editing or allow manual entry */}
             {editingPiece ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -2735,6 +3127,51 @@ export function LandManagement() {
                 }
                 return null
               })()
+            )}
+            
+            {/* Company Fee and Payment Settings - show when editing */}
+            {editingPiece && (
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4 space-y-4">
+                <p className="text-sm font-medium text-green-800">إعدادات الدفع والأقساط</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="piece_company_fee_percentage">عمولة الشركة (%)</Label>
+                    <Input
+                      id="piece_company_fee_percentage"
+                      type="number"
+                      step="0.01"
+                      value={pieceForm.company_fee_percentage}
+                      onChange={(e) => setPieceForm({ ...pieceForm, company_fee_percentage: e.target.value })}
+                      placeholder="2.00"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="piece_received_amount">المبلغ المستلم *</Label>
+                    <Input
+                      id="piece_received_amount"
+                      type="number"
+                      step="0.01"
+                      value={pieceForm.received_amount}
+                      onChange={(e) => setPieceForm({ ...pieceForm, received_amount: e.target.value })}
+                      placeholder="0.00"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="piece_number_of_months">عدد الأشهر *</Label>
+                    <Input
+                      id="piece_number_of_months"
+                      type="number"
+                      value={pieceForm.number_of_months}
+                      onChange={(e) => setPieceForm({ ...pieceForm, number_of_months: e.target.value })}
+                      placeholder="12"
+                      min="1"
+                    />
+                    <p className="text-xs text-muted-foreground">إعدادات الأقساط</p>
+                  </div>
+                </div>
+              </div>
             )}
             
             <div className="space-y-2">
@@ -3087,60 +3524,109 @@ export function LandManagement() {
       />
 
       {/* New Client Dialog */}
-      <Dialog open={clientDialogOpen} onOpenChange={setClientDialogOpen}>
-        <DialogContent className="w-[95vw] sm:w-full max-w-lg">
+      <Dialog open={clientDialogOpen} onOpenChange={(open) => {
+        setClientDialogOpen(open)
+        if (!open) {
+          // Reset form when dialog closes
+          setClientForm({
+            name: '',
+            cin: '',
+            phone: '',
+            email: '',
+            address: '',
+            client_type: 'Individual',
+            notes: '',
+          })
+          setFoundClient(null)
+          setNewClient(null)
+        }
+      }}>
+        <DialogContent className="w-[95vw] sm:w-full max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>إضافة عميل جديد</DialogTitle>
+            <DialogTitle>{foundClient ? 'العميل موجود' : 'إضافة عميل جديد'}</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="clientName">الاسم *</Label>
+          <div className="space-y-3">
+            {foundClient && (
+              <div className="bg-green-50 border border-green-200 rounded-lg p-2.5">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="h-4 w-4 text-green-600 mt-0.5 flex-shrink-0" />
+                  <div className="text-xs text-green-800">
+                    <p className="font-medium mb-0.5">تم العثور على عميل بهذا الرقم</p>
+                    <p className="text-xs">تم ملء البيانات تلقائياً. يمكنك تعديلها أو المتابعة.</p>
+                  </div>
+                </div>
+              </div>
+            )}
+            <div className="space-y-1.5">
+              <Label htmlFor="clientCIN" className="text-sm">رقم CIN *</Label>
+              <div className="relative">
+                <Input
+                  id="clientCIN"
+                  value={clientForm.cin}
+                  onChange={(e) => {
+                    const newCIN = e.target.value
+                    setClientForm({ ...clientForm, cin: newCIN })
+                    // Clear found client if CIN changes
+                    if (foundClient && newCIN !== foundClient.cin) {
+                      setFoundClient(null)
+                      setNewClient(null)
+                    }
+                    // Trigger search
+                    debouncedCINSearch(newCIN)
+                  }}
+                  placeholder="رقم CIN"
+                  className={searchingClient ? 'pr-10 h-9' : 'h-9'}
+                />
+                {searchingClient && (
+                  <div className="absolute left-3 top-1/2 -translate-y-1/2">
+                    <div className="h-4 w-4 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin"></div>
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="clientName" className="text-sm">الاسم *</Label>
               <Input
                 id="clientName"
                 value={clientForm.name}
                 onChange={(e) => setClientForm({ ...clientForm, name: e.target.value })}
                 placeholder="اسم العميل"
+                className="h-9"
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="clientCIN">رقم CIN *</Label>
-              <Input
-                id="clientCIN"
-                value={clientForm.cin}
-                onChange={(e) => setClientForm({ ...clientForm, cin: e.target.value })}
-                placeholder="رقم CIN"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="clientPhone">رقم الهاتف *</Label>
+            <div className="space-y-1.5">
+              <Label htmlFor="clientPhone" className="text-sm">رقم الهاتف *</Label>
               <Input
                 id="clientPhone"
                 value={clientForm.phone}
                 onChange={(e) => setClientForm({ ...clientForm, phone: e.target.value })}
                 placeholder="رقم الهاتف"
+                className="h-9"
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="clientEmail">البريد الإلكتروني</Label>
+            <div className="space-y-1.5">
+              <Label htmlFor="clientEmail" className="text-sm">البريد الإلكتروني</Label>
               <Input
                 id="clientEmail"
                 type="email"
                 value={clientForm.email}
                 onChange={(e) => setClientForm({ ...clientForm, email: e.target.value })}
                 placeholder="البريد الإلكتروني (اختياري)"
+                className="h-9"
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="clientAddress">العنوان</Label>
+            <div className="space-y-1.5">
+              <Label htmlFor="clientAddress" className="text-sm">العنوان</Label>
               <Input
                 id="clientAddress"
                 value={clientForm.address}
                 onChange={(e) => setClientForm({ ...clientForm, address: e.target.value })}
                 placeholder="العنوان (اختياري)"
+                className="h-9"
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="clientType">نوع العميل</Label>
+            <div className="space-y-1.5">
+              <Label htmlFor="clientType" className="text-sm">نوع العميل</Label>
               <Select
                 value={clientForm.client_type}
                 onChange={(e) => setClientForm({ ...clientForm, client_type: e.target.value as 'Individual' | 'Company' })}
@@ -3149,14 +3635,14 @@ export function LandManagement() {
                 <option value="Company">شركة</option>
               </Select>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="clientNotes">ملاحظات</Label>
+            <div className="space-y-1.5">
+              <Label htmlFor="clientNotes" className="text-sm">ملاحظات</Label>
               <Textarea
                 id="clientNotes"
                 value={clientForm.notes}
                 onChange={(e) => setClientForm({ ...clientForm, notes: e.target.value })}
                 placeholder="ملاحظات (اختياري)"
-                rows={3}
+                className="min-h-[70px]"
               />
             </div>
           </div>
@@ -3165,10 +3651,20 @@ export function LandManagement() {
               إلغاء
             </Button>
             <Button 
-              onClick={handleCreateClient}
-              disabled={savingClient || !clientForm.name || !clientForm.cin || !clientForm.phone}
+              onClick={async () => {
+                // If client found, use it directly, otherwise create new
+                if (foundClient) {
+                  setNewClient(foundClient)
+                  setClientDialogOpen(false)
+                  setSaleDialogOpen(true)
+                  showNotification('تم استخدام بيانات العميل الموجود', 'success')
+                } else {
+                  await handleCreateClient()
+                }
+              }}
+              disabled={savingClient || searchingClient || !clientForm.name || !clientForm.cin || !clientForm.phone}
             >
-              {savingClient ? 'جاري الحفظ...' : 'حفظ والمتابعة'}
+              {savingClient ? 'جاري الحفظ...' : searchingClient ? 'جاري البحث...' : foundClient ? 'استخدام والمتابعة' : 'حفظ والمتابعة'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -3189,15 +3685,32 @@ export function LandManagement() {
               
               <div className="space-y-2">
                 <Label>القطع المختارة:</Label>
-                <div className="bg-gray-50 rounded-lg p-3 max-h-40 overflow-y-auto">
+                <div className="bg-gray-50 rounded-lg p-2 max-h-40 overflow-y-auto space-y-1">
                   {Array.from(selectedPieces).map(pieceId => {
                     const piece = batches.flatMap(b => b.land_pieces).find(p => p.id === pieceId)
                     if (!piece) return null
                     const batch = batches.find(b => b.id === piece.land_batch_id)
                     return (
-                      <div key={pieceId} className="flex justify-between text-sm py-1">
-                        <span>{batch?.name || 'دفعة'} - #{piece.piece_number} ({piece.surface_area} م²)</span>
-                        <span className="font-medium">{formatCurrency(piece.selling_price_full || 0)}</span>
+                      <div key={pieceId} className="flex items-center justify-between text-sm py-1.5 px-2 bg-white rounded border border-gray-200 hover:bg-gray-50 transition-colors">
+                        <div className="flex-1 min-w-0">
+                          <div className="font-medium truncate">{batch?.name || 'دفعة'} - #{piece.piece_number} ({piece.surface_area} م²)</div>
+                          <div className="text-green-600 font-semibold text-xs mt-0.5">{formatCurrency(piece.selling_price_full || 0)}</div>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 ml-2 flex-shrink-0 text-red-600 hover:text-red-700 hover:bg-red-50"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setSelectedPieces(prev => {
+                              const newSelected = new Set(prev)
+                              newSelected.delete(pieceId)
+                              return newSelected
+                            })
+                          }}
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
                       </div>
                     )
                   })}
@@ -3260,18 +3773,33 @@ export function LandManagement() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      {/* Floating Sell Button for Mobile */}
-      {selectedPieces.size > 0 && hasPermission('create_sales') && (
-        <div className="fixed bottom-0 left-0 right-0 z-50 md:hidden p-4 bg-white border-t shadow-lg">
-          <Button 
-            onClick={() => setClientDialogOpen(true)} 
-            size="lg"
-            className="w-full bg-green-600 hover:bg-green-700 h-12 text-base font-semibold"
-          >
-            <ShoppingCart className="ml-2 h-5 w-5" />
-            بيع ({selectedPieces.size} قطعة)
-          </Button>
-        </div>
+      {/* Floating Sell Button for Mobile and Desktop */}
+      {selectedPieces.size > 0 && hasPermission('create_sales') && !clientDialogOpen && !saleDialogOpen && (
+        <>
+          {/* Mobile: Full width button */}
+          <div className="fixed bottom-0 left-0 right-0 z-40 p-4 bg-white/95 backdrop-blur-sm border-t shadow-2xl md:hidden">
+            <Button 
+              onClick={() => setClientDialogOpen(true)} 
+              size="lg"
+              className="w-full bg-green-600 hover:bg-green-700 active:bg-green-800 h-12 text-base font-semibold shadow-lg transition-all"
+            >
+              <ShoppingCart className="ml-2 h-5 w-5" />
+              بيع ({selectedPieces.size} {selectedPieces.size === 1 ? 'قطعة' : 'قطعة'})
+            </Button>
+          </div>
+          
+          {/* Desktop: Compact floating button */}
+          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 hidden md:block">
+            <Button 
+              onClick={() => setClientDialogOpen(true)} 
+              size="lg"
+              className="bg-green-600 hover:bg-green-700 active:bg-green-800 h-12 px-8 text-base font-semibold shadow-xl rounded-full transition-all hover:shadow-2xl min-w-[180px]"
+            >
+              <ShoppingCart className="ml-2 h-5 w-5" />
+              بيع ({selectedPieces.size})
+            </Button>
+          </div>
+        </>
       )}
     </div>
   )

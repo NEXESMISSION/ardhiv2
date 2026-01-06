@@ -484,8 +484,7 @@ export function Messages() {
               id: msg.sender_id,
               name: 'مستخدم',
               email: '',
-              role: 'FieldStaff' as any,
-              status: 'Active' as any,
+              role: 'Worker' as any,
               created_at: '',
               updated_at: '',
             }
@@ -750,7 +749,6 @@ export function Messages() {
           name: profile?.name || user.email || 'أنت',
           email: profile?.email || user.email || '',
           role: (profile?.role || 'Owner') as any,
-          status: (profile?.status || 'Active') as any,
           created_at: profile?.created_at || '',
           updated_at: profile?.updated_at || '',
         },

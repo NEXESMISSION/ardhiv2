@@ -24,7 +24,6 @@ import { cn } from '@/lib/utils'
 // Nav items with pageId for access control
 // pageId must match the IDs used in Users.tsx ALL_PAGES and stored in allowed_pages
 const navItems = [
-  { to: '/', icon: LayoutDashboard, label: 'الرئيسية', permission: null, pageId: 'home' },
   { to: '/land', icon: Map, label: 'إدارة الأراضي', permission: 'view_land', pageId: 'land' },
   { to: '/availability', icon: MapPin, label: 'توفر الأراضي', permission: 'view_land', pageId: 'availability' },
   { to: '/clients', icon: Users, label: 'العملاء', permission: 'view_clients', pageId: 'clients' },

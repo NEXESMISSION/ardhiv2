@@ -49,11 +49,7 @@ function AppRoutes() {
       )
     }
 
-    // Check if user account is inactive/disabled
-    if (profile.status === 'Inactive') {
-      return <Navigate to="/account-disabled" replace />
-    }
-
+    // Status check removed - users are always active
     return <>{children}</>
   }
 
@@ -143,7 +139,7 @@ function AppRoutes() {
         path="/account-disabled"
         element={
           // Only show to logged-in inactive users
-          user && profile?.status === 'Inactive' ? (
+          false ? (
             <AccountDisabled />
           ) : user ? (
             <Navigate to="/" replace />

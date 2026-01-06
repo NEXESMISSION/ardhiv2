@@ -6,7 +6,7 @@ export type ExpenseStatus = 'Pending' | 'Approved' | 'Rejected'
 export type PaymentMethod = 'Cash' | 'BankTransfer' | 'Check' | 'CreditCard' | 'Other'
 export type InstallmentStatus = 'Unpaid' | 'Paid' | 'Late' | 'Partial'
 export type PaymentRecordType = 'BigAdvance' | 'SmallAdvance' | 'Installment' | 'Full' | 'Partial' | 'Field' | 'Refund'
-export type UserRole = 'Owner' | 'Manager' | 'FieldStaff'
+export type UserRole = 'Owner' | 'Worker'
 export type UserStatus = 'Active' | 'Inactive'
 export type WorkerAvailabilityStatus = 'Available' | 'Busy' | 'Unavailable'
 export type ConversationStatus = 'open' | 'closed'
@@ -26,7 +26,6 @@ export interface User {
   name: string
   email: string
   role: UserRole
-  status: UserStatus
   created_at: string
   updated_at: string
 }

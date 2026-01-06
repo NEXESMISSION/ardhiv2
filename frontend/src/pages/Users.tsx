@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Select } from '@/components/ui/select'
+import { Textarea } from '@/components/ui/textarea'
 import {
   Table,
   TableBody,
@@ -23,7 +24,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import { Plus, Edit, Trash2, User, Shield, Activity, TrendingUp, CheckCircle2, ShoppingCart, Map as MapIcon, Users as UsersIcon, Calendar, FileText, CreditCard, Home, Building, Wallet, DollarSign, Lock, Eye, EyeOff, AlertCircle, Briefcase, MessageSquare, XCircle } from 'lucide-react'
-import type { User as UserType, UserRole, UserStatus, Sale, WorkerProfile, WorkerAvailabilityStatus } from '@/types/database'
+import type { User as UserType, UserRole, Sale, WorkerProfile } from '@/types/database'
 import { sanitizeText, sanitizeEmail } from '@/lib/sanitize'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { formatCurrency, formatDate } from '@/lib/utils'
@@ -40,8 +41,7 @@ const WORKER_TYPES = [
 
 const roleColors: Record<UserRole, 'default' | 'secondary' | 'destructive'> = {
   Owner: 'default',
-  Manager: 'secondary',
-  FieldStaff: 'destructive',
+  Worker: 'secondary',
 }
 
 // All available pages in the system - IDs must match Sidebar.tsx pageId values
@@ -81,8 +81,6 @@ export function Users() {
   const [error, setError] = useState<string | null>(null)
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [userToDelete, setUserToDelete] = useState<string | null>(null)
-  const [statusConfirmOpen, setStatusConfirmOpen] = useState(false)
-  const [userToToggle, setUserToToggle] = useState<UserType | null>(null)
   const [selectedUserForDetails, setSelectedUserForDetails] = useState<UserType | null>(null)
   const [userDetailsOpen, setUserDetailsOpen] = useState(false)
   const [userCreatedSales, setUserCreatedSales] = useState<any[]>([])
@@ -104,15 +102,12 @@ export function Users() {
     name: '',
     email: '',
     password: '',
-    role: 'FieldStaff' as UserRole,
-    status: 'Active' as UserStatus,
+    role: 'Worker' as UserRole,
     allowedPages: [] as string[],
-    // Worker profile fields
-    isWorker: false,
+    // Worker profile fields - always enabled for Worker role
     worker_type: '',
     region: '',
     skills: [] as string[],
-    availability: 'Available' as WorkerAvailabilityStatus,
     worker_notes: '',
   })
   const [skillInput, setSkillInput] = useState('')
@@ -127,7 +122,7 @@ export function Users() {
     try {
       const { data, error } = await supabase
         .from('users')
-        .select('id, name, email, role, status, created_at, updated_at, allowed_pages')
+        .select('id, name, email, role, created_at, updated_at, allowed_pages')
         .order('name', { ascending: true })
 
       if (error) {
@@ -347,33 +342,25 @@ export function Users() {
         email: user.email,
         password: '',
         role: user.role,
-        status: user.status,
         allowedPages: (user as any).allowed_pages || [],
-        // Worker profile fields
-        isWorker: !!workerProfile,
         worker_type: workerProfile?.worker_type || '',
         region: workerProfile?.region || '',
         skills: workerProfile?.skills || [],
-        availability: workerProfile?.availability || 'Available',
         worker_notes: workerProfile?.notes || '',
       })
     } else {
       setEditingUser(null)
-      // Default pages for new FieldStaff
+      // Default pages for new Worker
       const defaultPages = ['home', 'land', 'clients', 'sales', 'installments']
       setForm({
         name: '',
         email: '',
         password: '',
-        role: 'FieldStaff',
-        status: 'Active',
+        role: 'Worker',
         allowedPages: defaultPages,
-        // Worker profile fields
-        isWorker: false,
         worker_type: '',
         region: '',
         skills: [],
-        availability: 'Available',
         worker_notes: '',
       })
     }
@@ -445,7 +432,6 @@ export function Users() {
           .update({
             name: sanitizeText(form.name),
             role: form.role,
-            status: form.status,
             allowed_pages: form.role === 'Owner' ? null : form.allowedPages,
           })
           .eq('id', editingUser.id)
@@ -462,15 +448,14 @@ export function Users() {
           return
         }
 
-        // Save/update worker profile if isWorker is checked
-        if (form.isWorker && form.worker_type) {
+        // Save/update worker profile if role is Worker
+        if (form.role === 'Worker' && form.worker_type) {
           const existingProfile = workerProfiles.get(editingUser.id)
           const workerData = {
             user_id: editingUser.id,
             worker_type: sanitizeText(form.worker_type),
             region: form.region ? sanitizeText(form.region) : null,
             skills: form.skills.length > 0 ? form.skills.map(s => sanitizeText(s)) : null,
-            availability: form.availability,
             notes: form.worker_notes ? sanitizeText(form.worker_notes) : null,
           }
 
@@ -484,8 +469,8 @@ export function Users() {
               .from('worker_profiles')
               .insert([workerData])
           }
-        } else {
-          // Remove worker profile if unchecked
+        } else if (form.role === 'Owner') {
+          // Remove worker profile if changed to Owner
           const existingProfile = workerProfiles.get(editingUser.id)
           if (existingProfile) {
             await supabase
@@ -500,14 +485,11 @@ export function Users() {
           name: '', 
           email: '', 
           password: '', 
-          role: 'FieldStaff', 
-          status: 'Active', 
+          role: 'Worker', 
           allowedPages: [],
-          isWorker: false,
           worker_type: '',
           region: '',
           skills: [],
-          availability: 'Available',
           worker_notes: '',
         })
         await fetchUsers()
@@ -621,7 +603,6 @@ export function Users() {
             data: {
               name: form.name.trim(),
               role: form.role,
-              status: form.status,
             },
             emailRedirectTo: undefined, // Don't send confirmation email
           },
@@ -690,9 +671,8 @@ export function Users() {
           {
             id: authData.user.id,
             name: sanitizeText(form.name),
-              email: cleanEmail,
+            email: cleanEmail,
             role: form.role,
-            status: form.status,
             allowed_pages: form.role === 'Owner' ? null : form.allowedPages,
           },
         ])
@@ -747,8 +727,8 @@ export function Users() {
           return
         }
 
-        // Create worker profile if isWorker is checked
-        if (form.isWorker && form.worker_type && authData.user) {
+        // Create worker profile if role is Worker
+        if (form.role === 'Worker' && form.worker_type && authData.user) {
           try {
             await supabase
               .from('worker_profiles')
@@ -757,7 +737,6 @@ export function Users() {
                 worker_type: sanitizeText(form.worker_type),
                 region: form.region ? sanitizeText(form.region) : null,
                 skills: form.skills.length > 0 ? form.skills.map(s => sanitizeText(s)) : null,
-                availability: form.availability,
                 notes: form.worker_notes ? sanitizeText(form.worker_notes) : null,
               }])
           } catch (workerError) {
@@ -772,14 +751,11 @@ export function Users() {
           name: '', 
           email: '', 
           password: '', 
-          role: 'FieldStaff', 
-          status: 'Active', 
+          role: 'Worker', 
           allowedPages: [],
-          isWorker: false,
           worker_type: '',
           region: '',
           skills: [],
-          availability: 'Available',
           worker_notes: '',
         })
         setError(null)
@@ -842,36 +818,6 @@ export function Users() {
     }
   }
 
-  const toggleStatus = async (user: UserType) => {
-    if (user.id === profile?.id) {
-      setError('لا يمكنك تغيير حالتك الخاصة')
-      return
-    }
-
-    setUserToToggle(user)
-    setStatusConfirmOpen(true)
-  }
-
-  const confirmToggleStatus = async () => {
-    if (!userToToggle) return
-
-    try {
-      const newStatus = userToToggle.status === 'Active' ? 'Inactive' : 'Active'
-      const { error } = await supabase
-        .from('users')
-        .update({ status: newStatus })
-        .eq('id', userToToggle.id)
-
-      if (error) throw error
-      fetchUsers()
-      setStatusConfirmOpen(false)
-      setUserToToggle(null)
-    } catch (error) {
-      setError('خطأ في تحديث حالة المستخدم')
-      setStatusConfirmOpen(false)
-      setUserToToggle(null)
-    }
-  }
 
   if (!hasPermission('manage_users')) {
     return (
@@ -931,27 +877,14 @@ export function Users() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Managers</CardTitle>
-            <User className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-sm font-medium">Workers</CardTitle>
+            <Briefcase className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {users.filter((u) => u.role === 'Manager').length}
+              {users.filter((u) => u.role === 'Worker').length}
             </div>
-            <p className="text-xs text-muted-foreground">Limited financial access</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Field Staff</CardTitle>
-            <User className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {users.filter((u) => u.role === 'FieldStaff').length}
-            </div>
-            <p className="text-xs text-muted-foreground">Basic operations only</p>
+            <p className="text-xs text-muted-foreground">System workers</p>
           </CardContent>
         </Card>
       </div>
@@ -996,16 +929,7 @@ export function Users() {
                       
                       <div className="flex items-center gap-2">
                         <Badge variant={roleColors[user.role]} className="text-xs">
-                          {user.role === 'Owner' ? 'مالك' : 
-                           user.role === 'Manager' ? 'مدير' : 
-                           'موظف ميداني'}
-                        </Badge>
-                        <Badge
-                          variant={user.status === 'Active' ? 'success' : 'secondary'}
-                          className="text-xs cursor-pointer"
-                          onClick={() => toggleStatus(user)}
-                        >
-                          {user.status === 'Active' ? 'نشط' : 'غير نشط'}
+                          {user.role === 'Owner' ? 'مالك' : 'عامل'}
                         </Badge>
                       </div>
                       
@@ -1072,7 +996,6 @@ export function Users() {
                   <TableHead>الاسم</TableHead>
                   <TableHead>البريد الإلكتروني</TableHead>
                   <TableHead>الدور</TableHead>
-                  <TableHead>الحالة</TableHead>
                   <TableHead>الإحصائيات</TableHead>
                   <TableHead>الإجراءات</TableHead>
                 </TableRow>
@@ -1103,18 +1026,7 @@ export function Users() {
                     <TableCell>{user.email}</TableCell>
                     <TableCell>
                       <Badge variant={roleColors[user.role]}>
-                        {user.role === 'Owner' ? 'مالك' : 
-                         user.role === 'Manager' ? 'مدير' : 
-                         'موظف ميداني'}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Badge
-                        variant={user.status === 'Active' ? 'success' : 'secondary'}
-                        className="cursor-pointer"
-                        onClick={() => toggleStatus(user)}
-                      >
-                        {user.status === 'Active' ? 'نشط' : 'غير نشط'}
+                        {user.role === 'Owner' ? 'مالك' : 'عامل'}
                       </Badge>
                     </TableCell>
                     <TableCell>
@@ -1176,14 +1088,11 @@ export function Users() {
             name: '', 
             email: '', 
             password: '', 
-            role: 'FieldStaff', 
-            status: 'Active', 
+            role: 'Worker', 
             allowedPages: [],
-            isWorker: false,
             worker_type: '',
             region: '',
             skills: [],
-            availability: 'Available',
             worker_notes: '',
           })
           setEditingUser(null)
@@ -1253,148 +1162,62 @@ export function Users() {
                 </p>
               </div>
             )}
-            <div className="space-y-1.5 sm:space-y-2">
-              <Label htmlFor="role" className="text-xs sm:text-sm">الدور</Label>
-              <Select
-                value={form.role}
-                onChange={(e) => setForm({ ...form, role: e.target.value as UserRole })}
-                disabled={saving}
-                className="text-xs sm:text-sm"
-              >
-                <option value="Owner">مالك (Owner)</option>
-                <option value="Manager">مدير (Manager)</option>
-                <option value="FieldStaff">موظف ميداني (Field Staff)</option>
-              </Select>
-            </div>
-            <div className="space-y-1.5 sm:space-y-2">
-              <Label htmlFor="status" className="text-xs sm:text-sm">الحالة</Label>
-              <Select
-                value={form.status}
-                onChange={(e) => setForm({ ...form, status: e.target.value as UserStatus })}
-                disabled={saving}
-                className="text-xs sm:text-sm"
-              >
-                <option value="Active">نشط</option>
-                <option value="Inactive">غير نشط</option>
-              </Select>
-            </div>
 
-            {/* Page Permissions Section - Only show for non-Owner roles */}
-            {form.role !== 'Owner' && (
+            {/* Role field - Only show when editing existing user */}
+            {editingUser && (
+              <div className="space-y-1.5 sm:space-y-2">
+                <Label htmlFor="role" className="text-xs sm:text-sm">الدور</Label>
+                <Select
+                  value={form.role}
+                  onChange={(e) => {
+                    // Prevent changing to Owner if user is not already Owner
+                    if (editingUser.role !== 'Owner' && e.target.value === 'Owner') {
+                      return
+                    }
+                    setForm({ ...form, role: e.target.value as UserRole })
+                  }}
+                  disabled={saving || editingUser.role !== 'Owner'}
+                  className="text-xs sm:text-sm"
+                >
+                  <option value="Worker">عامل (Worker)</option>
+                  <option 
+                    value="Owner" 
+                    disabled={editingUser.role !== 'Owner'}
+                  >
+                    {editingUser.role === 'Owner' 
+                      ? 'مالك (Owner)' 
+                      : 'مالك (Owner) - يتم إنشاؤه فقط في Supabase'}
+                  </option>
+                </Select>
+                {editingUser.role !== 'Owner' && (
+                  <p className="text-xs text-muted-foreground">
+                    ملاحظة: لا يمكن تغيير دور المستخدم إلى مالك. المالك يتم إنشاؤه فقط مباشرة في Supabase.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Worker Profile Section - Show for Worker role (always for new users, conditionally for editing) */}
+            {(!editingUser || form.role === 'Worker') && (
               <div className="space-y-2 sm:space-y-3 border-t pt-3 sm:pt-4 mt-3 sm:mt-4">
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
-                  <Label className="text-sm sm:text-base font-semibold flex items-center gap-2">
-                    <Lock className="h-3 w-3 sm:h-4 sm:w-4" />
-                    الصفحات المتاحة
+                <div className="flex items-center gap-2 mb-3">
+                  <Briefcase className="h-4 w-4 sm:h-5 sm:w-5 text-primary" />
+                  <Label className="text-sm sm:text-base font-semibold">
+                    معلومات العامل
                   </Label>
-                  <div className="flex gap-2 w-full sm:w-auto">
-                    <Button 
-                      type="button" 
-                      variant="outline" 
-                      size="sm"
-                      onClick={selectAllPages}
-                      disabled={saving}
-                      className="flex-1 sm:flex-none text-xs"
-                    >
-                      <Eye className="h-3 w-3 mr-1" />
-                      تحديد الكل
-                    </Button>
-                    <Button 
-                      type="button" 
-                      variant="outline" 
-                      size="sm"
-                      onClick={deselectAllPages}
-                      disabled={saving}
-                      className="flex-1 sm:flex-none text-xs"
-                    >
-                      <EyeOff className="h-3 w-3 mr-1" />
-                      إلغاء الكل
-                    </Button>
-                  </div>
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  اختر الصفحات التي يمكن للمستخدم الوصول إليها
-                </p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto p-2 bg-gray-50 rounded-lg">
-                  {ALL_PAGES.map(page => {
-                    const PageIcon = page.icon
-                    const isSelected = form.allowedPages?.includes(page.id) || false
-                    return (
-                      <div
-                        key={page.id}
-                        className={`flex items-center gap-2 p-2 rounded-lg cursor-pointer transition-all ${
-                          isSelected 
-                            ? 'bg-primary/10 border-2 border-primary' 
-                            : 'bg-white border-2 border-gray-200 hover:border-gray-300'
-                        }`}
-                        onClick={() => !saving && togglePageAccess(page.id)}
-                      >
-                        <div className={`p-1.5 rounded ${isSelected ? 'bg-primary text-white' : 'bg-gray-100'}`}>
-                          <PageIcon className="h-3.5 w-3.5" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className={`text-xs font-medium truncate ${isSelected ? 'text-primary' : ''}`}>
-                            {page.name}
-                          </p>
-                        </div>
-                        <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
-                          isSelected ? 'border-primary bg-primary' : 'border-gray-300'
-                        }`}>
-                          {isSelected && <CheckCircle2 className="h-3 w-3 text-white" />}
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-                <p className="text-xs text-muted-foreground text-center">
-                  {form.allowedPages?.length || 0} من {ALL_PAGES.length} صفحة محددة
-                </p>
-              </div>
-            )}
 
-            {form.role === 'Owner' && (
-              <div className="bg-green-50 border border-green-200 rounded-lg p-2.5 sm:p-3 mt-3 sm:mt-4">
-                <p className="text-xs sm:text-sm text-green-800 flex items-center gap-2">
-                  <Shield className="h-3 w-3 sm:h-4 sm:w-4" />
-                  المالك لديه صلاحية الوصول الكامل لجميع الصفحات
-                </p>
-              </div>
-            )}
-
-            {/* Worker Profile Section */}
-            <div className="space-y-2 sm:space-y-3 border-t pt-3 sm:pt-4 mt-3 sm:mt-4">
-              <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  id="isWorker"
-                  checked={form.isWorker}
-                  onChange={(e) => setForm({ ...form, isWorker: e.target.checked })}
-                  className="w-4 h-4"
-                />
-                <Label htmlFor="isWorker" className="text-xs sm:text-sm font-semibold flex items-center gap-2">
-                  <Briefcase className="h-3 w-3 sm:h-4 sm:w-4" />
-                  هذا المستخدم هو عامل
-                </Label>
-              </div>
-
-              {form.isWorker && (
-                <div className="space-y-3 bg-muted/50 p-3 rounded-lg">
+                <div className="space-y-3">
                   <div className="space-y-1.5 sm:space-y-2">
                     <Label htmlFor="worker_type" className="text-xs sm:text-sm">نوع العامل *</Label>
-                    <select
+                    <Input
                       id="worker_type"
                       value={form.worker_type}
                       onChange={(e) => setForm({ ...form, worker_type: e.target.value })}
-                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      placeholder="مثال: محامي، بائع، وكيل، مدير..."
                       disabled={saving}
-                    >
-                      <option value="">اختر نوع العامل</option>
-                      {WORKER_TYPES.map((type) => (
-                        <option key={type} value={type}>
-                          {type}
-                        </option>
-                      ))}
-                    </select>
+                      className="text-xs sm:text-sm"
+                    />
                   </div>
 
                   <div className="space-y-1.5 sm:space-y-2">
@@ -1449,34 +1272,102 @@ export function Users() {
                   </div>
 
                   <div className="space-y-1.5 sm:space-y-2">
-                    <Label htmlFor="availability" className="text-xs sm:text-sm">الحالة</Label>
-                    <select
-                      id="availability"
-                      value={form.availability}
-                      onChange={(e) => setForm({ ...form, availability: e.target.value as WorkerAvailabilityStatus })}
-                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                      disabled={saving}
-                    >
-                      <option value="Available">متاح</option>
-                      <option value="Busy">مشغول</option>
-                      <option value="Unavailable">غير متاح</option>
-                    </select>
-                  </div>
-
-                  <div className="space-y-1.5 sm:space-y-2">
                     <Label htmlFor="worker_notes" className="text-xs sm:text-sm">ملاحظات</Label>
-                    <textarea
+                    <Textarea
                       id="worker_notes"
                       value={form.worker_notes}
                       onChange={(e) => setForm({ ...form, worker_notes: e.target.value })}
-                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm min-h-[100px]"
                       placeholder="ملاحظات إضافية..."
                       disabled={saving}
+                      rows={3}
+                      className="text-xs sm:text-sm min-h-[70px]"
                     />
                   </div>
                 </div>
-              )}
-            </div>
+              </div>
+            )}
+
+            {/* Page Permissions Section - Only show for non-Owner roles */}
+            {form.role !== 'Owner' && (
+              <div className="space-y-2 sm:space-y-3 border-t pt-3 sm:pt-4 mt-3 sm:mt-4">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+                  <Label className="text-sm sm:text-base font-semibold flex items-center gap-2">
+                    <Lock className="h-3 w-3 sm:h-4 sm:w-4" />
+                    الصفحات المتاحة
+                  </Label>
+                  <div className="flex gap-2 w-full sm:w-auto">
+                    <Button 
+                      type="button" 
+                      variant="outline" 
+                      size="sm"
+                      onClick={selectAllPages}
+                      disabled={saving}
+                      className="flex-1 sm:flex-none text-xs"
+                    >
+                      <Eye className="h-3 w-3 mr-1" />
+                      تحديد الكل
+                    </Button>
+                    <Button 
+                      type="button" 
+                      variant="outline" 
+                      size="sm"
+                      onClick={deselectAllPages}
+                      disabled={saving}
+                      className="flex-1 sm:flex-none text-xs"
+                    >
+                      <EyeOff className="h-3 w-3 mr-1" />
+                      إلغاء الكل
+                    </Button>
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  اختر الصفحات التي يمكن للمستخدم الوصول إليها
+                </p>
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 max-h-64 sm:max-h-80 overflow-y-auto p-3 sm:p-4 bg-gray-50 rounded-lg border border-gray-200">
+                  {ALL_PAGES.map(page => {
+                    const PageIcon = page.icon
+                    const isSelected = form.allowedPages?.includes(page.id) || false
+                    return (
+                      <div
+                        key={page.id}
+                        className={`flex flex-col items-center gap-2 p-3 sm:p-4 rounded-lg cursor-pointer transition-all min-h-[100px] ${
+                          isSelected 
+                            ? 'bg-primary/10 border-2 border-primary shadow-md' 
+                            : 'bg-white border-2 border-gray-200 hover:border-gray-300 hover:shadow-sm'
+                        }`}
+                        onClick={() => !saving && togglePageAccess(page.id)}
+                      >
+                        <div className={`p-2 sm:p-2.5 rounded-lg ${isSelected ? 'bg-primary text-white' : 'bg-gray-100'}`}>
+                          <PageIcon className="h-5 w-5 sm:h-6 sm:w-6" />
+                        </div>
+                        <div className="flex-1 min-w-0 text-center">
+                          <p className={`text-xs sm:text-sm font-medium ${isSelected ? 'text-primary font-semibold' : 'text-gray-700'}`}>
+                            {page.name}
+                          </p>
+                        </div>
+                        <div className={`w-5 h-5 sm:w-6 sm:h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${
+                          isSelected ? 'border-primary bg-primary' : 'border-gray-300'
+                        }`}>
+                          {isSelected && <CheckCircle2 className="h-4 w-4 sm:h-5 sm:w-5 text-white" />}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+                <p className="text-xs text-muted-foreground text-center">
+                  {form.allowedPages?.length || 0} من {ALL_PAGES.length} صفحة محددة
+                </p>
+              </div>
+            )}
+
+            {form.role === 'Owner' && (
+              <div className="bg-green-50 border border-green-200 rounded-lg p-2.5 sm:p-3 mt-3 sm:mt-4">
+                <p className="text-xs sm:text-sm text-green-800 flex items-center gap-2">
+                  <Shield className="h-3 w-3 sm:h-4 sm:w-4" />
+                  المالك لديه صلاحية الوصول الكامل لجميع الصفحات
+                </p>
+              </div>
+            )}
           </div>
           <DialogFooter className="gap-2">
             <Button 
@@ -1527,11 +1418,7 @@ export function Users() {
                   <p className="text-sm text-gray-600">{selectedUserForDetails.email}</p>
                   <div className="flex items-center gap-2 mt-1">
                     <Badge variant={roleColors[selectedUserForDetails.role]} className="text-xs">
-                        {selectedUserForDetails.role === 'Owner' ? 'مالك' : 
-                       selectedUserForDetails.role === 'Manager' ? 'مدير' : 'موظف ميداني'}
-                      </Badge>
-                    <Badge variant={selectedUserForDetails.status === 'Active' ? 'success' : 'secondary'} className="text-xs">
-                        {selectedUserForDetails.status === 'Active' ? 'نشط' : 'غير نشط'}
+                        {selectedUserForDetails.role === 'Owner' ? 'مالك' : 'عامل'}
                       </Badge>
                     </div>
                   </div>
@@ -1943,13 +1830,6 @@ export function Users() {
       />
 
       {/* Status Toggle Confirmation Dialog */}
-      <ConfirmDialog
-        open={statusConfirmOpen}
-        onOpenChange={setStatusConfirmOpen}
-        onConfirm={confirmToggleStatus}
-        title={userToToggle?.status === 'Active' ? 'تعطيل المستخدم' : 'تفعيل المستخدم'}
-        description={`هل أنت متأكد من ${userToToggle?.status === 'Active' ? 'تعطيل' : 'تفعيل'} هذا المستخدم؟`}
-      />
     </div>
   )
 }

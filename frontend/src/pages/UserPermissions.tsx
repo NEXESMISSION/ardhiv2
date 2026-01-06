@@ -360,7 +360,6 @@ export function UserPermissions() {
                   <TableHead>الاسم</TableHead>
                   <TableHead>البريد الإلكتروني</TableHead>
                   <TableHead>الدور</TableHead>
-                  <TableHead>الحالة</TableHead>
                   <TableHead>الإجراءات</TableHead>
                 </TableRow>
               </TableHeader>
@@ -371,12 +370,7 @@ export function UserPermissions() {
                     <TableCell>{user.email}</TableCell>
                     <TableCell>
                       <Badge variant={user.role === 'Owner' ? 'default' : 'secondary'}>
-                        {user.role === 'Owner' ? 'مالك' : user.role === 'Manager' ? 'مدير' : 'موظف ميداني'}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={user.status === 'Active' ? 'default' : 'secondary'}>
-                        {user.status === 'Active' ? 'نشط' : 'غير نشط'}
+                        {user.role === 'Owner' ? 'مالك' : 'عامل'}
                       </Badge>
                     </TableCell>
                     <TableCell>
