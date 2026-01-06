@@ -4940,6 +4940,9 @@ export function LandManagement() {
           })
           setFoundClient(null)
           setNewClient(null)
+        } else {
+          // Clear found client when dialog opens (so message only shows after search)
+          setFoundClient(null)
         }
       }}>
         <DialogContent className="w-[95vw] sm:w-full max-w-lg max-h-[90vh] overflow-y-auto">
@@ -4947,7 +4950,7 @@ export function LandManagement() {
             <DialogTitle>{foundClient ? 'العميل موجود' : 'إضافة عميل جديد'}</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
-            {foundClient && (
+            {foundClient && clientForm.cin && clientForm.cin.trim().length >= 3 && (
               <div className="bg-green-50 border border-green-200 rounded-lg p-2.5">
                 <div className="flex items-start gap-2">
                   <AlertTriangle className="h-4 w-4 text-green-600 mt-0.5 flex-shrink-0" />
@@ -5290,6 +5293,16 @@ export function LandManagement() {
                   // Full Payment Details
                   const totalPrice = selectedPiecesData.reduce((sum, p) => sum + (p.selling_price_full || 0), 0)
                   
+                  // Get company fee percentage from batch (use first batch's fee, or default to 0)
+                  const firstBatch = batches.find(b => b.id === selectedPiecesData[0]?.land_batch_id)
+                  const companyFeePercentage = (firstBatch as any)?.company_fee_percentage || 0
+                  const companyFeeAmount = (totalPrice * companyFeePercentage) / 100
+                  const totalPayable = totalPrice + companyFeeAmount
+                  
+                  // Get reservation amount from form
+                  const reservation = parseFloat(saleForm.reservation_amount) || 0
+                  const remainingAfterReservation = totalPayable - reservation
+                  
                   return (
                     <div className="bg-green-50 border border-green-200 rounded-lg p-4 space-y-3">
                       <p className="font-semibold text-green-800 text-sm mb-2">تفاصيل البيع (بالحاضر):</p>
@@ -5302,16 +5315,56 @@ export function LandManagement() {
                           <span className="text-muted-foreground">السعر الإجمالي:</span>
                           <span className="font-semibold text-green-700">{formatCurrency(totalPrice)}</span>
                         </div>
+                        {companyFeePercentage > 0 && (
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">عمولة الشركة ({companyFeePercentage}%):</span>
+                            <span className="font-medium text-green-700">{formatCurrency(companyFeeAmount)}</span>
+                          </div>
+                        )}
+                        <div className="flex justify-between border-t border-green-200 pt-2">
+                          <span className="font-medium text-muted-foreground">المبلغ الإجمالي المستحق:</span>
+                          <span className="font-semibold text-green-800">{formatCurrency(totalPayable)}</span>
+                        </div>
+                        {reservation > 0 && (
+                          <>
+                            <div className="flex justify-between text-green-700">
+                              <span>العربون (مدفوع عند الحجز):</span>
+                              <span className="font-medium">{formatCurrency(reservation)}</span>
+                            </div>
+                            <div className="flex justify-between border-t border-green-200 pt-2">
+                              <span className="font-medium text-muted-foreground">المبلغ المتبقي:</span>
+                              <span className="font-semibold text-green-800">{formatCurrency(remainingAfterReservation)}</span>
+                            </div>
+                          </>
+                        )}
                         {selectedPiecesData.map((piece, idx) => {
                           const batch = batches.find(b => b.id === piece.land_batch_id)
+                          const piecePrice = piece.selling_price_full || 0
+                          const pieceCompanyFee = (piecePrice * companyFeePercentage) / 100
+                          const pieceTotalPayable = piecePrice + pieceCompanyFee
+                          const reservationPerPiece = reservation / selectedPiecesData.length
+                          const pieceRemaining = pieceTotalPayable - reservationPerPiece
+                          
                           return (
                             <div key={piece.id} className="bg-white rounded p-2 border border-green-100">
-                              <div className="flex justify-between items-start">
+                              <div className="flex justify-between items-start mb-1">
                                 <div className="flex-1">
                                   <p className="font-medium text-xs">{batch?.name || 'دفعة'} - #{piece.piece_number}</p>
                                   <p className="text-xs text-muted-foreground">{piece.surface_area} م²</p>
                                 </div>
-                                <p className="font-semibold text-green-700 text-sm">{formatCurrency(piece.selling_price_full || 0)}</p>
+                                <p className="font-semibold text-green-700 text-sm">{formatCurrency(piecePrice)}</p>
+                              </div>
+                              <div className="text-xs text-muted-foreground space-y-0.5 pl-2 border-t border-green-50 pt-1 mt-1">
+                                {companyFeePercentage > 0 && (
+                                  <div>عمولة ({companyFeePercentage}%): {formatCurrency(pieceCompanyFee)}</div>
+                                )}
+                                <div>المستحق: {formatCurrency(pieceTotalPayable)}</div>
+                                {reservation > 0 && (
+                                  <>
+                                    <div className="text-green-700">العربون (مدفوع): {formatCurrency(reservationPerPiece)}</div>
+                                    <div>المتبقي: {formatCurrency(pieceRemaining)}</div>
+                                  </>
+                                )}
                               </div>
                             </div>
                           )
