@@ -3290,8 +3290,17 @@ export function LandManagement() {
         return
       }
       
-      if (reservation > totalPrice) {
-        showNotification('مبلغ العربون لا يمكن أن يكون أكبر من السعر الإجمالي', 'error')
+      // Calculate total payable for validation (price + company fee for Full payment)
+      let totalPayableForValidation = totalPrice
+      if (saleForm.payment_type === 'Full') {
+        const firstBatch = batches.find(b => b.id === selectedPieceObjects[0]?.land_batch_id)
+        const companyFeePercentage = (firstBatch as any)?.company_fee_percentage_full || 0
+        const companyFeeAmount = (totalPrice * companyFeePercentage) / 100
+        totalPayableForValidation = totalPrice + companyFeeAmount
+      }
+      
+      if (reservation > totalPayableForValidation) {
+        showNotification(`مبلغ العربون لا يمكن أن يكون أكبر من المبلغ الإجمالي المستحق (${formatCurrency(totalPayableForValidation)})`, 'error')
         setCreatingSale(false)
         return
       }
@@ -3308,6 +3317,19 @@ export function LandManagement() {
         status: 'Pending',
         sale_date: new Date().toISOString().split('T')[0],
         created_by: user?.id || null,
+      }
+      
+      // Add company fee for Full payment
+      if (saleForm.payment_type === 'Full') {
+        // Get company fee percentage from batch (use first batch's fee, or default to 0)
+        const firstBatch = batches.find(b => b.id === selectedPieceObjects[0]?.land_batch_id)
+        const companyFeePercentage = (firstBatch as any)?.company_fee_percentage_full || 0
+        const companyFeeAmount = (totalPrice * companyFeePercentage) / 100
+        
+        if (companyFeePercentage > 0) {
+          saleData.company_fee_percentage = companyFeePercentage
+          saleData.company_fee_amount = parseFloat(companyFeeAmount.toFixed(2))
+        }
       }
       
       // Add selected_offer_id if an offer was selected and payment type is Installment
