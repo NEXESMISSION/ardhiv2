@@ -852,8 +852,11 @@ export function LandManagement() {
     setEditingOffer(offer)
     setIsBatchOffer(true)
     // Determine calculation method based on what's available
-    // If monthly_payment exists, use 'monthly', otherwise use 'months'
+    // If monthly_payment exists and > 0, use 'monthly', otherwise use 'months'
     const hasMonthly = offer.monthly_payment && offer.monthly_payment > 0
+    const hasMonths = offer.number_of_months && offer.number_of_months > 0
+    // If neither has value, default to monthly
+    const calculationMethod = hasMonthly ? 'monthly' : (hasMonths ? 'months' : 'monthly')
     setOfferForm({
       price_per_m2_installment: offer.price_per_m2_installment?.toString() || '',
       company_fee_percentage: offer.company_fee_percentage?.toString() || '',
@@ -2271,8 +2274,11 @@ export function LandManagement() {
     setEditingOffer(offer)
     setIsBatchOffer(false)
     // Determine calculation method based on what's available
-    // If monthly_payment exists, use 'monthly', otherwise use 'months'
+    // If monthly_payment exists and > 0, use 'monthly', otherwise use 'months'
     const hasMonthly = offer.monthly_payment && offer.monthly_payment > 0
+    const hasMonths = offer.number_of_months && offer.number_of_months > 0
+    // If neither has value, default to monthly
+    const calculationMethod = hasMonthly ? 'monthly' : (hasMonths ? 'months' : 'monthly')
     setOfferForm({
       price_per_m2_installment: offer.price_per_m2_installment?.toString() || '',
       company_fee_percentage: offer.company_fee_percentage?.toString() || '',
@@ -4484,7 +4490,13 @@ export function LandManagement() {
                               {offer.price_per_m2_installment && `السعر/م²: ${offer.price_per_m2_installment} | `}
                               عمولة: {offer.company_fee_percentage}% | 
                               التسبقة: {offer.advance_is_percentage ? `${offer.advance_amount}%` : formatCurrency(offer.advance_amount)} | 
-                              الشهري: {formatCurrency(offer.monthly_payment)}
+                              {offer.monthly_payment && offer.monthly_payment > 0 ? (
+                                <>الشهري: {formatCurrency(offer.monthly_payment)}</>
+                              ) : offer.number_of_months && offer.number_of_months > 0 ? (
+                                <>عدد الأشهر: {offer.number_of_months} شهر</>
+                              ) : (
+                                <>الشهري: غير محدد</>
+                              )}
                             </div>
                             {isSelected && isReserved && (
                               <div className="mt-2 pt-2 border-t border-blue-200">
@@ -4591,7 +4603,13 @@ export function LandManagement() {
                                 {offer.price_per_m2_installment && `السعر/م²: ${offer.price_per_m2_installment} | `}
                                 عمولة: {offer.company_fee_percentage}% | 
                                 التسبقة: {offer.advance_is_percentage ? `${offer.advance_amount}%` : formatCurrency(offer.advance_amount)} | 
-                                الشهري: {formatCurrency(offer.monthly_payment)}
+                                {offer.monthly_payment && offer.monthly_payment > 0 ? (
+                                  <>الشهري: {formatCurrency(offer.monthly_payment)}</>
+                                ) : offer.number_of_months && offer.number_of_months > 0 ? (
+                                  <>عدد الأشهر: {offer.number_of_months} شهر</>
+                                ) : (
+                                  <>الشهري: غير محدد</>
+                                )}
                               </div>
                               {isSelected && isReserved && (
                                 <div className="mt-2 pt-2 border-t border-blue-200">
