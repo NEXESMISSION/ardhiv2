@@ -179,17 +179,16 @@ export function Financial() {
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
     today.setHours(0, 0, 0, 0)
     
-    // Custom date filter
-    if (selectedDate) {
-      const filterDate = new Date(selectedDate)
-      filterDate.setHours(0, 0, 0, 0)
-      const nextDay = new Date(filterDate)
-      nextDay.setDate(nextDay.getDate() + 1)
-      nextDay.setHours(23, 59, 59, 999)
-      return { start: filterDate, end: nextDay }
-    }
-    
     switch (filter) {
+      case 'custom':
+        if (selectedDate) {
+          const filterDate = new Date(selectedDate)
+          filterDate.setHours(0, 0, 0, 0)
+          const filterDateEnd = new Date(selectedDate)
+          filterDateEnd.setHours(23, 59, 59, 999)
+          return { start: filterDate, end: filterDateEnd }
+        }
+        return { start: new Date(0), end: null }
       case 'today':
         const todayEnd = new Date(today)
         todayEnd.setHours(23, 59, 59, 999)
@@ -235,12 +234,7 @@ export function Financial() {
     
     // Exclude refunds from payments completely
     const filteredPayments = payments
-      .filter(p => {
-        if (selectedDate) {
-          return isDateInRange(p.payment_date, startDate, endDate)
-        }
-        return isDateInRange(p.payment_date, startDate, endDate)
-      })
+      .filter(p => isDateInRange(p.payment_date, startDate, endDate))
       .filter(p => p.payment_type !== 'Refund')
     
     // Attach land pieces to payments and exclude payments for cancelled sales
@@ -429,7 +423,7 @@ export function Financial() {
       groupedCompanyFees,
       companyFeesByLand,
     }
-  }, [sales, payments, landPieces, dateFilter])
+  }, [sales, payments, landPieces, dateFilter, selectedDate])
 
   // Group payments by land batch and piece - don't repeat installments for same piece
   const getPaymentsByLand = (paymentType: PaymentTypeFilter): PaymentByLand[] => {
@@ -1163,264 +1157,344 @@ export function Financial() {
         </div>
       </div>
 
-      {/* Payment Details Dialog */}
+      {/* Payment Details Dialog - Matching Company Fee Design */}
       <Dialog open={paymentDetailDialogOpen} onOpenChange={setPaymentDetailDialogOpen}>
-        <DialogContent className="w-[95vw] sm:w-full max-w-6xl max-h-[95vh] overflow-y-auto p-3 sm:p-4 md:p-6">
-          <DialogHeader className="pb-2 sm:pb-4">
-            <DialogTitle className="text-base sm:text-lg flex items-center gap-2">
-              <DollarSign className="h-4 w-4 sm:h-5 sm:w-5" />
+        <DialogContent className="w-[95vw] sm:w-full max-w-6xl max-h-[95vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <DollarSign className="h-5 w-5 text-blue-600" />
               <span>تفاصيل {selectedPaymentTypeForDialog ? getPaymentTypeLabel(selectedPaymentTypeForDialog) : 'المدفوعات'}</span>
-              {dateFilter !== 'all' && <span className="text-xs sm:text-sm text-muted-foreground font-normal">- {filterLabels[dateFilter]}</span>}
-              </DialogTitle>
+              {dateFilter !== 'all' && <span className="text-sm text-muted-foreground font-normal">- {filterLabels[dateFilter]}</span>}
+            </DialogTitle>
           </DialogHeader>
-          
-          {(() => {
-            const paymentsByLand = getPaymentsByLand(selectedPaymentTypeForDialog)
-            if (paymentsByLand.length === 0) {
-              return <p className="text-xs sm:text-sm text-muted-foreground text-center py-4 sm:py-8">لا توجد مدفوعات</p>
-            }
-            
-            return (
-              <>
-                {/* Desktop Table View - Grouped by land piece and date */}
-                <div className="hidden md:block overflow-x-auto -mx-4 sm:mx-0 px-4 sm:px-0" style={{ WebkitOverflowScrolling: 'touch' }}>
-              <Table className="min-w-full">
-                <TableHeader>
-                  <TableRow>
-                        <TableHead>المكان</TableHead>
-                        <TableHead>رقم القطعة</TableHead>
-                    <TableHead>العميل</TableHead>
-                        <TableHead className="text-center">عدد الأقساط</TableHead>
-                    <TableHead className="text-right">المبلغ</TableHead>
-                        <TableHead>المستخدم</TableHead>
-                        <TableHead className="text-center">تفاصيل</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                      {paymentsByLand.flatMap((group, groupIndex) => {
-                        return [
-                          // Land Batch Summary Row
-                          <TableRow key={`summary-${groupIndex}`} className="bg-gray-100 font-bold border-t-2">
-                            <TableCell colSpan={3} className="font-bold text-base">
-                              {group.landBatchName} {group.location && `- ${group.location}`}
-                            </TableCell>
-                            <TableCell className="text-center font-bold">{group.paymentCount} دفعة</TableCell>
-                            <TableCell className="text-right font-bold text-lg">{formatCurrency(group.totalAmount)}</TableCell>
-                            <TableCell className="text-center">{group.pieces.length} قطعة</TableCell>
-                            <TableCell></TableCell>
-                          </TableRow>,
-                          // One row per piece - grouped
-                          ...group.pieces.map((piece) => {
-                            // Get unique clients for this piece
-                            const uniqueClients = new Set(piece.payments.map(p => (p.client as any)?.name).filter(Boolean))
-                            const recordedByUsers = Array.from(piece.recordedByUsers)
-                            const soldByUsers = Array.from(piece.soldByUsers)
-                            const pieceKey = `desktop-${group.landBatchName}-${piece.pieceId}`
-                            const isPieceExpanded = expandedPieceGroups.has(pieceKey)
-                            
-                            // Group payments by date for this piece
-                            const paymentsByDate = new Map<string, PaymentWithDetails[]>()
-                            piece.payments.forEach(payment => {
-                              const dateKey = payment.payment_date
-                              if (!paymentsByDate.has(dateKey)) {
-                                paymentsByDate.set(dateKey, [])
-                              }
-                              paymentsByDate.get(dateKey)!.push(payment)
-                            })
-                            
-                            return (
-                              <React.Fragment key={`piece-${piece.pieceId}`}>
-                                <TableRow 
-                                  className="bg-white hover:bg-gray-50 cursor-pointer"
-                                  onClick={() => {
-                                    setExpandedPieceGroups(prev => {
-                                      const next = new Set(prev)
-                                      if (next.has(pieceKey)) {
-                                        next.delete(pieceKey)
-                                      } else {
-                                        next.add(pieceKey)
-                                      }
-                                      return next
-                                    })
-                                  }}
-                                >
-                                  <TableCell className="text-muted-foreground">{group.landBatchName}</TableCell>
-                                  <TableCell className="font-medium">#{piece.pieceNumber}</TableCell>
-                                <TableCell>
-                                    <div className="text-sm">{Array.from(uniqueClients).join('، ')}</div>
-                                  </TableCell>
-                                  <TableCell className="text-center font-medium">{piece.installmentCount} قسط</TableCell>
-                                  <TableCell className="text-right font-bold">{formatCurrency(piece.totalAmount)}</TableCell>
-                                  <TableCell className="text-xs">
-                                  <div className="flex flex-col">
-                                      {soldByUsers.length > 0 && <span>باع: {soldByUsers.join('، ')}</span>}
-                                      {recordedByUsers.length > 0 && recordedByUsers.join('') !== soldByUsers.join('') && <span>سجل: {recordedByUsers.join('، ')}</span>}
-                                  </div>
-                                </TableCell>
-                                <TableCell className="text-center">
-                                    {isPieceExpanded ? <ChevronUp className="h-4 w-4 inline text-gray-600" /> : <ChevronDown className="h-4 w-4 inline text-gray-600" />}
-                                </TableCell>
-                                </TableRow>
-                                {/* Expanded details for this piece */}
-                                {isPieceExpanded && Array.from(paymentsByDate.entries()).map(([date, datePayments]) => {
-                                  const totalForDate = datePayments.reduce((sum, p) => sum + p.amount_paid, 0)
-                                  const dateClients = new Set(datePayments.map(p => (p.client as any)?.name).filter(Boolean))
-                                  
-                                  return (
-                                    <TableRow key={`${piece.pieceId}-${date}`} className="bg-gray-50/50 text-sm">
-                                      <TableCell colSpan={2} className="text-right text-muted-foreground pr-8">{formatDate(date)}</TableCell>
-                                      <TableCell>{Array.from(dateClients).join('، ')}</TableCell>
-                                      <TableCell className="text-center text-muted-foreground">{datePayments.length}x</TableCell>
-                                      <TableCell className="text-right">{formatCurrency(totalForDate)}</TableCell>
-                                      <TableCell colSpan={2}></TableCell>
-                              </TableRow>
-                                  )
-                                })}
-                              </React.Fragment>
-                            )
-                          })
-                        ]
-                      })}
-                      <TableRow className="bg-primary/10 font-bold border-t-2">
-                        <TableCell colSpan={6} className="font-bold">الإجمالي:</TableCell>
-                        <TableCell className="text-right font-bold text-lg">
-                          {formatCurrency(paymentsByLand.reduce((sum, g) => sum + g.totalAmount, 0))}
-                        </TableCell>
-                        <TableCell>-</TableCell>
-                      </TableRow>
-                </TableBody>
-              </Table>
-              </div>
+          <div className="space-y-4 sm:space-y-6">
+            {(() => {
+              const paymentsByLand = getPaymentsByLand(selectedPaymentTypeForDialog)
+              if (paymentsByLand.length === 0) {
+                return (
+                  <Card>
+                    <CardContent className="py-8 text-center">
+                      <p className="text-muted-foreground">لا توجد مدفوعات</p>
+                    </CardContent>
+                  </Card>
+                )
+              }
+              
+              const totalAmount = paymentsByLand.reduce((sum, g) => sum + g.totalAmount, 0)
+              const totalPieces = paymentsByLand.reduce((sum, g) => sum + g.pieces.length, 0)
+              const totalPayments = paymentsByLand.reduce((sum, g) => sum + g.paymentCount, 0)
+              const totalClients = new Set(paymentsByLand.flatMap(g => g.pieces.flatMap(p => p.payments.map(pay => pay.client_id)))).size
+              
+              // Get color based on payment type
+              const getColorClasses = () => {
+                switch (selectedPaymentTypeForDialog) {
+                  case 'Installment':
+                    return {
+                      bg: 'from-blue-50 to-cyan-50',
+                      border: 'border-blue-200',
+                      text: 'text-blue-600',
+                      textMuted: 'text-blue-700'
+                    }
+                  case 'SmallAdvance':
+                    return {
+                      bg: 'from-orange-50 to-amber-50',
+                      border: 'border-orange-200',
+                      text: 'text-orange-600',
+                      textMuted: 'text-orange-700'
+                    }
+                  case 'Full':
+                    return {
+                      bg: 'from-green-50 to-emerald-50',
+                      border: 'border-green-200',
+                      text: 'text-green-600',
+                      textMuted: 'text-green-700'
+                    }
+                  case 'BigAdvance':
+                    return {
+                      bg: 'from-purple-50 to-pink-50',
+                      border: 'border-purple-200',
+                      text: 'text-purple-600',
+                      textMuted: 'text-purple-700'
+                    }
+                  default:
+                    return {
+                      bg: 'from-gray-50 to-slate-50',
+                      border: 'border-gray-200',
+                      text: 'text-gray-600',
+                      textMuted: 'text-gray-700'
+                    }
+                }
+              }
+              
+              const colors = getColorClasses()
+              
+              return (
+                <>
+                  {/* Summary Card */}
+                  <Card className={`bg-gradient-to-r ${colors.bg} ${colors.border}`}>
+                    <CardHeader className="p-4 sm:p-6">
+                      <CardTitle className="text-base sm:text-lg">الملخص</CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-4 sm:p-6 pt-0">
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+                        <div className="bg-white p-3 rounded-lg">
+                          <p className="text-xs sm:text-sm text-muted-foreground mb-1">إجمالي المبلغ</p>
+                          <p className={`text-lg sm:text-xl font-bold ${colors.text}`}>{formatCurrency(totalAmount)}</p>
+                        </div>
+                        <div className="bg-white p-3 rounded-lg">
+                          <p className="text-xs sm:text-sm text-muted-foreground mb-1">عدد المدفوعات</p>
+                          <p className={`text-lg sm:text-xl font-bold ${colors.text}`}>{totalPayments}</p>
+                        </div>
+                        <div className="bg-white p-3 rounded-lg">
+                          <p className="text-xs sm:text-sm text-muted-foreground mb-1">عدد العملاء</p>
+                          <p className={`text-lg sm:text-xl font-bold ${colors.text}`}>{totalClients}</p>
+                        </div>
+                        <div className="bg-white p-3 rounded-lg">
+                          <p className="text-xs sm:text-sm text-muted-foreground mb-1">عدد القطع</p>
+                          <p className={`text-lg sm:text-xl font-bold ${colors.text}`}>{totalPieces}</p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
 
-                {/* Mobile Card View - Compact with all hidden by default */}
-                <div className="md:hidden space-y-2">
-                  {paymentsByLand.map((landGroup, idx) => {
-                    const landKey = `${landGroup.landBatchName}-${landGroup.location || ''}`
-                    const isLandExpanded = expandedLandGroups.has(landKey)
-                    
+                  {/* Payments Table - Grouped by Land Batch */}
+                  {(() => {
                     return (
-                      <Card key={idx} className="border-gray-200">
-                        <CardContent className="p-2">
-                          {/* Land Group Header - Always visible */}
-                          <div 
-                            className="flex items-center justify-between cursor-pointer"
-                            onClick={() => {
-                              setExpandedLandGroups(prev => {
-                                const next = new Set(prev)
-                                if (next.has(landKey)) {
-                                  next.delete(landKey)
-                                } else {
-                                  next.add(landKey)
-                                }
-                                return next
-                              })
-                            }}
-                          >
-                            <div className="flex-1 min-w-0">
-                              <div className="font-semibold text-sm text-gray-800 truncate">{landGroup.landBatchName}</div>
-                              {landGroup.location && <div className="text-xs text-gray-600 truncate">{landGroup.location}</div>}
-          </div>
-                            <div className="flex items-center gap-2 ml-2 flex-shrink-0">
-                              <div className="text-right">
-                                <div className="text-sm font-bold text-gray-700">{formatCurrency(landGroup.totalAmount)}</div>
-                                <div className="text-xs text-gray-600">{landGroup.pieces.length} قطعة</div>
-                              </div>
-                              {isLandExpanded ? <ChevronUp className="h-4 w-4 text-gray-600" /> : <ChevronDown className="h-4 w-4 text-gray-600" />}
-                            </div>
-                          </div>
-
-                          {/* Pieces Summary - Always visible when land expanded */}
-                          {isLandExpanded && (
-                            <div className="mt-2 pt-2 border-t border-gray-200 space-y-1">
-                              {landGroup.pieces.map((piece, pIdx) => {
-                                const pieceKey = `${landGroup.landBatchName}-${piece.pieceId}`
-                                const isPieceExpanded = expandedPieceGroups.has(pieceKey)
-                                const recordedByUsers = Array.from(piece.recordedByUsers)
-                                const soldByUsers = Array.from(piece.soldByUsers)
-                                
-                                // Group payments by date for this piece
-                                const paymentsByDate = new Map<string, PaymentWithDetails[]>()
-                                piece.payments.forEach(payment => {
-                                  const dateKey = payment.payment_date
-                                  if (!paymentsByDate.has(dateKey)) {
-                                    paymentsByDate.set(dateKey, [])
-                                  }
-                                  paymentsByDate.get(dateKey)!.push(payment)
-                                })
-                                
-                                return (
-                                  <div key={pIdx} className="bg-gray-50 rounded-md p-1.5">
-                                    {/* Piece Summary Row - Compact one-liner */}
-                                    <div 
-                                      className="flex items-center justify-between cursor-pointer text-xs"
-                                      onClick={() => {
-                                        setExpandedPieceGroups(prev => {
-                                          const next = new Set(prev)
-                                          if (next.has(pieceKey)) {
-                                            next.delete(pieceKey)
-                                          } else {
-                                            next.add(pieceKey)
-                                          }
-                                          return next
-                                        })
-                                      }}
-                                    >
-                                      <div className="flex items-center gap-1.5 flex-1">
-                                        <span className="font-bold text-gray-800">#{piece.pieceNumber}</span>
-                                        <span className="text-gray-700 font-semibold">{formatCurrency(piece.totalAmount)}</span>
-                                        {piece.installmentCount > 0 && (
-                                          <span className="text-gray-500">({piece.installmentCount} قسط)</span>
-                                        )}
-                                        <span className="text-gray-400">•</span>
-                                        {soldByUsers.length > 0 && (
-                                          <span className="text-gray-500">باع: {soldByUsers.join('، ')}</span>
-                                        )}
-                                        {recordedByUsers.length > 0 && recordedByUsers.join('') !== soldByUsers.join('') && (
-                                          <span className="text-gray-500">سجل: {recordedByUsers.join('، ')}</span>
-                                        )}
+                      <>
+                        {/* Mobile Card View */}
+                        <div className="space-y-4 md:hidden">
+                          {paymentsByLand.map((group, groupIndex) => {
+                            return (
+                              <div key={groupIndex} className="space-y-2">
+                                {/* Group Header Card */}
+                                <Card className={`bg-gradient-to-r ${colors.bg} ${colors.border}`}>
+                                  <CardContent className="p-4">
+                                    <div className="space-y-3">
+                                      <div>
+                                        <h4 className="font-bold text-base mb-1">{group.landBatchName}</h4>
+                                        {group.location && <p className="text-xs text-muted-foreground">{group.location}</p>}
                                       </div>
-                                      <div className="flex-shrink-0">
-                                        {isPieceExpanded ? <ChevronUp className="h-3 w-3 text-gray-500" /> : <ChevronDown className="h-3 w-3 text-gray-500" />}
+                                      <div className="grid grid-cols-2 gap-3 text-xs">
+                                        <div>
+                                          <span className="text-muted-foreground">المبلغ:</span>
+                                          <div className={`font-bold text-base ${colors.text}`}>{formatCurrency(group.totalAmount)}</div>
+                                        </div>
+                                        <div>
+                                          <span className="text-muted-foreground">عدد المدفوعات:</span>
+                                          <div className="font-medium">{group.paymentCount}</div>
+                                        </div>
+                                        <div>
+                                          <span className="text-muted-foreground">عدد القطع:</span>
+                                          <div className="font-medium">{group.pieces.length}</div>
+                                        </div>
+                                        <div>
+                                          <span className="text-muted-foreground">النسبة:</span>
+                                          <div className="font-medium">{totalAmount > 0 ? ((group.totalAmount / totalAmount) * 100).toFixed(1) : 0}%</div>
+                                        </div>
                                       </div>
                                     </div>
-
-                                    {/* Payment Details - Hidden by default, shown on arrow click */}
-                                    {isPieceExpanded && (
-                                      <div className="mt-1.5 pt-1.5 border-t border-gray-200 space-y-0.5">
-                                        {Array.from(paymentsByDate.entries()).map(([date, datePayments]) => {
-                                          const totalForDate = datePayments.reduce((sum, p) => sum + p.amount_paid, 0)
-                                          const uniqueClients = new Set(datePayments.map(p => (p.client as any)?.name).filter(Boolean))
-                                          
-                                          return (
-                                            <div key={date} className="flex items-center justify-between text-xs bg-white px-1.5 py-1 rounded border border-gray-100">
-                                              <div className="flex items-center gap-1.5">
-                                                <span className="font-medium text-gray-800">{formatCurrency(totalForDate)}</span>
-                                                {datePayments.length > 1 && (
-                                                  <span className="text-gray-400">({datePayments.length}x)</span>
-                                                )}
-                                                {uniqueClients.size > 0 && (
-                                                  <span className="text-gray-500">- {Array.from(uniqueClients).join('، ')}</span>
-                                                )}
+                                  </CardContent>
+                                </Card>
+                                
+                                {/* Piece Cards */}
+                                {group.pieces.map((piece) => {
+                                  const uniqueClients = new Set(piece.payments.map(p => (p.client as any)?.name).filter(Boolean))
+                                  const recordedByUsers = Array.from(piece.recordedByUsers)
+                                  const soldByUsers = Array.from(piece.soldByUsers)
+                                  
+                                  // Group payments by date
+                                  const paymentsByDate = new Map<string, PaymentWithDetails[]>()
+                                  piece.payments.forEach(payment => {
+                                    const dateKey = payment.payment_date
+                                    if (!paymentsByDate.has(dateKey)) {
+                                      paymentsByDate.set(dateKey, [])
+                                    }
+                                    paymentsByDate.get(dateKey)!.push(payment)
+                                  })
+                                  
+                                  return (
+                                    <Card key={piece.pieceId} className="hover:shadow-md transition-shadow">
+                                      <CardContent className="p-3">
+                                        <div className="space-y-2">
+                                          <div className="flex items-start justify-between">
+                                            <div className="flex-1 min-w-0">
+                                              <div className={`font-semibold text-base ${colors.text}`}>
+                                                {formatCurrency(piece.totalAmount)}
                                               </div>
-                                              <span className="text-gray-500">{formatDate(date)}</span>
+                                              <div className="text-xs text-muted-foreground mt-1">
+                                                #{piece.pieceNumber}
+                                              </div>
                                             </div>
-                                          )
-                                        })}
-                                      </div>
-                                    )}
-                                  </div>
-                                )
+                                            {piece.installmentCount > 0 && (
+                                              <Badge variant="secondary" className="text-xs flex-shrink-0">
+                                                {piece.installmentCount} قسط
+                                              </Badge>
+                                            )}
+                                          </div>
+                                          
+                                          <div className="space-y-1.5 text-xs">
+                                            <div>
+                                              <span className="text-muted-foreground">العميل:</span>
+                                              <div className="font-medium mt-0.5">{Array.from(uniqueClients).join('، ') || 'غير معروف'}</div>
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-2">
+                                              <div>
+                                                <span className="text-muted-foreground">الدفعة:</span>
+                                                <div className="font-medium">{group.landBatchName}</div>
+                                              </div>
+                                              {group.location && (
+                                                <div>
+                                                  <span className="text-muted-foreground">الموقع:</span>
+                                                  <div className="font-medium">{group.location}</div>
+                                                </div>
+                                              )}
+                                              {soldByUsers.length > 0 && (
+                                                <div>
+                                                  <span className="text-muted-foreground">باع:</span>
+                                                  <div className="font-medium">{soldByUsers.join('، ')}</div>
+                                                </div>
+                                              )}
+                                              {recordedByUsers.length > 0 && recordedByUsers.join('') !== soldByUsers.join('') && (
+                                                <div>
+                                                  <span className="text-muted-foreground">سجل:</span>
+                                                  <div className="font-medium">{recordedByUsers.join('، ')}</div>
+                                                </div>
+                                              )}
+                                            </div>
+                                            
+                                            {/* Payment Details by Date */}
+                                            {Array.from(paymentsByDate.entries()).map(([date, datePayments]) => {
+                                              const totalForDate = datePayments.reduce((sum, p) => sum + p.amount_paid, 0)
+                                              const dateClients = new Set(datePayments.map(p => (p.client as any)?.name).filter(Boolean))
+                                              
+                                              return (
+                                                <div key={date} className="mt-2 pt-2 border-t border-gray-200">
+                                                  <div className="flex items-center justify-between mb-1">
+                                                    <span className="font-medium text-gray-800">{formatDate(date)}</span>
+                                                    <span className={`font-bold ${colors.text}`}>{formatCurrency(totalForDate)}</span>
+                                                  </div>
+                                                  {datePayments.map((payment, idx) => (
+                                                    <div key={payment.id} className="text-xs bg-gray-50 p-1.5 rounded mt-1">
+                                                      <div className="flex justify-between">
+                                                        <span className="text-muted-foreground">المبلغ:</span>
+                                                        <span className="font-medium">{formatCurrency(payment.amount_paid)}</span>
+                                                      </div>
+                                                      {payment.payment_method && (
+                                                        <div className="flex justify-between mt-0.5">
+                                                          <span className="text-muted-foreground">طريقة الدفع:</span>
+                                                          <span>{payment.payment_method}</span>
+                                                        </div>
+                                                      )}
+                                                      {payment.notes && (
+                                                        <div className="mt-0.5 text-muted-foreground">{payment.notes}</div>
+                                                      )}
+                                                      {payment.recorded_by_user && (
+                                                        <div className="mt-0.5 text-muted-foreground">سجل: {payment.recorded_by_user.name}</div>
+                                                      )}
+                                                    </div>
+                                                  ))}
+                                                </div>
+                                              )
+                                            })}
+                                          </div>
+                                        </div>
+                                      </CardContent>
+                                    </Card>
+                                  )
+                                })}
+                              </div>
+                            )
+                          })}
+                        </div>
+
+                        {/* Desktop Table View */}
+                        <div className="hidden md:block overflow-x-auto -mx-4 sm:mx-0 px-4 sm:px-0" style={{ WebkitOverflowScrolling: 'touch' }}>
+                          <Table className="min-w-full">
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>التاريخ</TableHead>
+                                <TableHead>العميل</TableHead>
+                                <TableHead>اسم الدفعة</TableHead>
+                                <TableHead>الموقع</TableHead>
+                                <TableHead>رقم القطعة</TableHead>
+                                <TableHead className="text-center">عدد الأقساط</TableHead>
+                                <TableHead className="text-right">المبلغ</TableHead>
+                                <TableHead>طريقة الدفع</TableHead>
+                                <TableHead>المستخدم</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {paymentsByLand.flatMap((group, groupIndex) => {
+                                return [
+                                  <TableRow key={`summary-${groupIndex}`} className="bg-gray-50 font-bold">
+                                    <TableCell colSpan={5} className="font-bold">
+                                      {group.landBatchName} {group.location && `- ${group.location}`}
+                                    </TableCell>
+                                    <TableCell className="text-center">{group.paymentCount} دفعة</TableCell>
+                                    <TableCell className={`text-right font-bold text-lg ${colors.text}`}>
+                                      {formatCurrency(group.totalAmount)}
+                                    </TableCell>
+                                    <TableCell className="text-center">{group.pieces.length} قطعة</TableCell>
+                                    <TableCell>-</TableCell>
+                                  </TableRow>,
+                                  ...group.pieces.flatMap((piece) => {
+                                    const uniqueClients = new Set(piece.payments.map(p => (p.client as any)?.name).filter(Boolean))
+                                    const recordedByUsers = Array.from(piece.recordedByUsers)
+                                    const soldByUsers = Array.from(piece.soldByUsers)
+                                    
+                                    return piece.payments.map((payment, idx) => {
+                                      const client = payment.client as any
+                                      return (
+                                        <TableRow key={`${piece.pieceId}-${payment.id}-${idx}`} className="bg-white">
+                                          <TableCell>{formatDate(payment.payment_date)}</TableCell>
+                                          <TableCell>
+                                            <div className="flex flex-col">
+                                              <span className="font-medium">{client?.name || 'غير معروف'}</span>
+                                              {client?.phone && <span className="text-xs text-muted-foreground">({client.phone})</span>}
+                                            </div>
+                                          </TableCell>
+                                          <TableCell className="text-muted-foreground">{group.landBatchName}</TableCell>
+                                          <TableCell className="text-muted-foreground">{group.location || '-'}</TableCell>
+                                          <TableCell className="font-medium">#{piece.pieceNumber}</TableCell>
+                                          <TableCell className="text-center">{piece.installmentCount > 0 ? piece.installmentCount : '-'}</TableCell>
+                                          <TableCell className={`text-right font-bold ${colors.text}`}>
+                                            {formatCurrency(payment.amount_paid)}
+                                          </TableCell>
+                                          <TableCell>{payment.payment_method || '-'}</TableCell>
+                                          <TableCell className="text-xs">
+                                            <div className="flex flex-col">
+                                              {soldByUsers.length > 0 && <span>باع: {soldByUsers.join('، ')}</span>}
+                                              {recordedByUsers.length > 0 && recordedByUsers.join('') !== soldByUsers.join('') && (
+                                                <span>سجل: {recordedByUsers.join('، ')}</span>
+                                              )}
+                                              {payment.recorded_by_user && (
+                                                <span>سجل: {payment.recorded_by_user.name}</span>
+                                              )}
+                                            </div>
+                                          </TableCell>
+                                        </TableRow>
+                                      )
+                                    })
+                                  })
+                                ]
                               })}
-                            </div>
-                          )}
-                        </CardContent>
-                      </Card>
+                              <TableRow className="bg-primary/10 font-bold border-t-2">
+                                <TableCell colSpan={6} className="font-bold">الإجمالي:</TableCell>
+                                <TableCell className={`text-right font-bold text-lg ${colors.text}`}>
+                                  {formatCurrency(totalAmount)}
+                                </TableCell>
+                                <TableCell colSpan={2}>-</TableCell>
+                              </TableRow>
+                            </TableBody>
+                          </Table>
+                        </div>
+                      </>
                     )
-                  })}
-                </div>
-              </>
-            )
-          })()}
+                  })()}
+                </>
+              )
+            })()}
+          </div>
         </DialogContent>
       </Dialog>
 

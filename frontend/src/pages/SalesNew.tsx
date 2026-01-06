@@ -2246,6 +2246,7 @@ export function SalesNew() {
                               className="cursor-pointer hover:bg-muted/50"
                               onClick={() => {
                                 if (pieceSale) {
+                                  setClientDetailsOpen(false) // Close client details dialog
                                   setSelectedSaleForDetails(pieceSale)
                                   setSaleDetailsOpen(true)
                                 }
