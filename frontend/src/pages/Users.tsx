@@ -694,7 +694,7 @@ export function Users() {
           {
             id: authData.user.id,
             name: sanitizeText(form.name),
-            email: cleanEmail,
+              email: cleanEmail,
             role: form.role,
             allowed_pages: form.role === 'Owner' ? null : form.allowedPages,
             sidebar_order: form.sidebarOrder.length > 0 ? form.sidebarOrder : null,
@@ -1191,10 +1191,10 @@ export function Users() {
 
             {/* Role field - Only show when editing existing user */}
             {editingUser && (
-              <div className="space-y-1.5 sm:space-y-2">
-                <Label htmlFor="role" className="text-xs sm:text-sm">الدور</Label>
-                <Select
-                  value={form.role}
+            <div className="space-y-1.5 sm:space-y-2">
+              <Label htmlFor="role" className="text-xs sm:text-sm">الدور</Label>
+              <Select
+                value={form.role}
                   onChange={(e) => {
                     // Prevent changing to Owner if user is not already Owner
                     if (editingUser.role !== 'Owner' && e.target.value === 'Owner') {
@@ -1203,8 +1203,8 @@ export function Users() {
                     setForm({ ...form, role: e.target.value as UserRole })
                   }}
                   disabled={saving || editingUser.role !== 'Owner'}
-                  className="text-xs sm:text-sm"
-                >
+                className="text-xs sm:text-sm"
+              >
                   <option value="Worker">عامل (Worker)</option>
                   <option 
                     value="Owner" 
@@ -1214,13 +1214,13 @@ export function Users() {
                       ? 'مالك (Owner)' 
                       : 'مالك (Owner) - يتم إنشاؤه فقط في Supabase'}
                   </option>
-                </Select>
+              </Select>
                 {editingUser.role !== 'Owner' && (
                   <p className="text-xs text-muted-foreground">
                     ملاحظة: لا يمكن تغيير دور المستخدم إلى مالك. المالك يتم إنشاؤه فقط مباشرة في Supabase.
                   </p>
                 )}
-              </div>
+            </div>
             )}
 
             {/* Worker Profile Section - Show for Worker role (always for new users, conditionally for editing) */}
@@ -1234,15 +1234,15 @@ export function Users() {
                 </div>
 
                 <div className="space-y-3">
-                  <div className="space-y-1.5 sm:space-y-2">
+            <div className="space-y-1.5 sm:space-y-2">
                     <Label htmlFor="worker_type" className="text-xs sm:text-sm">نوع العامل *</Label>
                     <Input
                       id="worker_type"
                       value={form.worker_type}
                       onChange={(e) => setForm({ ...form, worker_type: e.target.value })}
                       placeholder="مثال: محامي، بائع، وكيل، مدير..."
-                      disabled={saving}
-                      className="text-xs sm:text-sm"
+                disabled={saving}
+                className="text-xs sm:text-sm"
                     />
                   </div>
 
@@ -1295,7 +1295,7 @@ export function Users() {
                         ))}
                       </div>
                     )}
-                  </div>
+            </div>
 
                   <div className="space-y-1.5 sm:space-y-2">
                     <Label htmlFor="worker_notes" className="text-xs sm:text-sm">ملاحظات</Label>

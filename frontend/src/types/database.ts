@@ -146,6 +146,7 @@ export interface Sale {
   installment_end_date: string | null
   number_of_installments: number | null
   monthly_installment_amount: number | null
+  selected_offer_id: string | null
   status: SaleStatus
   sale_date: string
   deadline_date: string | null
