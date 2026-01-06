@@ -148,17 +148,17 @@ const DialogContent = React.forwardRef<
         "fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4",
         isNotificationDialog && "md:items-start md:justify-start md:left-[16rem] md:right-auto md:top-4 md:inset-auto md:p-0"
       )}>
-        <div
-          ref={ref}
-          className={cn(
+      <div
+        ref={ref}
+        className={cn(
             "relative w-full max-w-[95vw] sm:max-w-lg md:max-w-2xl lg:max-w-3xl max-h-[95vh] sm:max-h-[90vh] overflow-hidden border bg-background shadow-lg duration-200 rounded-lg flex flex-col",
-            className
-          )}
-          {...props}
-        >
+          className
+        )}
+        {...props}
+      >
           {/* Content with balanced padding - responsive for mobile */}
           <div className="flex-1 min-w-0 overflow-y-auto p-4 sm:p-5 md:p-6 lg:p-8">
-            {children}
+          {children}
           </div>
         </div>
       </div>
@@ -176,12 +176,12 @@ const DialogHeader = ({
   if (!context) throw new Error("DialogHeader must be used within Dialog")
   
   return (
-    <div
-      className={cn(
+  <div
+    className={cn(
         "flex items-start justify-between gap-3 sm:gap-4 pb-3 sm:pb-4 md:pb-5",
-        className
-      )}
-      {...props}
+      className
+    )}
+    {...props}
     >
       {/* Title and subtitle container - takes available space */}
       <div className="flex-1 min-w-0 flex flex-col space-y-1 sm:space-y-1.5 text-right">

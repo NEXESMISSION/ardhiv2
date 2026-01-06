@@ -518,7 +518,7 @@ export function Financial() {
             pieceGroup.installmentCount += 1
           }
           if (!pieceGroup.payments.find(p => p.id === payment.id)) {
-            pieceGroup.payments.push(payment)
+          pieceGroup.payments.push(payment)
           }
           
           // Track users
@@ -531,8 +531,8 @@ export function Financial() {
           
           // Also add to batch totals (only once per payment, not per piece)
           if (!group.payments.find(p => p.id === payment.id)) {
-            group.totalAmount += payment.amount_paid
-            group.paymentCount += 1
+          group.totalAmount += payment.amount_paid
+          group.paymentCount += 1
             group.payments.push(payment)
           }
         })

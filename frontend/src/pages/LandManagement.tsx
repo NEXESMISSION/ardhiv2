@@ -25,11 +25,12 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
-import { sanitizeText, sanitizeNotes } from '@/lib/sanitize'
+import { sanitizeText, sanitizeNotes, sanitizeEmail, sanitizePhone, sanitizeCIN } from '@/lib/sanitize'
+import { showNotification } from '@/components/ui/notification'
 import { debounce } from '@/lib/throttle'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { Plus, Edit, Trash2, Map, ChevronDown, ChevronRight, Calculator, X, DollarSign, AlertTriangle, ShoppingCart, Upload, Image as ImageIcon } from 'lucide-react'
-import type { LandBatch, LandPiece, LandStatus } from '@/types/database'
+import type { LandBatch, LandPiece, LandStatus, Client } from '@/types/database'
 
 interface LandBatchWithPieces extends LandBatch {
   land_pieces: LandPiece[]
@@ -87,6 +88,28 @@ export function LandManagement() {
   const [imageViewDialogOpen, setImageViewDialogOpen] = useState(false)
   const [viewingImageUrl, setViewingImageUrl] = useState<string | null>(null)
   const [viewingImageName, setViewingImageName] = useState<string>('')
+  
+  // Multi-select for selling
+  const [selectedPieces, setSelectedPieces] = useState<Set<string>>(new Set())
+  const [clientDialogOpen, setClientDialogOpen] = useState(false)
+  const [saleDialogOpen, setSaleDialogOpen] = useState(false)
+  const [newClient, setNewClient] = useState<Client | null>(null)
+  const [clientForm, setClientForm] = useState({
+    name: '',
+    cin: '',
+    phone: '',
+    email: '',
+    address: '',
+    client_type: 'Individual',
+    notes: '',
+  })
+  const [saleForm, setSaleForm] = useState({
+    payment_type: 'Full' as 'Full' | 'Installment',
+    reservation_amount: '',
+    deadline_date: '',
+  })
+  const [savingClient, setSavingClient] = useState(false)
+  const [creatingSale, setCreatingSale] = useState(false)
   
   // Debounced search
   const debouncedSearchFn = useCallback(
@@ -1109,7 +1132,7 @@ export function LandManagement() {
       setBatchDialogOpen(false)
       
       // Always refresh batches after save to show updated data
-      await fetchBatches()
+        await fetchBatches()
       
       setError(null)
     } catch (error: any) {
@@ -1789,8 +1812,8 @@ export function LandManagement() {
       console.error('Error in saveBulkPieces:', error)
       if (!error.message || !error.message.includes('خطأ في حفظ القطع')) {
         setError(error.message || 'خطأ في حفظ القطع. يرجى التحقق من البيانات والمحاولة مرة أخرى.')
-      }
     }
+  }
   }
 
   // Filter batches by search term (name, location) and filter pieces within each batch
@@ -1819,11 +1842,11 @@ export function LandManagement() {
     ...batch,
       land_pieces: (Array.isArray(batch.land_pieces) ? batch.land_pieces : [])
         .filter((piece) => {
-          const matchesStatus = filterStatus === 'all' || filterStatus === '' || piece.status === filterStatus
-          const matchesSearch =
+        const matchesStatus = filterStatus === 'all' || filterStatus === '' || piece.status === filterStatus
+      const matchesSearch =
             !debouncedSearchTerm || debouncedSearchTerm.trim() === '' ||
             piece.piece_number?.toLowerCase().includes(debouncedSearchTerm.toLowerCase().trim())
-          return matchesStatus && matchesSearch
+      return matchesStatus && matchesSearch
         })
         .sort((a, b) => {
           // Natural sort for alphanumeric piece numbers
@@ -1849,14 +1872,200 @@ export function LandManagement() {
           }
           // Fallback to string comparison
           return aNum.localeCompare(bNum, 'ar')
-        }),
-    }))
+    }),
+  }))
     .sort((a, b) => {
       // Sort batches by name (alphabetically)
       const nameA = a.name?.toLowerCase() || ''
       const nameB = b.name?.toLowerCase() || ''
       return nameA.localeCompare(nameB, 'ar')
     })
+
+  // Handle create client
+  const handleCreateClient = async () => {
+    if (savingClient) return
+    
+    setSavingClient(true)
+    
+    try {
+      if (!clientForm.name.trim() || !clientForm.cin.trim() || !clientForm.phone.trim()) {
+        showNotification('يرجى ملء جميع الحقول المطلوبة', 'error')
+        setSavingClient(false)
+        return
+      }
+
+      const sanitizedCIN = sanitizeCIN(clientForm.cin)
+      if (!sanitizedCIN) {
+        showNotification('رقم CIN غير صالح', 'error')
+        setSavingClient(false)
+        return
+      }
+
+      const sanitizedPhone = sanitizePhone(clientForm.phone)
+      
+      // Check for duplicate CIN
+      const { data: existingClient } = await supabase
+        .from('clients')
+        .select('id, name')
+        .eq('cin', sanitizedCIN)
+        .limit(1)
+
+      if (existingClient && existingClient.length > 0) {
+        showNotification(`عميل برقم CIN "${sanitizedCIN}" موجود بالفعل: ${existingClient[0].name}`, 'error')
+        setSavingClient(false)
+        return
+      }
+
+      const clientData: any = {
+        name: sanitizeText(clientForm.name),
+        cin: sanitizedCIN,
+        phone: sanitizedPhone,
+        email: clientForm.email ? sanitizeEmail(clientForm.email) : null,
+        address: clientForm.address ? sanitizeText(clientForm.address) : null,
+        client_type: clientForm.client_type,
+        notes: clientForm.notes ? sanitizeNotes(clientForm.notes) : null,
+        created_by: user?.id || null,
+      }
+
+      const { data: newClientData, error } = await supabase
+        .from('clients')
+        .insert([clientData])
+        .select()
+        .single()
+
+      if (error) throw error
+
+      setNewClient(newClientData)
+      setClientDialogOpen(false)
+      setSaleDialogOpen(true)
+      showNotification('تم إضافة العميل بنجاح', 'success')
+    } catch (error: any) {
+      console.error('Error creating client:', error)
+      showNotification('خطأ في إضافة العميل: ' + (error.message || 'خطأ غير معروف'), 'error')
+    } finally {
+      setSavingClient(false)
+    }
+  }
+
+  // Handle create sale
+  const handleCreateSale = async () => {
+    if (creatingSale || !newClient || selectedPieces.size === 0) return
+    
+    setCreatingSale(true)
+    
+    try {
+      // Validate pieces are still available
+      const { data: currentPieces } = await supabase
+        .from('land_pieces')
+        .select('id, status, piece_number, selling_price_full, selling_price_installment, surface_area, purchase_cost, land_batch_id')
+        .in('id', Array.from(selectedPieces))
+      
+      const unavailablePieces = (currentPieces || []).filter((p: any) => p.status !== 'Available')
+      if (unavailablePieces.length > 0) {
+        const pieceNumbers = unavailablePieces.map((p: any) => `#${p.piece_number}`).join(', ')
+        showNotification(`القطع التالية لم تعد متاحة: ${pieceNumbers}`, 'error')
+        fetchBatches()
+        setCreatingSale(false)
+        return
+      }
+
+      const selectedPieceObjects = currentPieces || []
+      
+      const totalCost = parseFloat(selectedPieceObjects.reduce((sum, p) => sum + (parseFloat(p.purchase_cost) || 0), 0).toFixed(2))
+      const totalPrice = parseFloat(selectedPieceObjects.reduce((sum, p) => {
+        if (saleForm.payment_type === 'Full') {
+          return sum + (parseFloat(p.selling_price_full) || 0)
+        } else {
+          return sum + (parseFloat(p.selling_price_installment) || 0)
+        }
+      }, 0).toFixed(2))
+      
+      if (totalPrice <= 0 || isNaN(totalPrice)) {
+        showNotification('يرجى التأكد من أن القطع المختارة لها أسعار محددة', 'error')
+        setCreatingSale(false)
+        return
+      }
+
+      const reservation = parseFloat(saleForm.reservation_amount) || 0
+      
+      if (reservation > totalPrice) {
+        showNotification('مبلغ العربون لا يمكن أن يكون أكبر من السعر الإجمالي', 'error')
+        setCreatingSale(false)
+        return
+      }
+
+      const saleData: any = {
+        client_id: newClient.id,
+        land_piece_ids: Array.from(selectedPieces),
+        payment_type: saleForm.payment_type,
+        total_purchase_cost: totalCost,
+        total_selling_price: totalPrice,
+        profit_margin: parseFloat((totalPrice - totalCost).toFixed(2)),
+        small_advance_amount: reservation,
+        big_advance_amount: 0,
+        status: 'Pending',
+        sale_date: new Date().toISOString().split('T')[0],
+        created_by: user?.id || null,
+      }
+      
+      if (saleForm.deadline_date && saleForm.deadline_date.trim() !== '') {
+        saleData.deadline_date = saleForm.deadline_date
+      }
+
+      const { data: newSale, error } = await supabase
+        .from('sales')
+        .insert(saleData)
+        .select()
+        .single()
+      
+      if (error) throw error
+
+      // Create SmallAdvance payment if reservation amount > 0
+      if (reservation > 0 && newSale) {
+        await supabase.from('payments').insert([{
+          client_id: newClient.id,
+          sale_id: newSale.id,
+          amount_paid: reservation,
+          payment_type: 'SmallAdvance',
+          payment_date: new Date().toISOString().split('T')[0],
+          recorded_by: user?.id || null,
+        }] as any)
+      }
+
+      // Update all selected pieces status to Reserved
+      for (const pieceId of selectedPieces) {
+        await supabase
+          .from('land_pieces')
+          .update({ status: 'Reserved' } as any)
+          .eq('id', pieceId)
+      }
+
+      showNotification('تم إنشاء البيع بنجاح', 'success')
+      setSaleDialogOpen(false)
+      setNewClient(null)
+      setSelectedPieces(new Set())
+      setClientForm({
+        name: '',
+        cin: '',
+        phone: '',
+        email: '',
+        address: '',
+        client_type: 'Individual',
+        notes: '',
+      })
+      setSaleForm({
+        payment_type: 'Full',
+        reservation_amount: '',
+        deadline_date: '',
+      })
+      fetchBatches()
+    } catch (error: any) {
+      console.error('Error creating sale:', error)
+      showNotification('خطأ في إنشاء البيع: ' + (error.message || 'خطأ غير معروف'), 'error')
+    } finally {
+      setCreatingSale(false)
+    }
+  }
 
   if (loading) {
     return (
@@ -1890,13 +2099,25 @@ export function LandManagement() {
       <div className="flex flex-col gap-3">
         <div className="flex items-center justify-between">
           <h1 className="text-xl sm:text-2xl font-bold">الأراضي</h1>
-        {hasPermission('edit_land') && (
-            <Button onClick={() => openBatchDialog()} size="sm">
-              <Plus className="ml-1 h-4 w-4" />
-              إضافة
-          </Button>
-        )}
-      </div>
+          <div className="flex items-center gap-2">
+            {selectedPieces.size > 0 && hasPermission('create_sales') && (
+              <Button 
+                onClick={() => setClientDialogOpen(true)} 
+                size="sm"
+                className="bg-green-600 hover:bg-green-700"
+              >
+                <ShoppingCart className="ml-1 h-4 w-4" />
+                بيع ({selectedPieces.size})
+              </Button>
+            )}
+            {hasPermission('edit_land') && (
+              <Button onClick={() => openBatchDialog()} size="sm">
+                <Plus className="ml-1 h-4 w-4" />
+                إضافة
+              </Button>
+            )}
+          </div>
+        </div>
 
         {/* Inline Filters - Compact */}
         <div className="flex flex-col sm:flex-row gap-2">
@@ -1991,8 +2212,8 @@ export function LandManagement() {
                   <div className="p-2 bg-gray-50 border-b flex gap-2">
                     <Button variant="outline" size="sm" onClick={() => openPieceDialog(batch.id)} className="flex-1 h-8 text-xs">
                       <Plus className="ml-1 h-3.5 w-3.5" />
-                      إضافة قطعة
-                    </Button>
+                    إضافة قطعة
+                  </Button>
                     <Button variant="outline" size="sm" onClick={() => openBulkAddDialog(batch.id)} className="flex-1 h-8 text-xs bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200">
                       <Plus className="ml-1 h-3.5 w-3.5" />
                       إضافة متعددة
@@ -2033,7 +2254,7 @@ export function LandManagement() {
                         </Button>
                       </div>
                     </div>
-                  </div>
+              </div>
                 )}
 
               {(!batch.land_pieces || batch.land_pieces.length === 0) ? (
@@ -2049,10 +2270,28 @@ export function LandManagement() {
                             piece.status === 'Available' ? 'bg-green-50 border-green-200' :
                             piece.status === 'Reserved' ? 'bg-orange-50 border-orange-200' :
                             piece.status === 'Sold' ? 'bg-gray-100 border-gray-200' : 'bg-gray-50 border-gray-200'
-                          }`}
+                          } ${selectedPieces.has(piece.id) ? 'ring-2 ring-green-500' : ''}`}
                         >
                           <div className="flex items-center justify-between mb-1">
-                            <span className="font-bold">{piece.piece_number}</span>
+                            <div className="flex items-center gap-1">
+                              {piece.status === 'Available' && hasPermission('create_sales') && (
+                                <input
+                                  type="checkbox"
+                                  checked={selectedPieces.has(piece.id)}
+                                  onChange={(e) => {
+                                    const newSelected = new Set(selectedPieces)
+                                    if (e.target.checked) {
+                                      newSelected.add(piece.id)
+                                    } else {
+                                      newSelected.delete(piece.id)
+                                    }
+                                    setSelectedPieces(newSelected)
+                                  }}
+                                  className="h-4 w-4 text-green-600 rounded"
+                                />
+                              )}
+                              <span className="font-bold">{piece.piece_number}</span>
+                            </div>
                             <Badge variant={statusColors[piece.status]} className="text-xs px-1.5 py-0">
                               {piece.status === 'Available' ? 'متاح' :
                                piece.status === 'Reserved' ? 'محجوز' :
@@ -2061,18 +2300,6 @@ export function LandManagement() {
                           </div>
                           <div className="text-muted-foreground">{piece.surface_area} م²</div>
                           <div className="font-semibold text-green-600 mt-1">{formatCurrency(piece.selling_price_full || 0)}</div>
-                          
-                          {/* Sell Button for Available */}
-                          {piece.status === 'Available' && hasPermission('create_sales') && (
-                            <Button
-                              size="sm"
-                              onClick={() => navigate(`/sales?piece=${piece.id}`)}
-                              className="w-full mt-2 h-7 text-xs bg-green-600 hover:bg-green-700"
-                            >
-                              <ShoppingCart className="h-3 w-3 ml-1" />
-                              بيع
-                            </Button>
-                          )}
                           
                           {/* Edit buttons */}
                           {hasPermission('edit_land') && (
@@ -2114,6 +2341,9 @@ export function LandManagement() {
                       <Table>
                     <TableHeader>
                           <TableRow className="text-xs">
+                            {hasPermission('create_sales') && (
+                              <TableHead className="py-2 w-10"></TableHead>
+                            )}
                             <TableHead className="py-2">قطعة</TableHead>
                             <TableHead className="py-2">م²</TableHead>
                             <TableHead className="py-2">كامل</TableHead>
@@ -2124,7 +2354,30 @@ export function LandManagement() {
                     </TableHeader>
                     <TableBody>
                       {batch.land_pieces.map((piece) => (
-                            <TableRow key={piece.id} className="text-sm">
+                            <TableRow 
+                              key={piece.id} 
+                              className={`text-sm ${selectedPieces.has(piece.id) ? 'bg-green-50' : ''}`}
+                            >
+                              {hasPermission('create_sales') && (
+                                <TableCell className="py-2">
+                                  {piece.status === 'Available' ? (
+                                    <input
+                                      type="checkbox"
+                                      checked={selectedPieces.has(piece.id)}
+                                      onChange={(e) => {
+                                        const newSelected = new Set(selectedPieces)
+                                        if (e.target.checked) {
+                                          newSelected.add(piece.id)
+                                        } else {
+                                          newSelected.delete(piece.id)
+                                        }
+                                        setSelectedPieces(newSelected)
+                                      }}
+                                      className="h-4 w-4 text-green-600 rounded"
+                                    />
+                                  ) : null}
+                                </TableCell>
+                              )}
                               <TableCell className="py-2 font-medium">{piece.piece_number}</TableCell>
                               <TableCell className="py-2">{piece.surface_area}</TableCell>
                               <TableCell className="py-2 text-green-600 font-medium">{formatCurrency(piece.selling_price_full || 0)}</TableCell>
@@ -2138,26 +2391,16 @@ export function LandManagement() {
                           </TableCell>
                               <TableCell className="py-2">
                                 <div className="flex items-center gap-0.5">
-                                  {piece.status === 'Available' && hasPermission('create_sales') && (
-                                    <Button
-                                      size="sm"
-                                      onClick={() => navigate(`/sales?piece=${piece.id}`)}
-                                      className="h-7 text-xs bg-green-600 hover:bg-green-700"
-                                    >
-                                      <ShoppingCart className="h-3 w-3 ml-1" />
-                                      بيع
-                                    </Button>
-                                  )}
                           {hasPermission('edit_land') && (
                               <>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => openPieceDialog(batch.id, piece)}
-                                  className="h-7 w-7"
-                                >
-                                  <Edit className="h-3.5 w-3.5" />
-                                </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => openPieceDialog(batch.id, piece)}
+                                      className="h-7 w-7"
+                              >
+                                      <Edit className="h-3.5 w-3.5" />
+                              </Button>
                                 <Button
                                   variant="ghost"
                                   size="icon"
@@ -2801,6 +3044,181 @@ export function LandManagement() {
         confirmText="نعم، حذف"
         cancelText="إلغاء"
       />
+
+      {/* New Client Dialog */}
+      <Dialog open={clientDialogOpen} onOpenChange={setClientDialogOpen}>
+        <DialogContent className="w-[95vw] sm:w-full max-w-lg">
+          <DialogHeader>
+            <DialogTitle>إضافة عميل جديد</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="clientName">الاسم *</Label>
+              <Input
+                id="clientName"
+                value={clientForm.name}
+                onChange={(e) => setClientForm({ ...clientForm, name: e.target.value })}
+                placeholder="اسم العميل"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="clientCIN">رقم CIN *</Label>
+              <Input
+                id="clientCIN"
+                value={clientForm.cin}
+                onChange={(e) => setClientForm({ ...clientForm, cin: e.target.value })}
+                placeholder="رقم CIN"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="clientPhone">رقم الهاتف *</Label>
+              <Input
+                id="clientPhone"
+                value={clientForm.phone}
+                onChange={(e) => setClientForm({ ...clientForm, phone: e.target.value })}
+                placeholder="رقم الهاتف"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="clientEmail">البريد الإلكتروني</Label>
+              <Input
+                id="clientEmail"
+                type="email"
+                value={clientForm.email}
+                onChange={(e) => setClientForm({ ...clientForm, email: e.target.value })}
+                placeholder="البريد الإلكتروني (اختياري)"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="clientAddress">العنوان</Label>
+              <Input
+                id="clientAddress"
+                value={clientForm.address}
+                onChange={(e) => setClientForm({ ...clientForm, address: e.target.value })}
+                placeholder="العنوان (اختياري)"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="clientType">نوع العميل</Label>
+              <Select
+                value={clientForm.client_type}
+                onChange={(e) => setClientForm({ ...clientForm, client_type: e.target.value as 'Individual' | 'Company' })}
+              >
+                <option value="Individual">فردي</option>
+                <option value="Company">شركة</option>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="clientNotes">ملاحظات</Label>
+              <Textarea
+                id="clientNotes"
+                value={clientForm.notes}
+                onChange={(e) => setClientForm({ ...clientForm, notes: e.target.value })}
+                placeholder="ملاحظات (اختياري)"
+                rows={3}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setClientDialogOpen(false)}>
+              إلغاء
+            </Button>
+            <Button 
+              onClick={handleCreateClient}
+              disabled={savingClient || !clientForm.name || !clientForm.cin || !clientForm.phone}
+            >
+              {savingClient ? 'جاري الحفظ...' : 'حفظ والمتابعة'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Sale Creation Dialog */}
+      <Dialog open={saleDialogOpen} onOpenChange={setSaleDialogOpen}>
+        <DialogContent className="w-[95vw] sm:w-full max-w-2xl max-h-[95vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>إنشاء بيع جديد</DialogTitle>
+          </DialogHeader>
+          {newClient && (
+            <div className="space-y-4">
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                <p className="font-medium text-sm">العميل: {newClient.name}</p>
+                <p className="text-xs text-muted-foreground">CIN: {newClient.cin} | الهاتف: {newClient.phone}</p>
+              </div>
+              
+              <div className="space-y-2">
+                <Label>القطع المختارة:</Label>
+                <div className="bg-gray-50 rounded-lg p-3 max-h-40 overflow-y-auto">
+                  {Array.from(selectedPieces).map(pieceId => {
+                    const piece = batches.flatMap(b => b.land_pieces).find(p => p.id === pieceId)
+                    if (!piece) return null
+                    const batch = batches.find(b => b.id === piece.land_batch_id)
+                    return (
+                      <div key={pieceId} className="flex justify-between text-sm py-1">
+                        <span>{batch?.name || 'دفعة'} - #{piece.piece_number} ({piece.surface_area} م²)</span>
+                        <span className="font-medium">{formatCurrency(piece.selling_price_full || 0)}</span>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="paymentType">نوع الدفع *</Label>
+                <Select
+                  id="paymentType"
+                  value={saleForm.payment_type}
+                  onChange={(e) => setSaleForm({ ...saleForm, payment_type: e.target.value as 'Full' | 'Installment' })}
+                >
+                  <option value="Full">بالحاضر</option>
+                  <option value="Installment">بالتقسيط</option>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="reservationAmount">العربون (مبلغ الحجز) *</Label>
+                <Input
+                  id="reservationAmount"
+                  type="number"
+                  step="0.01"
+                  value={saleForm.reservation_amount}
+                  onChange={(e) => setSaleForm({ ...saleForm, reservation_amount: e.target.value })}
+                  placeholder="أدخل مبلغ العربون"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="deadlineDate">آخر أجل لإتمام الإجراءات (اختياري)</Label>
+                <Input
+                  id="deadlineDate"
+                  type="date"
+                  value={saleForm.deadline_date}
+                  onChange={(e) => setSaleForm({ ...saleForm, deadline_date: e.target.value })}
+                  placeholder="mm/dd/yyyy"
+                />
+                <p className="text-xs text-muted-foreground">
+                  تاريخ آخر أجل لإتمام إجراءات البيع. سيتم عرض تحذيرات عند اقتراب الموعد النهائي.
+                </p>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => {
+              setSaleDialogOpen(false)
+              setNewClient(null)
+              setSelectedPieces(new Set())
+            }}>
+              إلغاء
+            </Button>
+            <Button 
+              onClick={handleCreateSale}
+              disabled={creatingSale || !saleForm.reservation_amount}
+            >
+              {creatingSale ? 'جاري الإنشاء...' : 'إنشاء البيع'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

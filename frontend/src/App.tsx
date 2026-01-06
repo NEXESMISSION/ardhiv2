@@ -160,7 +160,7 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       >
-        <Route index element={<Home />} />
+        <Route index element={<Navigate to="/land" replace />} />
         <Route 
           path="land" 
           element={

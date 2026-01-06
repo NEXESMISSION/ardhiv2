@@ -24,20 +24,20 @@ import { cn } from '@/lib/utils'
 // Nav items with pageId for access control
 // pageId must match the IDs used in Users.tsx ALL_PAGES and stored in allowed_pages
 const navItems = [
-  { to: '/', icon: LayoutDashboard, label: 'Accueil', permission: null, pageId: 'home' },
-  { to: '/land', icon: Map, label: 'Gestion des terrains', permission: 'view_land', pageId: 'land' },
-  { to: '/availability', icon: MapPin, label: 'Disponibilité des terrains', permission: 'view_land', pageId: 'availability' },
-  { to: '/clients', icon: Users, label: 'Clients', permission: 'view_clients', pageId: 'clients' },
-  { to: '/sales', icon: ShoppingCart, label: 'Ventes', permission: 'view_sales', pageId: 'sales' },
-  { to: '/sale-confirmation', icon: CheckCircle2, label: 'Confirmation des ventes', permission: 'edit_sales', pageId: 'confirm-sales' },
-  { to: '/installments', icon: CreditCard, label: 'Versements', permission: 'view_installments', pageId: 'installments' },
-  { to: '/financial', icon: DollarSign, label: 'Financier', permission: 'view_financial', pageId: 'finance' },
-  { to: '/expenses', icon: Receipt, label: 'Dépenses', permission: 'view_financial', pageId: 'expenses' },
-  { to: '/debts', icon: TrendingDown, label: 'Dettes', permission: null, pageId: 'debts' },
-  { to: '/real-estate-buildings', icon: Building2, label: 'Développement et construction', permission: null, pageId: 'real-estate' },
-  { to: '/messages', icon: MessageSquare, label: 'Messages', permission: 'view_messages', pageId: 'messages' },
-  { to: '/users', icon: Settings, label: 'Utilisateurs', permission: 'manage_users', pageId: 'users' },
-  { to: '/security', icon: Shield, label: 'Sécurité', permission: 'view_audit_logs', pageId: 'security' },
+  { to: '/', icon: LayoutDashboard, label: 'الرئيسية', permission: null, pageId: 'home' },
+  { to: '/land', icon: Map, label: 'إدارة الأراضي', permission: 'view_land', pageId: 'land' },
+  { to: '/availability', icon: MapPin, label: 'توفر الأراضي', permission: 'view_land', pageId: 'availability' },
+  { to: '/clients', icon: Users, label: 'العملاء', permission: 'view_clients', pageId: 'clients' },
+  { to: '/sales', icon: ShoppingCart, label: 'المبيعات', permission: 'view_sales', pageId: 'sales' },
+  { to: '/sale-confirmation', icon: CheckCircle2, label: 'تأكيد المبيعات', permission: 'edit_sales', pageId: 'confirm-sales' },
+  { to: '/installments', icon: CreditCard, label: 'الأقساط', permission: 'view_installments', pageId: 'installments' },
+  { to: '/financial', icon: DollarSign, label: 'المالية', permission: 'view_financial', pageId: 'finance' },
+  { to: '/expenses', icon: Receipt, label: 'المصاريف', permission: 'view_financial', pageId: 'expenses' },
+  { to: '/debts', icon: TrendingDown, label: 'الديون', permission: null, pageId: 'debts' },
+  { to: '/real-estate-buildings', icon: Building2, label: 'التطوير والبناء', permission: null, pageId: 'real-estate' },
+  { to: '/messages', icon: MessageSquare, label: 'الرسائل', permission: 'view_messages', pageId: 'messages' },
+  { to: '/users', icon: Settings, label: 'المستخدمين', permission: 'manage_users', pageId: 'users' },
+  { to: '/security', icon: Shield, label: 'الأمان', permission: 'view_audit_logs', pageId: 'security' },
 ]
 
 interface SidebarProps {
@@ -68,7 +68,7 @@ export function Sidebar({ onClose }: SidebarProps) {
   return (
     <aside className="flex h-screen w-64 flex-col border-l bg-card shadow-lg md:shadow-none">
       <div className="flex h-16 items-center justify-between border-b px-4 md:px-6">
-        <h1 className="text-xl font-bold text-primary">Système de gestion des terrains</h1>
+        <h1 className="text-xl font-bold text-primary">نظام الأراضي</h1>
         {/* Desktop notification bell in sidebar header */}
         <div className="hidden md:block">
           <NotificationBell />
@@ -119,9 +119,9 @@ export function Sidebar({ onClose }: SidebarProps) {
         <div className="mb-3 px-3">
           <p className="text-sm font-medium">{profile?.name}</p>
           <p className="text-xs text-muted-foreground">
-            {String(profile?.role) === 'owner' ? 'Propriétaire' : 
-             String(profile?.role) === 'manager' ? 'Gestionnaire' : 
-             String(profile?.role) === 'field_staff' ? 'Personnel de terrain' : profile?.role}
+            {String(profile?.role) === 'owner' ? 'مالك' : 
+             String(profile?.role) === 'manager' ? 'مدير' : 
+             String(profile?.role) === 'field_staff' ? 'موظف ميداني' : profile?.role}
           </p>
         </div>
         <button
@@ -129,7 +129,7 @@ export function Sidebar({ onClose }: SidebarProps) {
           className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
         >
           <LogOut className="h-5 w-5" />
-          Déconnexion
+          تسجيل الخروج
         </button>
       </div>
     </aside>

@@ -774,10 +774,10 @@ export function SalesNew() {
       if (!client) return false
       return (
         client.id?.toLowerCase().includes(search) ||
-        client.phone?.toLowerCase().includes(search) ||
+      client.phone?.toLowerCase().includes(search) ||
         client.name?.toLowerCase().includes(search) ||
-        client.cin?.toLowerCase().includes(search)
-      )
+      client.cin?.toLowerCase().includes(search)
+    )
     })
   }, [clients, debouncedClientSearch])
 
@@ -1420,7 +1420,7 @@ export function SalesNew() {
 
       {/* Compact Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <h1 className="text-2xl sm:text-3xl font-bold">Ventes</h1>
+        <h1 className="text-2xl sm:text-3xl font-bold">المبيعات</h1>
         {hasPermission('create_sales') && (
           <Button 
             onClick={() => setNewSaleOpen(true)} 
@@ -1428,18 +1428,18 @@ export function SalesNew() {
             className="bg-green-600 hover:bg-green-700 w-full sm:w-auto"
           >
             <Plus className="h-4 w-4 ml-1" />
-            Nouvelle vente
+            بيع جديد
           </Button>
         )}
       </div>
 
       {/* Compact Stats - Inline */}
       <div className="flex flex-wrap items-center gap-2 sm:gap-4 text-xs sm:text-sm">
-        <span className="text-muted-foreground">Total: <strong className="text-blue-600">{filteredAndSortedSales.length}</strong></span>
-        <span className="text-muted-foreground">Vendu: <strong className="text-green-600">{filteredAndSortedSales.filter(s => s.status === 'Completed').length}</strong></span>
-        <span className="text-muted-foreground">Comptant: <strong className="text-blue-600">{filteredAndSortedSales.filter(s => s.paymentType === 'Full' && s.status !== 'Completed').length}</strong></span>
-        <span className="text-muted-foreground">Versements: <strong className="text-purple-600">{filteredAndSortedSales.filter(s => s.paymentType === 'Installment' && s.status !== 'Completed').length}</strong></span>
-        <span className="text-muted-foreground">Réservé: <strong className="text-orange-600">{filteredAndSortedSales.filter(s => s.status === 'Pending' && !(s as any).is_confirmed).length}</strong></span>
+        <span className="text-muted-foreground">إجمالي: <strong className="text-blue-600">{filteredAndSortedSales.length}</strong></span>
+        <span className="text-muted-foreground">مباع: <strong className="text-green-600">{filteredAndSortedSales.filter(s => s.status === 'Completed').length}</strong></span>
+        <span className="text-muted-foreground">بالحاضر: <strong className="text-blue-600">{filteredAndSortedSales.filter(s => s.paymentType === 'Full' && s.status !== 'Completed').length}</strong></span>
+        <span className="text-muted-foreground">بالتقسيط: <strong className="text-purple-600">{filteredAndSortedSales.filter(s => s.paymentType === 'Installment' && s.status !== 'Completed').length}</strong></span>
+        <span className="text-muted-foreground">محجوز: <strong className="text-orange-600">{filteredAndSortedSales.filter(s => s.status === 'Pending' && !(s as any).is_confirmed).length}</strong></span>
       </div>
 
 
@@ -1447,7 +1447,7 @@ export function SalesNew() {
       {filteredAndSortedSales.length === 0 ? (
         <Card>
           <CardContent className="py-8 text-center">
-            <p className="text-muted-foreground">Aucune vente</p>
+            <p className="text-muted-foreground">لا توجد مبيعات</p>
           </CardContent>
         </Card>
       ) : (
@@ -1490,11 +1490,11 @@ export function SalesNew() {
                           }
                           className="text-xs flex-shrink-0"
                         >
-                          {(sale.status === 'Completed' || (sale as any).status === 'Completed') ? 'Vendu' :
-                           sale.paymentType === 'Installment' && (sale as any).status !== 'Completed' ? 'Versements' :
-                           sale.paymentType === 'Full' && (sale as any).status !== 'Completed' ? 'Comptant' :
-                           sale.status === 'Pending' && !(sale as any).is_confirmed ? 'Réservé' :
-                           'Réservé'}
+                          {(sale.status === 'Completed' || (sale as any).status === 'Completed') ? 'مباع' :
+                           sale.paymentType === 'Installment' && (sale as any).status !== 'Completed' ? 'بالتقسيط' :
+                           sale.paymentType === 'Full' && (sale as any).status !== 'Completed' ? 'بالحاضر' :
+                           sale.status === 'Pending' && !(sale as any).is_confirmed ? 'محجوز' :
+                           'محجوز'}
                         </Badge>
                       </div>
                       
@@ -1663,11 +1663,11 @@ export function SalesNew() {
                           }
                           className="text-xs"
                         >
-                          {(sale.status === 'Completed' || (sale as any).status === 'Completed') ? 'Vendu' :
-                           sale.paymentType === 'Installment' && (sale as any).status !== 'Completed' ? 'Versements' :
-                           sale.paymentType === 'Full' && (sale as any).status !== 'Completed' ? 'Comptant' :
-                           sale.status === 'Pending' && !(sale as any).is_confirmed ? 'Réservé' :
-                           'Réservé'}
+                          {(sale.status === 'Completed' || (sale as any).status === 'Completed') ? 'مباع' :
+                           sale.paymentType === 'Installment' && (sale as any).status !== 'Completed' ? 'بالتقسيط' :
+                           sale.paymentType === 'Full' && (sale as any).status !== 'Completed' ? 'بالحاضر' :
+                           sale.status === 'Pending' && !(sale as any).is_confirmed ? 'محجوز' :
+                           'محجوز'}
                         </Badge>
                       </TableCell>
                       {user?.role === 'Owner' && (() => {
@@ -1760,9 +1760,9 @@ export function SalesNew() {
                 {filteredClients.map(client => {
                   if (!client || !client.id) return null
                   return (
-                    <option key={client.id} value={client.id}>
-                      {client.name} {client.phone ? `- ${client.phone}` : ''}
-                    </option>
+                  <option key={client.id} value={client.id}>
+                    {client.name} {client.phone ? `- ${client.phone}` : ''}
+                  </option>
                   )
                 })}
               </Select>
