@@ -1,29 +1,19 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Textarea } from '@/components/ui/textarea'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
   DialogFooter,
-  DialogDescription,
 } from '@/components/ui/dialog'
-import { Select } from '@/components/ui/select'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { sanitizeText } from '@/lib/sanitize'
 import {
@@ -32,136 +22,93 @@ import {
   Edit,
   Trash2,
   DollarSign,
-  Calendar,
-  TrendingUp,
   Eye,
   X,
   Save,
-  MapPin,
-  Package,
+  Box,
+  Image as ImageIcon,
+  Upload,
+  ChevronRight,
+  ChevronLeft,
 } from 'lucide-react'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
-
-type ProjectType = 'Building' | 'House' | 'Apartment'
-type ProjectStatus = 'Planning' | 'InProgress' | 'OnHold' | 'Completed' | 'Cancelled'
-type ExpenseCategory = 'Materials' | 'Labor' | 'Equipment' | 'Permits' | 'Design' | 'Utilities' | 'Insurance' | 'Other'
 
 interface Project {
   id: string
   name: string
-  project_type: ProjectType
-  status: ProjectStatus
-  location: string | null
   description: string | null
-  start_date: string | null
-  expected_completion_date: string | null
-  actual_completion_date: string | null
-  estimated_budget: number
-  total_expenses: number
-  units_count: number
-  total_area: number | null
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+interface ProjectBox {
+  id: string
+  project_id: string
+  name: string
+  description: string | null
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+interface BoxExpense {
+  id: string
+  box_id: string
+  description: string
+  amount: number
+  expense_date: string
+  image_url: string | null
   notes: string | null
   created_by: string | null
   created_at: string
   updated_at: string
 }
 
-interface ProjectExpense {
-  id: string
-  project_id: string
-  category: ExpenseCategory
-  description: string
-  amount: number
-  expense_date: string
-  supplier_name: string | null
-  invoice_number: string | null
-  payment_method: string
-  notes: string | null
-  recorded_by: string | null
-  created_at: string
-  updated_at: string
-}
-
-const projectTypeLabels: Record<ProjectType, string> = {
-  Building: 'مبنى',
-  House: 'منزل',
-  Apartment: 'شقة',
-}
-
-const projectStatusLabels: Record<ProjectStatus, string> = {
-  Planning: 'التخطيط',
-  InProgress: 'قيد التنفيذ',
-  OnHold: 'متوقف',
-  Completed: 'مكتمل',
-  Cancelled: 'ملغي',
-}
-
-const expenseCategoryLabels: Record<ExpenseCategory, string> = {
-  Materials: 'مواد',
-  Labor: 'عمالة',
-  Equipment: 'معدات',
-  Permits: 'تراخيص',
-  Design: 'تصميم',
-  Utilities: 'مرافق',
-  Insurance: 'تأمين',
-  Other: 'أخرى',
-}
-
-const statusColors: Record<ProjectStatus, 'success' | 'warning' | 'default' | 'secondary' | 'destructive'> = {
-  Planning: 'default',
-  InProgress: 'warning',
-  OnHold: 'secondary',
-  Completed: 'success',
-  Cancelled: 'destructive',
-}
-
 export function RealEstateBuildings() {
-  const { user, hasPermission } = useAuth()
-  const isOwner = hasPermission('manage_financial')
-  
+  const { user } = useAuth()
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
+  // View state: 'projects' | 'boxes' | 'expenses'
+  const [currentView, setCurrentView] = useState<'projects' | 'boxes' | 'expenses'>('projects')
+  const [selectedProject, setSelectedProject] = useState<Project | null>(null)
+  const [selectedBox, setSelectedBox] = useState<ProjectBox | null>(null)
+  const [boxes, setBoxes] = useState<ProjectBox[]>([])
+  const [expenses, setExpenses] = useState<BoxExpense[]>([])
+
   // Project dialog
   const [projectDialogOpen, setProjectDialogOpen] = useState(false)
   const [editingProject, setEditingProject] = useState<Project | null>(null)
-  const [projectForm, setProjectForm] = useState({
-    name: '',
-    project_type: 'Building' as ProjectType,
-    status: 'Planning' as ProjectStatus,
-    location: '',
-    description: '',
-    start_date: '',
-    expected_completion_date: '',
-    estimated_budget: '',
-    units_count: '',
-    total_area: '',
-    notes: '',
-  })
+  const [projectForm, setProjectForm] = useState({ name: '', description: '' })
 
-  // Details dialog
-  const [detailsDialogOpen, setDetailsDialogOpen] = useState(false)
-  const [selectedProject, setSelectedProject] = useState<Project | null>(null)
-  const [selectedProjectExpenses, setSelectedProjectExpenses] = useState<ProjectExpense[]>([])
+  // Box dialog
+  const [boxDialogOpen, setBoxDialogOpen] = useState(false)
+  const [editingBox, setEditingBox] = useState<ProjectBox | null>(null)
+  const [boxForm, setBoxForm] = useState({ name: '', description: '' })
 
   // Expense dialog
   const [expenseDialogOpen, setExpenseDialogOpen] = useState(false)
-  const [editingExpense, setEditingExpense] = useState<ProjectExpense | null>(null)
+  const [editingExpense, setEditingExpense] = useState<BoxExpense | null>(null)
   const [expenseForm, setExpenseForm] = useState({
-    category: 'Materials' as ExpenseCategory,
     description: '',
     amount: '',
     expense_date: new Date().toISOString().split('T')[0],
-    supplier_name: '',
-    invoice_number: '',
-    payment_method: 'Cash',
     notes: '',
+    image_url: '', // Direct URL input
   })
+  const [expenseImage, setExpenseImage] = useState<File | null>(null)
+  const [expenseImagePreview, setExpenseImagePreview] = useState<string | null>(null)
+  const [uploadingImage, setUploadingImage] = useState(false)
+  const [imageInputMode, setImageInputMode] = useState<'upload' | 'url'>('url') // Default to URL
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Delete confirmations
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
+  const [deleteBoxConfirmOpen, setDeleteBoxConfirmOpen] = useState(false)
   const [deleteExpenseConfirmOpen, setDeleteExpenseConfirmOpen] = useState(false)
+  const [itemToDelete, setItemToDelete] = useState<{ type: 'project' | 'box' | 'expense'; id: string } | null>(null)
 
   useEffect(() => {
     fetchProjects()
@@ -171,7 +118,7 @@ export function RealEstateBuildings() {
     try {
       setLoading(true)
       const { data, error } = await supabase
-        .from('real_estate_projects')
+        .from('projects')
         .select('*')
         .order('created_at', { ascending: false })
       
@@ -185,18 +132,35 @@ export function RealEstateBuildings() {
     }
   }
 
-  const fetchProjectExpenses = async (projectId: string) => {
+  const fetchBoxes = async (projectId: string) => {
     try {
       const { data, error } = await supabase
-        .from('project_expenses')
+        .from('project_boxes')
         .select('*')
         .eq('project_id', projectId)
+        .order('created_at', { ascending: false })
+      
+      if (error) throw error
+      setBoxes(data || [])
+    } catch (err: any) {
+      console.error('Error fetching boxes:', err)
+      setError(err.message || 'خطأ في تحميل الصناديق')
+    }
+  }
+
+  const fetchExpenses = async (boxId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('box_expenses')
+        .select('*')
+        .eq('box_id', boxId)
         .order('expense_date', { ascending: false })
       
       if (error) throw error
-      setSelectedProjectExpenses(data || [])
-    } catch (err) {
+      setExpenses(data || [])
+    } catch (err: any) {
       console.error('Error fetching expenses:', err)
+      setError(err.message || 'خطأ في تحميل المصروفات')
     }
   }
 
@@ -205,32 +169,11 @@ export function RealEstateBuildings() {
       setEditingProject(project)
       setProjectForm({
         name: project.name,
-        project_type: project.project_type,
-        status: project.status,
-        location: project.location || '',
         description: project.description || '',
-        start_date: project.start_date || '',
-        expected_completion_date: project.expected_completion_date || '',
-        estimated_budget: project.estimated_budget.toString(),
-        units_count: project.units_count.toString(),
-        total_area: project.total_area?.toString() || '',
-        notes: project.notes || '',
       })
     } else {
       setEditingProject(null)
-      setProjectForm({
-        name: '',
-        project_type: 'Building',
-        status: 'Planning',
-        location: '',
-        description: '',
-        start_date: '',
-        expected_completion_date: '',
-        estimated_budget: '',
-        units_count: '',
-        total_area: '',
-        notes: '',
-      })
+      setProjectForm({ name: '', description: '' })
     }
     setError(null)
     setProjectDialogOpen(true)
@@ -246,28 +189,19 @@ export function RealEstateBuildings() {
     try {
       const projectData: any = {
         name: sanitizeText(projectForm.name),
-        project_type: projectForm.project_type,
-        status: projectForm.status,
-        location: projectForm.location ? sanitizeText(projectForm.location) : null,
         description: projectForm.description ? sanitizeText(projectForm.description) : null,
-        start_date: projectForm.start_date || null,
-        expected_completion_date: projectForm.expected_completion_date || null,
-        estimated_budget: projectForm.estimated_budget ? parseFloat(projectForm.estimated_budget) : 0,
-        units_count: projectForm.units_count ? parseInt(projectForm.units_count) : 0,
-        total_area: projectForm.total_area ? parseFloat(projectForm.total_area) : null,
-        notes: projectForm.notes ? sanitizeText(projectForm.notes) : null,
         created_by: user?.id || null,
       }
 
       if (editingProject) {
         const { error } = await supabase
-          .from('real_estate_projects')
+          .from('projects')
           .update(projectData)
           .eq('id', editingProject.id)
         if (error) throw error
       } else {
         const { error } = await supabase
-          .from('real_estate_projects')
+          .from('projects')
           .insert([projectData])
         if (error) throw error
       }
@@ -279,126 +213,274 @@ export function RealEstateBuildings() {
     }
   }
 
-  const openDetailsDialog = async (project: Project) => {
-    setSelectedProject(project)
-    setDetailsDialogOpen(true)
-    await fetchProjectExpenses(project.id)
+  const openBoxDialog = (box?: ProjectBox) => {
+    if (box) {
+      setEditingBox(box)
+      setBoxForm({
+        name: box.name,
+        description: box.description || '',
+      })
+    } else {
+      setEditingBox(null)
+      setBoxForm({ name: '', description: '' })
+    }
+    setError(null)
+    setBoxDialogOpen(true)
   }
 
-  const openExpenseDialog = (expense?: ProjectExpense) => {
-    if (!selectedProject) return
-    
+  const saveBox = async () => {
+    if (!selectedProject || !boxForm.name.trim()) {
+      setError('اسم الصندوق مطلوب')
+      return
+    }
+
+    setError(null)
+    try {
+      const boxData: any = {
+        project_id: selectedProject.id,
+        name: sanitizeText(boxForm.name),
+        description: boxForm.description ? sanitizeText(boxForm.description) : null,
+        created_by: user?.id || null,
+      }
+
+      if (editingBox) {
+        const { error } = await supabase
+          .from('project_boxes')
+          .update(boxData)
+          .eq('id', editingBox.id)
+        if (error) throw error
+      } else {
+        const { error } = await supabase
+          .from('project_boxes')
+          .insert([boxData])
+        if (error) throw error
+      }
+
+      setBoxDialogOpen(false)
+      await fetchBoxes(selectedProject.id)
+    } catch (err: any) {
+      setError(err.message || 'خطأ في حفظ الصندوق')
+    }
+  }
+
+  const uploadImage = async (file: File): Promise<string | null> => {
+    try {
+      setUploadingImage(true)
+      const fileExt = file.name.split('.').pop()
+      const fileName = `${Math.random()}.${fileExt}`
+      const filePath = `project-expenses/${fileName}`
+
+      const { error: uploadError } = await supabase.storage
+        .from('project-expenses')
+        .upload(filePath, file)
+
+      if (uploadError) {
+        // Try to create bucket if it doesn't exist
+        console.error('Upload error:', uploadError)
+        return null
+      }
+
+      const { data } = supabase.storage
+        .from('project-expenses')
+        .getPublicUrl(filePath)
+
+      return data.publicUrl
+    } catch (err) {
+      console.error('Error uploading image:', err)
+      return null
+    } finally {
+      setUploadingImage(false)
+    }
+  }
+
+  const openExpenseDialog = (expense?: BoxExpense) => {
     if (expense) {
       setEditingExpense(expense)
       setExpenseForm({
-        category: expense.category,
         description: expense.description,
         amount: expense.amount.toString(),
         expense_date: expense.expense_date,
-        supplier_name: expense.supplier_name || '',
-        invoice_number: expense.invoice_number || '',
-        payment_method: expense.payment_method,
         notes: expense.notes || '',
+        image_url: expense.image_url || '',
       })
+      setExpenseImagePreview(expense.image_url)
+      setExpenseImage(null)
+      setImageInputMode(expense.image_url ? 'url' : 'upload')
     } else {
       setEditingExpense(null)
       setExpenseForm({
-        category: 'Materials',
         description: '',
         amount: '',
         expense_date: new Date().toISOString().split('T')[0],
-        supplier_name: '',
-        invoice_number: '',
-        payment_method: 'Cash',
         notes: '',
+        image_url: '',
       })
+      setExpenseImagePreview(null)
+      setExpenseImage(null)
+      setImageInputMode('url')
     }
     setError(null)
     setExpenseDialogOpen(true)
   }
 
-  const saveExpense = async () => {
-    if (!isOwner || !selectedProject) return
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) {
+      setExpenseImage(file)
+      const reader = new FileReader()
+      reader.onloadend = () => {
+        setExpenseImagePreview(reader.result as string)
+      }
+      reader.readAsDataURL(file)
+      setExpenseForm({ ...expenseForm, image_url: '' }) // Clear URL when file is selected
+    }
+  }
 
-    if (!expenseForm.description.trim() || !expenseForm.amount) {
+  const handleImageUrlChange = (url: string) => {
+    setExpenseForm({ ...expenseForm, image_url: url })
+    if (url.trim()) {
+      setExpenseImagePreview(url)
+      setExpenseImage(null) // Clear file when URL is entered
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ''
+      }
+    } else {
+      setExpenseImagePreview(null)
+    }
+  }
+
+  const saveExpense = async () => {
+    if (!selectedBox || !expenseForm.description.trim() || !expenseForm.amount) {
       setError('الوصف والمبلغ مطلوبان')
       return
     }
 
     setError(null)
     try {
+      let imageUrl: string | null = null
+
+      // Priority: URL input > File upload
+      if (expenseForm.image_url && expenseForm.image_url.trim()) {
+        imageUrl = expenseForm.image_url.trim()
+      } else if (expenseImage) {
+        const uploadedUrl = await uploadImage(expenseImage)
+        if (uploadedUrl) {
+          imageUrl = uploadedUrl
+        }
+      } else if (editingExpense?.image_url) {
+        // Keep existing image if no new one provided
+        imageUrl = editingExpense.image_url
+      }
+
       const expenseData: any = {
-        project_id: selectedProject.id,
-        category: expenseForm.category,
+        box_id: selectedBox.id,
         description: sanitizeText(expenseForm.description),
         amount: parseFloat(expenseForm.amount),
         expense_date: expenseForm.expense_date,
-        supplier_name: expenseForm.supplier_name ? sanitizeText(expenseForm.supplier_name) : null,
-        invoice_number: expenseForm.invoice_number ? sanitizeText(expenseForm.invoice_number) : null,
-        payment_method: expenseForm.payment_method,
+        image_url: imageUrl,
         notes: expenseForm.notes ? sanitizeText(expenseForm.notes) : null,
-        recorded_by: user?.id || null,
+        created_by: user?.id || null,
       }
 
       if (editingExpense) {
         const { error } = await supabase
-          .from('project_expenses')
+          .from('box_expenses')
           .update(expenseData)
           .eq('id', editingExpense.id)
         if (error) throw error
       } else {
         const { error } = await supabase
-          .from('project_expenses')
+          .from('box_expenses')
           .insert([expenseData])
         if (error) throw error
       }
 
       setExpenseDialogOpen(false)
-      await fetchProjectExpenses(selectedProject.id)
-      fetchProjects() // Refresh to update total_expenses
+      await fetchExpenses(selectedBox.id)
     } catch (err: any) {
       setError(err.message || 'خطأ في حفظ المصروف')
     }
   }
 
-  const deleteProject = async () => {
-    if (!isOwner || !selectedProject) return
+  const handleViewProject = async (project: Project) => {
+    setSelectedProject(project)
+    setSelectedBox(null)
+    setExpenses([])
+    await fetchBoxes(project.id)
+    setCurrentView('boxes')
+  }
+
+  const handleViewBox = async (box: ProjectBox) => {
+    setSelectedBox(box)
+    await fetchExpenses(box.id)
+    setCurrentView('expenses')
+  }
+
+  const handleBack = () => {
+    if (currentView === 'expenses') {
+      setCurrentView('boxes')
+      setSelectedBox(null)
+      setExpenses([])
+    } else if (currentView === 'boxes') {
+      setCurrentView('projects')
+      setSelectedProject(null)
+      setBoxes([])
+    }
+  }
+
+  const deleteItem = async () => {
+    if (!itemToDelete) return
+
     try {
-      const { error } = await supabase
-        .from('real_estate_projects')
-        .delete()
-        .eq('id', selectedProject.id)
-      if (error) throw error
+      if (itemToDelete.type === 'project') {
+        const { error } = await supabase
+          .from('projects')
+          .delete()
+          .eq('id', itemToDelete.id)
+        if (error) throw error
+        setCurrentView('projects')
+        setSelectedProject(null)
+        setBoxes([])
+        setExpenses([])
+      } else if (itemToDelete.type === 'box') {
+        const { error } = await supabase
+          .from('project_boxes')
+          .delete()
+          .eq('id', itemToDelete.id)
+        if (error) throw error
+        if (selectedProject) {
+          await fetchBoxes(selectedProject.id)
+        }
+      } else if (itemToDelete.type === 'expense') {
+        const { error } = await supabase
+          .from('box_expenses')
+          .delete()
+          .eq('id', itemToDelete.id)
+        if (error) throw error
+        if (selectedBox) {
+          await fetchExpenses(selectedBox.id)
+        }
+      }
+
       setDeleteConfirmOpen(false)
-      setDetailsDialogOpen(false)
+      setDeleteBoxConfirmOpen(false)
+      setDeleteExpenseConfirmOpen(false)
+      setItemToDelete(null)
       fetchProjects()
     } catch (err: any) {
-      setError(err.message || 'خطأ في حذف المشروع')
+      setError(err.message || 'خطأ في الحذف')
     }
   }
 
-  const deleteExpense = async () => {
-    if (!isOwner || !editingExpense) return
-    try {
-      const { error } = await supabase
-        .from('project_expenses')
-        .delete()
-        .eq('id', editingExpense.id)
-      if (error) throw error
-      setDeleteExpenseConfirmOpen(false)
-      setExpenseDialogOpen(false)
-      if (selectedProject) {
-        await fetchProjectExpenses(selectedProject.id)
-        fetchProjects()
-      }
-    } catch (err: any) {
-      setError(err.message || 'خطأ في حذف المصروف')
-    }
-  }
-
-  const totalBudget = projects.reduce((sum, p) => sum + p.estimated_budget, 0)
-  const totalExpenses = projects.reduce((sum, p) => sum + p.total_expenses, 0)
-  const remainingBudget = totalBudget - totalExpenses
+  const totalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0)
+  const boxTotalExpenses = boxes.reduce(async (sum, box) => {
+    const { data } = await supabase
+      .from('box_expenses')
+      .select('amount')
+      .eq('box_id', box.id)
+    const boxTotal = (data || []).reduce((s, e) => s + e.amount, 0)
+    return (await sum) + boxTotal
+  }, Promise.resolve(0))
 
   if (loading) {
     return (
@@ -409,22 +491,46 @@ export function RealEstateBuildings() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 p-4 md:p-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold flex items-center gap-3">
-            <Building2 className="h-8 w-8 text-primary" />
-            التطوير والبناء
-          </h1>
-          <p className="text-muted-foreground mt-2">
-            إدارة المشاريع العقارية وتتبع التكاليف
-          </p>
+        <div className="flex items-center gap-3">
+          {currentView !== 'projects' && (
+            <Button variant="ghost" size="sm" onClick={handleBack} className="gap-2">
+              <ChevronRight className="h-4 w-4" />
+              رجوع
+            </Button>
+          )}
+          <div>
+            <h1 className="text-2xl md:text-3xl font-bold flex items-center gap-3">
+              <Building2 className="h-6 w-6 md:h-8 md:w-8 text-primary" />
+              {currentView === 'projects' && 'التطوير والبناء'}
+              {currentView === 'boxes' && selectedProject && `صناديق: ${selectedProject.name}`}
+              {currentView === 'expenses' && selectedBox && `مصروفات: ${selectedBox.name}`}
+            </h1>
+            <p className="text-muted-foreground mt-1 text-sm">
+              {currentView === 'projects' && 'إدارة المشاريع والصناديق والمصروفات'}
+              {currentView === 'boxes' && 'إدارة الصناديق في هذا المشروع'}
+              {currentView === 'expenses' && 'تتبع المصروفات لهذا الصندوق'}
+            </p>
+          </div>
         </div>
-        {isOwner && (
+        {currentView === 'projects' && (
           <Button onClick={() => openProjectDialog()} size="lg" className="gap-2">
             <Plus className="h-5 w-5" />
             مشروع جديد
+          </Button>
+        )}
+        {currentView === 'boxes' && selectedProject && (
+          <Button onClick={() => openBoxDialog()} size="lg" className="gap-2">
+            <Plus className="h-5 w-5" />
+            صندوق جديد
+          </Button>
+        )}
+        {currentView === 'expenses' && selectedBox && (
+          <Button onClick={() => openExpenseDialog()} size="lg" className="gap-2">
+            <Plus className="h-5 w-5" />
+            مصروف جديد
           </Button>
         )}
       </div>
@@ -438,713 +544,291 @@ export function RealEstateBuildings() {
         </Card>
       )}
 
-      {/* Statistics Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">إجمالي المشاريع</CardTitle>
-            <Building2 className="h-5 w-5 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{projects.length}</div>
-            <p className="text-xs text-muted-foreground mt-1">مشروع</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">الميزانية الإجمالية</CardTitle>
-            <DollarSign className="h-5 w-5 text-green-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{formatCurrency(totalBudget)}</div>
-            <p className="text-xs text-muted-foreground mt-1">دينار تونسي</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">إجمالي المصروفات</CardTitle>
-            <TrendingUp className="h-5 w-5 text-orange-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{formatCurrency(totalExpenses)}</div>
-            <p className="text-xs text-muted-foreground mt-1">دينار تونسي</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">المتبقي</CardTitle>
-            <Calendar className="h-5 w-5 text-blue-600" />
-          </CardHeader>
-          <CardContent>
-            <div className={`text-2xl font-bold ${remainingBudget < 0 ? 'text-destructive' : 'text-primary'}`}>
-              {formatCurrency(remainingBudget)}
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">دينار تونسي</p>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Projects Table */}
-      <Card>
-        <CardHeader>
-          <CardTitle>المشاريع</CardTitle>
-          <CardDescription>قائمة بجميع المشاريع العقارية</CardDescription>
-        </CardHeader>
-        <CardContent>
+      {/* Projects View */}
+      {currentView === 'projects' && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {projects.length === 0 ? (
-            <div className="text-center py-12">
+            <div className="col-span-full text-center py-12">
               <Building2 className="h-12 w-12 text-muted-foreground mx-auto mb-4 opacity-50" />
-              <p className="text-muted-foreground">لا توجد مشاريع بعد</p>
-              {isOwner && (
-                <Button 
-                  onClick={() => openProjectDialog()} 
-                  className="mt-4 gap-2"
-                  variant="outline"
-                >
-                  <Plus className="h-4 w-4" />
-                  إضافة مشروع جديد
-                </Button>
-              )}
+              <p className="text-muted-foreground mb-4">لا توجد مشاريع بعد</p>
+              <Button onClick={() => openProjectDialog()} className="gap-2" variant="outline">
+                <Plus className="h-4 w-4" />
+                إضافة مشروع جديد
+              </Button>
             </div>
           ) : (
-            <>
-              {/* Mobile Card View */}
-              <div className="space-y-3 md:hidden">
-                {projects.map((project) => {
-                  const remaining = project.estimated_budget - project.total_expenses
-                  return (
-                    <Card key={project.id} className="hover:shadow-md transition-shadow">
+            projects.map((project) => (
+              <Card key={project.id} className="hover:shadow-md transition-shadow cursor-pointer" onClick={() => handleViewProject(project)}>
+                <CardHeader>
+                  <CardTitle className="flex items-center justify-between">
+                    <span>{project.name}</span>
+                    <ChevronLeft className="h-4 w-4 text-muted-foreground" />
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {project.description && (
+                    <p className="text-sm text-muted-foreground mb-4 line-clamp-2">{project.description}</p>
+                  )}
+                  <div className="flex items-center gap-2 pt-2 border-t">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        openProjectDialog(project)
+                      }}
+                      className="flex-1"
+                    >
+                      <Edit className="h-3 w-3 mr-1" />
+                      تعديل
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setItemToDelete({ type: 'project', id: project.id })
+                        setDeleteConfirmOpen(true)
+                      }}
+                      className="text-destructive hover:text-destructive"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ))
+          )}
+        </div>
+      )}
+
+      {/* Boxes View */}
+      {currentView === 'boxes' && selectedProject && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {boxes.length === 0 ? (
+            <div className="col-span-full text-center py-12">
+              <Box className="h-12 w-12 text-muted-foreground mx-auto mb-4 opacity-50" />
+              <p className="text-muted-foreground mb-4">لا توجد صناديق بعد</p>
+              <Button onClick={() => openBoxDialog()} className="gap-2" variant="outline">
+                <Plus className="h-4 w-4" />
+                إضافة صندوق جديد
+              </Button>
+            </div>
+          ) : (
+            boxes.map((box) => (
+              <Card key={box.id} className="hover:shadow-md transition-shadow cursor-pointer" onClick={() => handleViewBox(box)}>
+                <CardHeader>
+                  <CardTitle className="flex items-center justify-between">
+                    <span>{box.name}</span>
+                    <ChevronLeft className="h-4 w-4 text-muted-foreground" />
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {box.description && (
+                    <p className="text-sm text-muted-foreground mb-4 line-clamp-2">{box.description}</p>
+                  )}
+                  <div className="flex items-center gap-2 pt-2 border-t">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        openBoxDialog(box)
+                      }}
+                      className="flex-1"
+                    >
+                      <Edit className="h-3 w-3 mr-1" />
+                      تعديل
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setItemToDelete({ type: 'box', id: box.id })
+                        setDeleteBoxConfirmOpen(true)
+                      }}
+                      className="text-destructive hover:text-destructive"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ))
+          )}
+        </div>
+      )}
+
+      {/* Expenses View */}
+      {currentView === 'expenses' && selectedBox && (
+        <div className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center justify-between">
+                <span>المصروفات</span>
+                <Badge variant="outline" className="text-lg">
+                  {formatCurrency(totalExpenses)}
+                </Badge>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {expenses.length === 0 ? (
+                <div className="text-center py-12">
+                  <DollarSign className="h-12 w-12 text-muted-foreground mx-auto mb-4 opacity-50" />
+                  <p className="text-muted-foreground mb-4">لا توجد مصروفات بعد</p>
+                  <Button onClick={() => openExpenseDialog()} className="gap-2" variant="outline">
+                    <Plus className="h-4 w-4" />
+                    إضافة مصروف جديد
+                  </Button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {expenses.map((expense) => (
+                    <Card key={expense.id} className="hover:shadow-md transition-shadow">
                       <CardContent className="p-4">
                         <div className="space-y-3">
                           <div className="flex items-start justify-between">
-                            <div className="flex-1 min-w-0">
-                              <div className="font-semibold text-sm">{project.name}</div>
-                              <div className="flex items-center gap-2 mt-1">
-                                <Badge variant="outline" className="text-xs">
-                                  {projectTypeLabels[project.project_type]}
-                                </Badge>
-                                <Badge className={`text-xs ${statusColors[project.status]}`}>
-                                  {projectStatusLabels[project.status]}
-                                </Badge>
+                            <div className="flex-1">
+                              <div className="font-bold text-lg text-primary">
+                                {formatCurrency(expense.amount)}
+                              </div>
+                              <div className="text-xs text-muted-foreground mt-1">
+                                {formatDate(expense.expense_date)}
                               </div>
                             </div>
-                          </div>
-                          
-                          {project.location && (
-                            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                              <MapPin className="h-3 w-3" />
-                              <span>{project.location}</span>
-                            </div>
-                          )}
-                          
-                          <div className="grid grid-cols-2 gap-2 text-xs">
-                            <div>
-                              <span className="text-muted-foreground">الميزانية:</span>
-                              <div className="font-medium">{formatCurrency(project.estimated_budget)}</div>
-                            </div>
-                            <div>
-                              <span className="text-muted-foreground">المصروفات:</span>
-                              <div className="font-medium text-orange-600">{formatCurrency(project.total_expenses)}</div>
-                            </div>
-                            <div className="col-span-2">
-                              <span className="text-muted-foreground">المتبقي:</span>
-                              <div className={`font-medium ${remaining < 0 ? 'text-red-600' : 'text-green-600'}`}>
-                                {formatCurrency(remaining)}
-                              </div>
-                            </div>
-                          </div>
-                          
-                          <div className="flex items-center gap-2 pt-2 border-t">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="flex-1 text-xs h-8"
-                              onClick={() => openDetailsDialog(project)}
-                            >
-                              <Eye className="h-3 w-3 mr-1" />
-                              عرض
-                            </Button>
-                            {isOwner && (
-                              <>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="flex-1 text-xs h-8"
-                                  onClick={() => openProjectDialog(project)}
-                                >
-                                  <Edit className="h-3 w-3 mr-1" />
-                                  تعديل
-                                </Button>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="text-xs h-8"
-                                  onClick={() => {
-                                    setSelectedProject(project)
-                                    setDeleteConfirmOpen(true)
-                                  }}
-                                >
-                                  <Trash2 className="h-3 w-3" />
-                                </Button>
-                              </>
-                            )}
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  )
-                })}
-              </div>
-
-              {/* Desktop Table View */}
-              <div className="hidden md:block overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>اسم المشروع</TableHead>
-                      <TableHead>النوع</TableHead>
-                      <TableHead>الحالة</TableHead>
-                      <TableHead>الموقع</TableHead>
-                      <TableHead>الميزانية</TableHead>
-                      <TableHead>المصروفات</TableHead>
-                      <TableHead>المتبقي</TableHead>
-                      <TableHead className="text-left">الإجراءات</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {projects.map((project) => {
-                      const remaining = project.estimated_budget - project.total_expenses
-                      return (
-                        <TableRow key={project.id} className="hover:bg-muted/50">
-                          <TableCell className="font-medium">{project.name}</TableCell>
-                          <TableCell>
-                            <Badge variant="outline">{projectTypeLabels[project.project_type]}</Badge>
-                          </TableCell>
-                          <TableCell>
-                            <Badge className={statusColors[project.status]}>
-                              {projectStatusLabels[project.status]}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex items-center gap-1 text-muted-foreground">
-                              <MapPin className="h-3 w-3" />
-                              <span>{project.location || '-'}</span>
-                            </div>
-                          </TableCell>
-                          <TableCell className="font-medium">{formatCurrency(project.estimated_budget)}</TableCell>
-                          <TableCell className="text-orange-600 font-medium">{formatCurrency(project.total_expenses)}</TableCell>
-                          <TableCell className={`font-medium ${remaining < 0 ? 'text-destructive' : 'text-primary'}`}>
-                            {formatCurrency(remaining)}
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex items-center gap-2">
+                            <div className="flex gap-1">
                               <Button
                                 variant="ghost"
                                 size="sm"
-                                onClick={() => openDetailsDialog(project)}
-                                className="gap-1"
+                                onClick={() => openExpenseDialog(expense)}
+                                className="h-8 w-8 p-0"
                               >
-                                <Eye className="h-4 w-4" />
-                                <span className="hidden sm:inline">عرض</span>
+                                <Edit className="h-3 w-3" />
                               </Button>
-                              {isOwner && (
-                                <>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => openProjectDialog(project)}
-                                    className="gap-1"
-                                  >
-                                    <Edit className="h-4 w-4" />
-                                    <span className="hidden sm:inline">تعديل</span>
-                                  </Button>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => {
-                                      setSelectedProject(project)
-                                      setDeleteConfirmOpen(true)
-                                    }}
-                                    className="gap-1 text-destructive hover:text-destructive"
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                    <span className="hidden sm:inline">حذف</span>
-                                  </Button>
-                                </>
-                              )}
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => {
+                                  setItemToDelete({ type: 'expense', id: expense.id })
+                                  setDeleteExpenseConfirmOpen(true)
+                                }}
+                                className="h-8 w-8 p-0 text-destructive hover:text-destructive"
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </Button>
                             </div>
-                          </TableCell>
-                        </TableRow>
-                      )
-                    })}
-                  </TableBody>
-                </Table>
-              </div>
-            </>
-          )}
-        </CardContent>
-      </Card>
+                          </div>
+                          
+                          <div>
+                            <p className="text-sm font-medium">{expense.description}</p>
+                            {expense.notes && (
+                              <p className="text-xs text-muted-foreground mt-1">{expense.notes}</p>
+                            )}
+                          </div>
+
+                          {expense.image_url && (
+                            <div className="mt-2">
+                              <img
+                                src={expense.image_url}
+                                alt="Expense proof"
+                                className="w-full h-32 object-cover rounded-md cursor-pointer hover:opacity-80 transition-opacity"
+                                onClick={() => window.open(expense.image_url!, '_blank')}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {/* Project Dialog */}
       <Dialog open={projectDialogOpen} onOpenChange={setProjectDialogOpen}>
-        <DialogContent className="w-[95vw] sm:w-full max-w-3xl max-h-[95vh] overflow-y-auto">
+        <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>{editingProject ? 'تعديل المشروع' : 'مشروع جديد'}</DialogTitle>
-            <DialogDescription className="text-xs sm:text-sm">
-              {editingProject ? 'قم بتعديل بيانات المشروع' : 'أضف مشروعاً عقارياً جديداً'}
-            </DialogDescription>
           </DialogHeader>
-          <div className="space-y-3 sm:space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
-              <div className="space-y-1.5 sm:space-y-2">
-                <Label className="text-xs sm:text-sm">اسم المشروع *</Label>
-                <Input
-                  value={projectForm.name}
-                  onChange={(e) => setProjectForm({ ...projectForm, name: e.target.value })}
-                  placeholder="أدخل اسم المشروع"
-                />
-              </div>
-              <div className="space-y-1.5 sm:space-y-2">
-                <Label className="text-xs sm:text-sm">النوع *</Label>
-                <Select
-                  value={projectForm.project_type}
-                  onChange={(e) => setProjectForm({ ...projectForm, project_type: e.target.value as ProjectType })}
-                  className="text-xs sm:text-sm"
-                >
-                  <option value="Building">مبنى</option>
-                  <option value="House">منزل</option>
-                  <option value="Apartment">شقة</option>
-                </Select>
-              </div>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>اسم المشروع *</Label>
+              <Input
+                value={projectForm.name}
+                onChange={(e) => setProjectForm({ ...projectForm, name: e.target.value })}
+                placeholder="أدخل اسم المشروع"
+              />
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
-              <div className="space-y-1.5 sm:space-y-2">
-                <Label className="text-xs sm:text-sm">الحالة</Label>
-                <Select
-                  value={projectForm.status}
-                  onChange={(e) => setProjectForm({ ...projectForm, status: e.target.value as ProjectStatus })}
-                  className="text-xs sm:text-sm"
-                >
-                  <option value="Planning">التخطيط</option>
-                  <option value="InProgress">قيد التنفيذ</option>
-                  <option value="OnHold">متوقف</option>
-                  <option value="Completed">مكتمل</option>
-                  <option value="Cancelled">ملغي</option>
-                </Select>
-              </div>
-              <div className="space-y-1.5 sm:space-y-2">
-                <Label className="text-xs sm:text-sm">الموقع</Label>
-                <Input
-                  value={projectForm.location}
-                  onChange={(e) => setProjectForm({ ...projectForm, location: e.target.value })}
-                  placeholder="أدخل الموقع"
-                  className="text-xs sm:text-sm"
-                />
-              </div>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4">
-              <div className="space-y-1.5 sm:space-y-2">
-                <Label className="text-xs sm:text-sm">تاريخ البدء</Label>
-                <Input
-                  type="date"
-                  value={projectForm.start_date}
-                  onChange={(e) => setProjectForm({ ...projectForm, start_date: e.target.value })}
-                  className="text-xs sm:text-sm"
-                />
-              </div>
-              <div className="space-y-1.5 sm:space-y-2">
-                <Label className="text-xs sm:text-sm">تاريخ الانتهاء المتوقع</Label>
-                <Input
-                  type="date"
-                  value={projectForm.expected_completion_date}
-                  onChange={(e) => setProjectForm({ ...projectForm, expected_completion_date: e.target.value })}
-                  className="text-xs sm:text-sm"
-                />
-              </div>
-              <div className="space-y-1.5 sm:space-y-2">
-                <Label className="text-xs sm:text-sm">الميزانية (DT) *</Label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  value={projectForm.estimated_budget}
-                  onChange={(e) => setProjectForm({ ...projectForm, estimated_budget: e.target.value })}
-                  placeholder="0.00"
-                  className="text-xs sm:text-sm"
-                />
-              </div>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
-              <div className="space-y-1.5 sm:space-y-2">
-                <Label className="text-xs sm:text-sm">عدد الوحدات</Label>
-                <Input
-                  type="number"
-                  value={projectForm.units_count}
-                  onChange={(e) => setProjectForm({ ...projectForm, units_count: e.target.value })}
-                  placeholder="0"
-                  className="text-xs sm:text-sm"
-                />
-              </div>
-              <div className="space-y-1.5 sm:space-y-2">
-                <Label className="text-xs sm:text-sm">المساحة الإجمالية (م²)</Label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  value={projectForm.total_area}
-                  onChange={(e) => setProjectForm({ ...projectForm, total_area: e.target.value })}
-                  placeholder="0.00"
-                  className="text-xs sm:text-sm"
-                />
-              </div>
-            </div>
-            <div className="space-y-1.5 sm:space-y-2">
-              <Label className="text-xs sm:text-sm">الوصف</Label>
+            <div className="space-y-2">
+              <Label>الوصف</Label>
               <Textarea
                 value={projectForm.description}
                 onChange={(e) => setProjectForm({ ...projectForm, description: e.target.value })}
                 rows={3}
                 placeholder="أدخل وصف المشروع"
-                className="text-xs sm:text-sm min-h-[80px] sm:min-h-[100px]"
-              />
-            </div>
-            <div className="space-y-1.5 sm:space-y-2">
-              <Label className="text-xs sm:text-sm">ملاحظات</Label>
-              <Textarea
-                value={projectForm.notes}
-                onChange={(e) => setProjectForm({ ...projectForm, notes: e.target.value })}
-                rows={2}
-                placeholder="أدخل ملاحظات إضافية"
-                className="text-xs sm:text-sm min-h-[60px] sm:min-h-[80px]"
               />
             </div>
           </div>
-          <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => setProjectDialogOpen(false)} className="w-full sm:w-auto">
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setProjectDialogOpen(false)}>
               إلغاء
             </Button>
-            <Button onClick={saveProject} className="gap-2 w-full sm:w-auto">
-              <Save className="h-3 w-3 sm:h-4 sm:w-4" />
+            <Button onClick={saveProject} className="gap-2">
+              <Save className="h-4 w-4" />
               حفظ
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Project Details Dialog */}
-      <Dialog open={detailsDialogOpen} onOpenChange={setDetailsDialogOpen}>
-        <DialogContent className="w-[95vw] sm:w-full max-w-5xl max-h-[95vh] overflow-y-auto">
+      {/* Box Dialog */}
+      <Dialog open={boxDialogOpen} onOpenChange={setBoxDialogOpen}>
+        <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Package className="h-5 w-5 text-primary" />
-              <span>تفاصيل المشروع</span>
-            </DialogTitle>
+            <DialogTitle>{editingBox ? 'تعديل الصندوق' : 'صندوق جديد'}</DialogTitle>
           </DialogHeader>
-          {selectedProject && (() => {
-            const remaining = selectedProject.estimated_budget - selectedProject.total_expenses
-            const budgetPercentage = selectedProject.estimated_budget > 0 
-              ? (selectedProject.total_expenses / selectedProject.estimated_budget) * 100 
-              : 0
-            return (
-            <div className="space-y-4 sm:space-y-6">
-              {/* Project Header with Key Info */}
-              <div className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/20 dark:to-indigo-950/20 p-4 sm:p-6 rounded-lg border border-blue-200 dark:border-blue-800">
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4">
-                  <div>
-                    <h3 className="text-lg sm:text-xl font-bold mb-2">{selectedProject.name}</h3>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge className={`text-xs sm:text-sm ${statusColors[selectedProject.status]}`}>
-                        {projectStatusLabels[selectedProject.status]}
-                      </Badge>
-                      <Badge variant="outline" className="text-xs sm:text-sm">
-                        {projectTypeLabels[selectedProject.project_type]}
-                      </Badge>
-                    </div>
-                  </div>
-                  {selectedProject.location && (
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <MapPin className="h-4 w-4" />
-                      <span>{selectedProject.location}</span>
-                    </div>
-                  )}
-                </div>
-                
-                {/* Financial Summary */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-4 border-t border-blue-200 dark:border-blue-800">
-                  <div className="bg-white dark:bg-gray-900 p-3 rounded-lg">
-                    <p className="text-xs text-muted-foreground mb-1">الميزانية</p>
-                    <p className="text-lg sm:text-xl font-bold text-blue-600">{formatCurrency(selectedProject.estimated_budget)}</p>
-                  </div>
-                  <div className="bg-white dark:bg-gray-900 p-3 rounded-lg">
-                    <p className="text-xs text-muted-foreground mb-1">المصروفات</p>
-                    <p className="text-lg sm:text-xl font-bold text-orange-600">{formatCurrency(selectedProject.total_expenses)}</p>
-                  </div>
-                  <div className={`bg-white dark:bg-gray-900 p-3 rounded-lg ${remaining < 0 ? 'border-2 border-red-300' : ''}`}>
-                    <p className="text-xs text-muted-foreground mb-1">المتبقي</p>
-                    <p className={`text-lg sm:text-xl font-bold ${remaining < 0 ? 'text-red-600' : 'text-green-600'}`}>
-                      {formatCurrency(remaining)}
-                    </p>
-                  </div>
-                </div>
-                
-                {/* Budget Progress Bar */}
-                <div className="mt-4">
-                  <div className="flex items-center justify-between text-xs mb-2">
-                    <span className="text-muted-foreground">نسبة الاستهلاك</span>
-                    <span className="font-semibold">{Math.round(budgetPercentage)}%</span>
-                  </div>
-                  <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5">
-                    <div 
-                      className={`h-2.5 rounded-full transition-all ${
-                        budgetPercentage > 100 ? 'bg-red-500' :
-                        budgetPercentage > 80 ? 'bg-orange-500' :
-                        'bg-green-500'
-                      }`}
-                      style={{ width: `${Math.min(budgetPercentage, 100)}%` }}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Project Details */}
-              <Card>
-                <CardHeader className="p-4 sm:p-6">
-                  <CardTitle className="text-base sm:text-lg">معلومات المشروع</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4 p-4 sm:p-6 pt-0">
-                  {selectedProject.description && (
-                    <div className="space-y-2">
-                      <p className="text-xs sm:text-sm font-medium text-muted-foreground">الوصف</p>
-                      <p className="text-sm sm:text-base leading-relaxed">{selectedProject.description}</p>
-                    </div>
-                  )}
-                  {selectedProject.start_date && (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <p className="text-xs sm:text-sm font-medium text-muted-foreground">تاريخ البدء</p>
-                        <p className="text-sm sm:text-base font-medium">{formatDate(selectedProject.start_date)}</p>
-                      </div>
-                      {selectedProject.expected_completion_date && (
-                        <div className="space-y-2">
-                          <p className="text-xs sm:text-sm font-medium text-muted-foreground">تاريخ الانتهاء المتوقع</p>
-                          <p className="text-sm sm:text-base font-medium">{formatDate(selectedProject.expected_completion_date)}</p>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  {(selectedProject.units_count || selectedProject.total_area) && (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t">
-                      {selectedProject.units_count && (
-                        <div className="space-y-2">
-                          <p className="text-xs sm:text-sm font-medium text-muted-foreground">عدد الوحدات</p>
-                          <p className="text-sm sm:text-base font-medium">{selectedProject.units_count}</p>
-                        </div>
-                      )}
-                      {selectedProject.total_area && (
-                        <div className="space-y-2">
-                          <p className="text-xs sm:text-sm font-medium text-muted-foreground">المساحة الإجمالية</p>
-                          <p className="text-sm sm:text-base font-medium">{selectedProject.total_area} م²</p>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-
-              {/* Expenses Section */}
-              <Card>
-                <CardHeader className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-4 sm:p-6">
-                  <div>
-                    <CardTitle className="text-base sm:text-lg flex items-center gap-2">
-                      <TrendingUp className="h-4 w-4 sm:h-5 sm:w-5 text-orange-600" />
-                      المصروفات
-                    </CardTitle>
-                    <CardDescription className="text-xs sm:text-sm mt-1">
-                      إجمالي: {formatCurrency(selectedProject.total_expenses)} • {selectedProjectExpenses.length} مصروف
-                    </CardDescription>
-                  </div>
-                  {isOwner && (
-                    <Button onClick={() => openExpenseDialog()} className="gap-2 w-full sm:w-auto text-xs sm:text-sm">
-                      <Plus className="h-3 w-3 sm:h-4 sm:w-4" />
-                      إضافة مصروف
-                    </Button>
-                  )}
-                </CardHeader>
-                <CardContent className="p-4 sm:p-6 pt-0">
-                  {selectedProjectExpenses.length === 0 ? (
-                    <div className="text-center py-8 sm:py-12">
-                      <TrendingUp className="h-10 w-10 sm:h-12 sm:w-12 text-muted-foreground mx-auto mb-4 opacity-50" />
-                      <p className="text-sm sm:text-base text-muted-foreground mb-4">لا توجد مصروفات</p>
-                      {isOwner && (
-                        <Button onClick={() => openExpenseDialog()} variant="outline" className="gap-2">
-                          <Plus className="h-4 w-4" />
-                          إضافة أول مصروف
-                        </Button>
-                      )}
-                    </div>
-                  ) : (
-                    <>
-                      {/* Mobile Card View */}
-                      <div className="space-y-3 md:hidden">
-                        {selectedProjectExpenses.map((expense) => (
-                          <Card key={expense.id} className="hover:shadow-md transition-shadow">
-                            <CardContent className="p-3">
-                              <div className="space-y-2">
-                                <div className="flex items-start justify-between">
-                                  <div className="flex-1 min-w-0">
-                                    <div className="font-semibold text-base text-orange-600">
-                                      {formatCurrency(expense.amount)}
-                                    </div>
-                                    <div className="text-xs text-muted-foreground mt-1">
-                                      {formatDate(expense.expense_date)}
-                                    </div>
-                                  </div>
-                                  <Badge variant="outline" className="text-xs flex-shrink-0">
-                                    {expenseCategoryLabels[expense.category]}
-                                  </Badge>
-                                </div>
-                                
-                                {expense.description && (
-                                  <div>
-                                    <p className="text-xs text-muted-foreground mb-0.5">الوصف:</p>
-                                    <p className="text-sm font-medium">{expense.description}</p>
-                                  </div>
-                                )}
-                                
-                                {expense.supplier_name && (
-                                  <div className="flex items-center gap-1.5 text-xs">
-                                    <span className="text-muted-foreground">المورد:</span>
-                                    <span className="font-medium">{expense.supplier_name}</span>
-                                  </div>
-                                )}
-                                
-                                {isOwner && (
-                                  <div className="flex items-center gap-2 pt-2 border-t">
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      className="flex-1 text-xs h-8"
-                                      onClick={() => openExpenseDialog(expense)}
-                                    >
-                                      <Edit className="h-3 w-3 mr-1" />
-                                      تعديل
-                                    </Button>
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      className="text-xs h-8"
-                                      onClick={() => {
-                                        setEditingExpense(expense)
-                                        setDeleteExpenseConfirmOpen(true)
-                                      }}
-                                    >
-                                      <Trash2 className="h-3 w-3" />
-                                    </Button>
-                                  </div>
-                                )}
-                              </div>
-                            </CardContent>
-                          </Card>
-                        ))}
-                      </div>
-
-                      {/* Desktop Table View */}
-                      <div className="hidden md:block overflow-x-auto">
-                        <Table>
-                          <TableHeader>
-                            <TableRow>
-                              <TableHead>التاريخ</TableHead>
-                              <TableHead>الفئة</TableHead>
-                              <TableHead>الوصف</TableHead>
-                              <TableHead>المبلغ</TableHead>
-                              <TableHead>المورد</TableHead>
-                              {isOwner && <TableHead className="text-left">الإجراءات</TableHead>}
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {selectedProjectExpenses.map((expense) => (
-                              <TableRow key={expense.id} className="hover:bg-muted/50">
-                                <TableCell>{formatDate(expense.expense_date)}</TableCell>
-                                <TableCell>
-                                  <Badge variant="outline">{expenseCategoryLabels[expense.category]}</Badge>
-                                </TableCell>
-                                <TableCell className="max-w-xs truncate">{expense.description}</TableCell>
-                                <TableCell className="font-medium">{formatCurrency(expense.amount)}</TableCell>
-                                <TableCell>{expense.supplier_name || '-'}</TableCell>
-                                {isOwner && (
-                                  <TableCell>
-                                    <div className="flex items-center gap-2">
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={() => openExpenseDialog(expense)}
-                                        className="gap-1"
-                                      >
-                                        <Edit className="h-4 w-4" />
-                                        <span className="hidden sm:inline">تعديل</span>
-                                      </Button>
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={() => {
-                                          setEditingExpense(expense)
-                                          setDeleteExpenseConfirmOpen(true)
-                                        }}
-                                        className="gap-1 text-destructive hover:text-destructive"
-                                      >
-                                        <Trash2 className="h-4 w-4" />
-                                        <span className="hidden sm:inline">حذف</span>
-                                      </Button>
-                                    </div>
-                                  </TableCell>
-                                )}
-                              </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
-                      </div>
-                    </>
-                  )}
-                </CardContent>
-              </Card>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>اسم الصندوق *</Label>
+              <Input
+                value={boxForm.name}
+                onChange={(e) => setBoxForm({ ...boxForm, name: e.target.value })}
+                placeholder="مثال: شركة البناء، محمد العامل، إلخ..."
+              />
             </div>
-            )
-          })()}
+            <div className="space-y-2">
+              <Label>الوصف</Label>
+              <Textarea
+                value={boxForm.description}
+                onChange={(e) => setBoxForm({ ...boxForm, description: e.target.value })}
+                rows={3}
+                placeholder="أدخل وصف الصندوق (اختياري)"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBoxDialogOpen(false)}>
+              إلغاء
+            </Button>
+            <Button onClick={saveBox} className="gap-2">
+              <Save className="h-4 w-4" />
+              حفظ
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* Expense Dialog */}
       <Dialog open={expenseDialogOpen} onOpenChange={setExpenseDialogOpen}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-2xl max-h-[95vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editingExpense ? 'تعديل المصروف' : 'مصروف جديد'}</DialogTitle>
-            <DialogDescription>
-              {editingExpense ? 'قم بتعديل بيانات المصروف' : 'أضف مصروفاً جديداً للمشروع'}
-            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>الفئة *</Label>
-                <Select
-                  value={expenseForm.category}
-                  onChange={(e) => setExpenseForm({ ...expenseForm, category: e.target.value as ExpenseCategory })}
-                >
-                  {Object.entries(expenseCategoryLabels).map(([value, label]) => (
-                    <option key={value} value={value}>{label}</option>
-                  ))}
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>التاريخ *</Label>
-                <Input
-                  type="date"
-                  value={expenseForm.expense_date}
-                  onChange={(e) => setExpenseForm({ ...expenseForm, expense_date: e.target.value })}
-                />
-              </div>
-            </div>
             <div className="space-y-2">
               <Label>الوصف *</Label>
               <Input
@@ -1153,7 +837,7 @@ export function RealEstateBuildings() {
                 placeholder="أدخل وصف المصروف"
               />
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>المبلغ (DT) *</Label>
                 <Input
@@ -1165,33 +849,11 @@ export function RealEstateBuildings() {
                 />
               </div>
               <div className="space-y-2">
-                <Label>طريقة الدفع</Label>
-                <Select
-                  value={expenseForm.payment_method}
-                  onChange={(e) => setExpenseForm({ ...expenseForm, payment_method: e.target.value })}
-                >
-                  <option value="Cash">نقد</option>
-                  <option value="Check">شيك</option>
-                  <option value="Bank Transfer">تحويل بنكي</option>
-                  <option value="Other">أخرى</option>
-                </Select>
-              </div>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>اسم المورد</Label>
+                <Label>التاريخ *</Label>
                 <Input
-                  value={expenseForm.supplier_name}
-                  onChange={(e) => setExpenseForm({ ...expenseForm, supplier_name: e.target.value })}
-                  placeholder="أدخل اسم المورد"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>رقم الفاتورة</Label>
-                <Input
-                  value={expenseForm.invoice_number}
-                  onChange={(e) => setExpenseForm({ ...expenseForm, invoice_number: e.target.value })}
-                  placeholder="أدخل رقم الفاتورة"
+                  type="date"
+                  value={expenseForm.expense_date}
+                  onChange={(e) => setExpenseForm({ ...expenseForm, expense_date: e.target.value })}
                 />
               </div>
             </div>
@@ -1204,27 +866,109 @@ export function RealEstateBuildings() {
                 placeholder="أدخل ملاحظات إضافية"
               />
             </div>
+            <div className="space-y-2">
+              <Label>صورة الدليل (اختياري)</Label>
+              <div className="space-y-2">
+                {/* Toggle between URL and Upload */}
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant={imageInputMode === 'url' ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => {
+                      setImageInputMode('url')
+                      setExpenseImage(null)
+                      if (fileInputRef.current) {
+                        fileInputRef.current.value = ''
+                      }
+                    }}
+                    className="flex-1"
+                  >
+                    رابط URL
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={imageInputMode === 'upload' ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => {
+                      setImageInputMode('upload')
+                      setExpenseForm({ ...expenseForm, image_url: '' })
+                    }}
+                    className="flex-1"
+                  >
+                    رفع ملف
+                  </Button>
+                </div>
+
+                {/* URL Input Mode */}
+                {imageInputMode === 'url' && (
+                  <Input
+                    type="url"
+                    value={expenseForm.image_url}
+                    onChange={(e) => handleImageUrlChange(e.target.value)}
+                    placeholder="أدخل رابط الصورة (URL)"
+                  />
+                )}
+
+                {/* File Upload Mode */}
+                {imageInputMode === 'upload' && (
+                  <>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={handleImageSelect}
+                      className="hidden"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="w-full gap-2"
+                      disabled={uploadingImage}
+                    >
+                      <Upload className="h-4 w-4" />
+                      {expenseImage ? 'تغيير الصورة' : 'اختر صورة'}
+                    </Button>
+                  </>
+                )}
+
+                {/* Image Preview */}
+                {expenseImagePreview && (
+                  <div className="relative">
+                    <img
+                      src={expenseImagePreview}
+                      alt="Preview"
+                      className="w-full h-48 object-cover rounded-md"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setExpenseImage(null)
+                        setExpenseForm({ ...expenseForm, image_url: '' })
+                        setExpenseImagePreview(null)
+                        if (fileInputRef.current) {
+                          fileInputRef.current.value = ''
+                        }
+                      }}
+                      className="absolute top-2 right-2"
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
           <DialogFooter>
-            {editingExpense && (
-              <Button
-                variant="destructive"
-                onClick={() => {
-                  setExpenseDialogOpen(false)
-                  setDeleteExpenseConfirmOpen(true)
-                }}
-                className="gap-2"
-              >
-                <Trash2 className="h-4 w-4" />
-                حذف
-              </Button>
-            )}
             <Button variant="outline" onClick={() => setExpenseDialogOpen(false)}>
               إلغاء
             </Button>
-            <Button onClick={saveExpense} className="gap-2">
+            <Button onClick={saveExpense} className="gap-2" disabled={uploadingImage}>
               <Save className="h-4 w-4" />
-              حفظ
+              {uploadingImage ? 'جاري الحفظ...' : 'حفظ'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1234,14 +978,21 @@ export function RealEstateBuildings() {
       <ConfirmDialog
         open={deleteConfirmOpen}
         onOpenChange={setDeleteConfirmOpen}
-        onConfirm={deleteProject}
+        onConfirm={deleteItem}
         title="حذف المشروع"
-        description={`هل أنت متأكد من حذف المشروع "${selectedProject?.name}"؟ سيتم حذف جميع المصروفات المرتبطة به أيضاً.`}
+        description="هل أنت متأكد من حذف هذا المشروع؟ سيتم حذف جميع الصناديق والمصروفات المرتبطة به."
+      />
+      <ConfirmDialog
+        open={deleteBoxConfirmOpen}
+        onOpenChange={setDeleteBoxConfirmOpen}
+        onConfirm={deleteItem}
+        title="حذف الصندوق"
+        description="هل أنت متأكد من حذف هذا الصندوق؟ سيتم حذف جميع المصروفات المرتبطة به."
       />
       <ConfirmDialog
         open={deleteExpenseConfirmOpen}
         onOpenChange={setDeleteExpenseConfirmOpen}
-        onConfirm={deleteExpense}
+        onConfirm={deleteItem}
         title="حذف المصروف"
         description="هل أنت متأكد من حذف هذا المصروف؟"
       />

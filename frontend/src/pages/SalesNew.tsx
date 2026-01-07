@@ -1107,7 +1107,7 @@ export function SalesNew() {
       <div className="flex flex-wrap items-center gap-2">
         <Label className="text-sm font-medium">الفترة الزمنية:</Label>
         <div className="flex gap-2 flex-wrap">
-          <Button
+          <Button 
             variant={timePeriodFilter === 'all' && !selectedDate ? 'default' : 'outline'}
             size="sm"
             onClick={() => {
@@ -1171,8 +1171,8 @@ export function SalesNew() {
                 className="h-6 w-6 p-0"
               >
                 <X className="h-3 w-3" />
-              </Button>
-            )}
+          </Button>
+        )}
           </div>
         </div>
       </div>
@@ -1236,18 +1236,18 @@ export function SalesNew() {
                               }
                             })()}
                           </div>
-                          <div className="flex-1 min-w-0">
-                            <button 
-                              onClick={() => {
-                                const client = clients.find(c => c.id === sale.clientId)
-                                if (client) openClientDetails(client)
-                              }}
-                              className="font-semibold text-sm text-primary hover:underline"
-                            >
-                              {sale.clientName}
-                            </button>
-                            <div className="text-xs text-muted-foreground mt-1">
-                              {sale.batchName} - {sale.pieceName} • {sale.surfaceArea} م²
+                        <div className="flex-1 min-w-0">
+                          <button 
+                            onClick={() => {
+                              const client = clients.find(c => c.id === sale.clientId)
+                              if (client) openClientDetails(client)
+                            }}
+                            className="font-semibold text-sm text-primary hover:underline"
+                          >
+                            {sale.clientName}
+                          </button>
+                          <div className="text-xs text-muted-foreground mt-1">
+                            {sale.batchName} - {sale.pieceName} • {sale.surfaceArea} م²
                             </div>
                           </div>
                         </div>
@@ -1397,15 +1397,15 @@ export function SalesNew() {
                               return <div className="w-3 h-3 rounded-full bg-red-500 flex-shrink-0" title="في انتظار التأكيد" />
                             }
                           })()}
-                          <button 
-                            onClick={() => {
-                              const client = clients.find(c => c.id === sale.clientId)
-                              if (client) openClientDetails(client)
-                            }}
-                            className="hover:underline text-primary font-medium"
-                          >
-                            {sale.clientName}
-                          </button>
+                        <button 
+                          onClick={() => {
+                            const client = clients.find(c => c.id === sale.clientId)
+                            if (client) openClientDetails(client)
+                          }}
+                          className="hover:underline text-primary font-medium"
+                        >
+                          {sale.clientName}
+                        </button>
                         </div>
                       </TableCell>
                       <TableCell>
@@ -1857,7 +1857,7 @@ export function SalesNew() {
                      selectedSaleForDetails.status === 'AwaitingPayment' ? 'قيد الدفع' :
                      'محجوز'}
                   </Badge>
-                </div>
+              </div>
 
                 {/* Client Information */}
                 <Card>
@@ -1867,26 +1867,26 @@ export function SalesNew() {
                       <div>
                         <p className="text-sm text-muted-foreground">الاسم</p>
                         <p className="font-medium">{client?.name || 'غير معروف'}</p>
-                      </div>
+              </div>
                       <div>
                         <p className="text-sm text-muted-foreground">رقم CIN</p>
                         <p className="font-medium">{client?.cin || '-'}</p>
-                      </div>
+            </div>
                       <div>
                         <p className="text-sm text-muted-foreground">رقم الهاتف</p>
                         <p className="font-medium">{client?.phone || '-'}</p>
-                      </div>
+              </div>
                       <div>
                         <p className="text-sm text-muted-foreground">البريد الإلكتروني</p>
                         <p className="font-medium">{client?.email || '-'}</p>
-                      </div>
+              </div>
                       {client?.address && (
                         <div className="sm:col-span-2">
                           <p className="text-sm text-muted-foreground">العنوان</p>
                           <p className="font-medium">{client.address}</p>
-                        </div>
+            </div>
                       )}
-                    </div>
+            </div>
                   </CardContent>
                 </Card>
 
@@ -1898,11 +1898,11 @@ export function SalesNew() {
                       <div>
                         <p className="text-sm text-muted-foreground">الدفعة</p>
                         <p className="font-medium">{selectedSaleForDetails.batchName}</p>
-                      </div>
+            </div>
                       <div>
                         <p className="text-sm text-muted-foreground">رقم القطعة</p>
                         <p className="font-medium">{selectedSaleForDetails.pieceName}</p>
-                      </div>
+              </div>
                       <div>
                         <p className="text-sm text-muted-foreground">المساحة (م²)</p>
                         <p className="font-medium">{selectedSaleForDetails.surfaceArea} م²</p>
@@ -1948,8 +1948,8 @@ export function SalesNew() {
                               </p>
                             </div>
                           </>
-                        )}
-                      </div>
+            )}
+          </div>
                       
                       {selectedSaleForDetails.deadlineDate && (
                         <div className="mt-3 p-3 bg-blue-50 rounded-lg border border-blue-200">
@@ -2252,26 +2252,26 @@ export function SalesNew() {
                                 }
                               }}
                             >
-                              <TableCell>{formatDate(sale.sale_date)}</TableCell>
-                              <TableCell>{sale.payment_type === 'Full' ? 'بالحاضر' : 'بالتقسيط'}</TableCell>
-                              <TableCell>{formatCurrency(sale.total_selling_price)}</TableCell>
-                              <TableCell>
-                                <Badge
-                                  variant={
-                                    sale.status === 'Completed'
-                                      ? 'success'
-                                      : sale.status === 'Cancelled'
-                                      ? 'destructive'
-                                      : 'warning'
-                                  }
-                                >
-                                  {sale.status === 'Completed' ? 'مباع' :
-                                   sale.status === 'Cancelled' ? 'ملغي' :
-                                   (sale as any).is_confirmed || (sale as any).big_advance_confirmed ? 'قيد الدفع' :
+                            <TableCell>{formatDate(sale.sale_date)}</TableCell>
+                            <TableCell>{sale.payment_type === 'Full' ? 'بالحاضر' : 'بالتقسيط'}</TableCell>
+                            <TableCell>{formatCurrency(sale.total_selling_price)}</TableCell>
+                            <TableCell>
+                              <Badge
+                                variant={
+                                  sale.status === 'Completed'
+                                    ? 'success'
+                                    : sale.status === 'Cancelled'
+                                    ? 'destructive'
+                                    : 'warning'
+                                }
+                              >
+                                {sale.status === 'Completed' ? 'مباع' :
+                                 sale.status === 'Cancelled' ? 'ملغي' :
+                                 (sale as any).is_confirmed || (sale as any).big_advance_confirmed ? 'قيد الدفع' :
                                    'محجوز'}
-                                </Badge>
-                              </TableCell>
-                            </TableRow>
+                              </Badge>
+                            </TableCell>
+                          </TableRow>
                           )
                         })}
                       </TableBody>
