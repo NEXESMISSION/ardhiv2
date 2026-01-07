@@ -306,8 +306,9 @@ export function SalesNew() {
         if (status === 'Completed') {
           remainingPerPiece = 0 // مباع - fully paid, no remaining
         } else {
-          // Remaining = Total Payable - Total Paid
-          // Total Paid includes: reservation + bigAdvance + other payments
+          // For ALL sales (installment or full): Remaining = Total Payable - Total Paid
+          // Total Paid includes: العربون (SmallAdvance) + الدفعة الأولى (BigAdvance) + installments
+          // This ensures the correct calculation regardless of how installments were created
           remainingPerPiece = Math.max(0, totalPayablePerPiece - paidPerPiece)
         }
         

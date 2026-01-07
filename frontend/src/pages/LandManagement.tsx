@@ -1259,30 +1259,84 @@ export function LandManagement() {
         created_by: user?.id || null,
       }
 
+      let savedOfferId: string | null = null
+      
       if (editingOffer) {
         const { error } = await supabase
           .from('payment_offers')
           .update(offerData)
           .eq('id', editingOffer.id)
         if (error) throw error
+        savedOfferId = editingOffer.id
       } else {
-        const { error } = await supabase
+        const { data: insertedOffer, error } = await supabase
           .from('payment_offers')
           .insert([offerData])
+          .select('id')
+          .single()
         if (error) throw error
+        savedOfferId = insertedOffer?.id || null
       }
 
-      // Reload offers
+      // Reload batch offers
       const { data: offers } = await supabase
         .from('payment_offers')
         .select('*')
         .eq('land_batch_id', editingBatch.id)
+        .is('land_piece_id', null) // Only batch offers
         .order('is_default', { ascending: false })
         .order('created_at', { ascending: true })
       setBatchOffers((offers as PaymentOffer[]) || [])
 
-      // Note: Available pieces use batch offers directly (no need to update)
-      // Reserved pieces have their own copy of offers (created when reserved)
+      // SYNC: Update/Create offers for all Available pieces in this batch
+      // Get all Available pieces in this batch
+      const { data: availablePieces } = await supabase
+        .from('land_pieces')
+        .select('id')
+        .eq('land_batch_id', editingBatch.id)
+        .eq('status', 'Available')
+      
+      if (availablePieces && availablePieces.length > 0) {
+        const pieceIds = availablePieces.map(p => p.id)
+        
+        // Delete existing offers for Available pieces that match this offer name or are from batch sync
+        // Only delete offers with same offer_name to replace them
+        if (offerForm.offer_name) {
+          await supabase
+            .from('payment_offers')
+            .delete()
+            .in('land_piece_id', pieceIds)
+            .eq('offer_name', offerForm.offer_name.trim())
+        }
+        
+        // Create piece-specific copies of this offer for all Available pieces
+        const pieceOffersToCreate = pieceIds.map(pieceId => ({
+          land_batch_id: null, // Piece-specific offers don't reference batch
+          land_piece_id: pieceId,
+          price_per_m2_installment: offerData.price_per_m2_installment,
+          company_fee_percentage: offerData.company_fee_percentage,
+          advance_amount: offerData.advance_amount,
+          advance_is_percentage: offerData.advance_is_percentage,
+          monthly_payment: offerData.monthly_payment,
+          number_of_months: offerData.number_of_months,
+          offer_name: offerData.offer_name,
+          notes: offerData.notes,
+          is_default: offerData.is_default,
+          created_by: user?.id || null,
+        }))
+        
+        const { error: pieceOffersError } = await supabase
+          .from('payment_offers')
+          .insert(pieceOffersToCreate)
+        
+        if (pieceOffersError) {
+          console.error('Error syncing offers to pieces:', pieceOffersError)
+          // Don't throw - batch offer was saved successfully
+        }
+      }
+      
+      // Refresh batches to show updated piece offers
+      await fetchBatches()
       
       setOfferDialogOpen(false)
       setEditingOffer(null)
@@ -1307,20 +1361,50 @@ export function LandManagement() {
     if (!editingBatch) return
     
     try {
+      // Get the offer to be deleted (to get the offer_name for synced pieces)
+      const { data: offerToDelete } = await supabase
+        .from('payment_offers')
+        .select('offer_name')
+        .eq('id', offerId)
+        .single()
+      
+      // Delete the batch offer
       const { error } = await supabase
         .from('payment_offers')
         .delete()
         .eq('id', offerId)
       if (error) throw error
+      
+      // Also delete synced piece offers with the same offer_name for Available pieces
+      if (offerToDelete?.offer_name) {
+        const { data: availablePieces } = await supabase
+          .from('land_pieces')
+          .select('id')
+          .eq('land_batch_id', editingBatch.id)
+          .eq('status', 'Available')
+        
+        if (availablePieces && availablePieces.length > 0) {
+          const pieceIds = availablePieces.map(p => p.id)
+          await supabase
+            .from('payment_offers')
+            .delete()
+            .in('land_piece_id', pieceIds)
+            .eq('offer_name', offerToDelete.offer_name)
+        }
+      }
 
       // Reload offers
       const { data: offers } = await supabase
         .from('payment_offers')
         .select('*')
         .eq('land_batch_id', editingBatch.id)
+        .is('land_piece_id', null) // Only batch offers
         .order('is_default', { ascending: false })
         .order('created_at', { ascending: true })
       setBatchOffers((offers as PaymentOffer[]) || [])
+      
+      // Refresh batches to update piece offers
+      await fetchBatches()
     } catch (err: any) {
       setError(err.message || 'خطأ في حذف العرض')
     }
@@ -4452,7 +4536,12 @@ export function LandManagement() {
                                   />
                                 )}
                                 <div className="flex-1 min-w-0">
-                                  <div className="font-bold text-sm truncate">{piece.piece_number}</div>
+                                  <div className="font-bold text-sm truncate flex items-center gap-1">
+                                    {piece.piece_number}
+                                    {(piece as any).payment_offers && (piece as any).payment_offers.length > 0 && piece.status === 'Available' && (
+                                      <span className="text-green-500 text-xs" title="عرض خاص">★</span>
+                                    )}
+                                  </div>
                                   <div className="text-xs text-muted-foreground mt-0.5">{piece.surface_area} م²</div>
                                 </div>
                               </div>
@@ -4465,14 +4554,16 @@ export function LandManagement() {
                             
                             <div className="font-semibold text-green-600 text-sm mb-2">
                               {(() => {
-                                // For Available pieces, calculate from batch price_per_m2_full
-                                // For Reserved/Sold pieces, use stored selling_price_full
+                                // PRIORITY: Use piece's selling_price_full if set
+                                if (piece.selling_price_full && parseFloat(String(piece.selling_price_full)) > 0) {
+                                  return formatCurrency(parseFloat(String(piece.selling_price_full)))
+                                }
+                                // Fall back to batch calculation for Available pieces
                                 if (piece.status === 'Available' && (batch as any).price_per_m2_full) {
                                   const calculatedPrice = piece.surface_area * parseFloat((batch as any).price_per_m2_full)
                                   return formatCurrency(calculatedPrice)
-                                } else {
-                                  return formatCurrency(piece.selling_price_full || 0)
                                 }
+                                return formatCurrency(0)
                               })()}
                             </div>
                             <div className="font-semibold text-blue-600 text-sm mb-2">
@@ -4654,18 +4745,27 @@ export function LandManagement() {
                                   ) : null}
                                 </TableCell>
                               )}
-                              <TableCell className="py-2 font-medium text-center">{piece.piece_number}</TableCell>
+                              <TableCell className="py-2 font-medium text-center">
+                                <span className="flex items-center justify-center gap-1">
+                                  {piece.piece_number}
+                                  {(piece as any).payment_offers && (piece as any).payment_offers.length > 0 && piece.status === 'Available' && (
+                                    <span className="text-green-500 text-xs" title="عرض خاص">★</span>
+                                  )}
+                                </span>
+                              </TableCell>
                               <TableCell className="py-2 text-center">{piece.surface_area}</TableCell>
                               <TableCell className="py-2 text-green-600 font-medium text-right">
                                 {(() => {
-                                  // For Available pieces, calculate from batch price_per_m2_full
-                                  // For Reserved/Sold pieces, use stored selling_price_full
+                                  // PRIORITY: Use piece's selling_price_full if set
+                                  if (piece.selling_price_full && parseFloat(String(piece.selling_price_full)) > 0) {
+                                    return formatCurrency(parseFloat(String(piece.selling_price_full)))
+                                  }
+                                  // Fall back to batch calculation for Available pieces
                                   if (piece.status === 'Available' && (batch as any).price_per_m2_full) {
                                     const calculatedPrice = piece.surface_area * parseFloat((batch as any).price_per_m2_full)
                                     return formatCurrency(calculatedPrice)
-                                  } else {
-                                    return formatCurrency(piece.selling_price_full || 0)
                                   }
+                                  return formatCurrency(0)
                                 })()}
                               </TableCell>
                               <TableCell className="py-2 text-blue-600 font-medium text-right">
@@ -6251,16 +6351,20 @@ export function LandManagement() {
                 
                 if (saleForm.payment_type === 'Full' || saleForm.payment_type === 'PromiseOfSale') {
                   // Full Payment or Promise of Sale Details
-                  // For Available pieces, calculate from batch price_per_m2_full
-                  // For Reserved pieces, use stored selling_price_full
+                  // PRIORITY: Use piece's selling_price_full if set, otherwise calculate from batch
                   const totalPrice = selectedPiecesData.reduce((sum, p) => {
+                    // First check if piece has a specific price set (selling_price_full > 0)
+                    if (p.selling_price_full && parseFloat(String(p.selling_price_full)) > 0) {
+                      return sum + parseFloat(String(p.selling_price_full))
+                    }
+                    // Fall back to batch price_per_m2_full calculation
                     if (p.status === 'Available') {
                       const batch = batches.find(b => b.id === p.land_batch_id)
                       if ((batch as any)?.price_per_m2_full) {
                         return sum + (p.surface_area * parseFloat((batch as any).price_per_m2_full))
                       }
                     }
-                    return sum + (p.selling_price_full || 0)
+                    return sum + 0
                   }, 0)
                   
                   // Get company fee percentage from batch (use first batch's fee, or default to 0)
@@ -6339,11 +6443,15 @@ export function LandManagement() {
                         )}
                         {selectedPiecesData.map((piece, idx) => {
                           const batch = batches.find(b => b.id === piece.land_batch_id)
-                          // For Available pieces, calculate from batch price_per_m2_full
-                          // For Reserved pieces, use stored selling_price_full
-                          const piecePrice = piece.status === 'Available' && (batch as any)?.price_per_m2_full
-                            ? (piece.surface_area * parseFloat((batch as any).price_per_m2_full))
-                            : (piece.selling_price_full || 0)
+                          // PRIORITY: Use piece's selling_price_full if set, otherwise calculate from batch
+                          let piecePrice = 0
+                          if (piece.selling_price_full && parseFloat(String(piece.selling_price_full)) > 0) {
+                            // Piece has specific price set
+                            piecePrice = parseFloat(String(piece.selling_price_full))
+                          } else if (piece.status === 'Available' && (batch as any)?.price_per_m2_full) {
+                            // Fall back to batch calculation
+                            piecePrice = piece.surface_area * parseFloat((batch as any).price_per_m2_full)
+                          }
                           const pieceCompanyFee = (piecePrice * companyFeePercentage) / 100
                           const pieceTotalPayable = piecePrice + pieceCompanyFee
                           const reservationPerPiece = reservation / selectedPiecesData.length
@@ -6386,31 +6494,50 @@ export function LandManagement() {
                   )
                 } else {
                   // Installment Payment Details
-                  if (!selectedOffer) {
-                    return (
-                      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
-                        <p className="text-xs text-yellow-800">يرجى اختيار عرض الدفع لعرض التفاصيل</p>
-                      </div>
-                    )
-                  }
+                  // Use piece-specific offers if available, otherwise fall back to selected batch offer
                   
                   // Get reservation amount and calculate per piece
                   const reservation = parseFloat(saleForm.reservation_amount) || 0
                   const reservationPerPiece = reservation / selectedPiecesData.length
                   
-                  // Calculate per piece
+                  // Calculate per piece - using piece-specific offers
                   const piecesCalculations = selectedPiecesData.map(p => {
-                    const piecePrice = selectedOffer.price_per_m2_installment 
-                      ? (p.surface_area * selectedOffer.price_per_m2_installment)
+                    // Get piece-specific offers from the piece's payment_offers (loaded via fetchBatches)
+                    const pieceOffers = (p as any).payment_offers || []
+                    // Use piece-specific offer if available, otherwise use selected batch offer
+                    const offerToUse = pieceOffers.length > 0 
+                      ? (pieceOffers.find((o: PaymentOffer) => o.is_default) || pieceOffers[0])
+                      : selectedOffer
+                    
+                    if (!offerToUse) {
+                      // No offer available
+                      return {
+                        piece: p,
+                        piecePrice: p.selling_price_installment || p.selling_price_full || 0,
+                        companyFeePercentage: 0,
+                        companyFeePerPiece: 0,
+                        totalPayablePerPiece: p.selling_price_installment || p.selling_price_full || 0,
+                        reservationPerPiece,
+                        advancePerPiece: 0,
+                        remainingPerPiece: (p.selling_price_installment || p.selling_price_full || 0) - reservationPerPiece,
+                        monthsPerPiece: 0,
+                        monthlyAmountPerPiece: 0,
+                        offerName: null,
+                        hasPieceOffer: false
+                      }
+                    }
+                    
+                    const piecePrice = offerToUse.price_per_m2_installment 
+                      ? (p.surface_area * offerToUse.price_per_m2_installment)
                       : (p.selling_price_installment || p.selling_price_full || 0)
                     
-                    const companyFeePercentage = selectedOffer.company_fee_percentage || 0
+                    const companyFeePercentage = offerToUse.company_fee_percentage || 0
                     const companyFeePerPiece = (piecePrice * companyFeePercentage) / 100
                     const totalPayablePerPiece = piecePrice + companyFeePerPiece
                     
-                    const advancePerPiece = selectedOffer.advance_is_percentage
-                      ? (piecePrice * selectedOffer.advance_amount) / 100
-                      : selectedOffer.advance_amount
+                    const advancePerPiece = offerToUse.advance_is_percentage
+                      ? (piecePrice * offerToUse.advance_amount) / 100
+                      : offerToUse.advance_amount
                     
                     // Remaining after reservation (paid at sale creation) and advance (paid at confirmation)
                     const remainingPerPiece = totalPayablePerPiece - reservationPerPiece - advancePerPiece
@@ -6419,36 +6546,55 @@ export function LandManagement() {
                     let monthsPerPiece = 0
                     let monthlyAmountPerPiece = 0
                     
-                    if (selectedOffer.monthly_payment && selectedOffer.monthly_payment > 0) {
+                    if (offerToUse.monthly_payment && offerToUse.monthly_payment > 0) {
                       // Offer has monthly_payment - calculate number of months
-                      monthlyAmountPerPiece = selectedOffer.monthly_payment
+                      monthlyAmountPerPiece = offerToUse.monthly_payment
                       monthsPerPiece = remainingPerPiece > 0
-                        ? Math.ceil(remainingPerPiece / selectedOffer.monthly_payment)
+                        ? Math.ceil(remainingPerPiece / offerToUse.monthly_payment)
                         : 0
-                    } else if (selectedOffer.number_of_months && selectedOffer.number_of_months > 0) {
+                    } else if (offerToUse.number_of_months && offerToUse.number_of_months > 0) {
                       // Offer has number_of_months - calculate monthly payment
-                      monthsPerPiece = selectedOffer.number_of_months
+                      monthsPerPiece = offerToUse.number_of_months
                       monthlyAmountPerPiece = remainingPerPiece > 0
-                        ? remainingPerPiece / selectedOffer.number_of_months
+                        ? remainingPerPiece / offerToUse.number_of_months
                         : 0
                     }
                     
                     return {
                       piece: p,
                       piecePrice,
+                      companyFeePercentage,
                       companyFeePerPiece,
                       totalPayablePerPiece,
                       reservationPerPiece,
                       advancePerPiece,
                       remainingPerPiece,
                       monthsPerPiece,
-                      monthlyAmountPerPiece
+                      monthlyAmountPerPiece,
+                      offerName: offerToUse.offer_name || null,
+                      hasPieceOffer: pieceOffers.length > 0
                     }
                   })
                   
+                  // Check if all pieces have offers (either piece-specific or batch)
+                  const allPiecesHaveOffers = piecesCalculations.every(calc => 
+                    calc.piecePrice > 0 && (calc.monthsPerPiece > 0 || calc.monthlyAmountPerPiece > 0)
+                  )
+                  
+                  if (!allPiecesHaveOffers && !selectedOffer) {
+                    return (
+                      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+                        <p className="text-xs text-yellow-800">يرجى اختيار عرض الدفع لعرض التفاصيل (بعض القطع ليس لديها عروض محددة)</p>
+                      </div>
+                    )
+                  }
+                  
                   // Sum up totals
                   const totalPrice = piecesCalculations.reduce((sum, calc) => sum + calc.piecePrice, 0)
-                  const companyFeePercentage = selectedOffer.company_fee_percentage || 0
+                  // Use average company fee percentage if different offers have different percentages
+                  const avgCompanyFeePercentage = piecesCalculations.length > 0
+                    ? piecesCalculations.reduce((sum, calc) => sum + (calc.companyFeePercentage || 0), 0) / piecesCalculations.length
+                    : (selectedOffer?.company_fee_percentage || 0)
                   const companyFeeAmount = piecesCalculations.reduce((sum, calc) => sum + calc.companyFeePerPiece, 0)
                   const totalPayable = piecesCalculations.reduce((sum, calc) => sum + calc.totalPayablePerPiece, 0)
                   const totalReservation = piecesCalculations.reduce((sum, calc) => sum + calc.reservationPerPiece, 0)
@@ -6468,16 +6614,21 @@ export function LandManagement() {
                           {piecesCalculations.map((calc) => {
                             const batch = batches.find(b => b.id === calc.piece.land_batch_id)
                             return (
-                              <div key={calc.piece.id} className="border-b border-blue-50 last:border-0 pb-1.5 last:pb-0 mb-1.5 last:mb-0">
+                              <div key={calc.piece.id} className={`border-b border-blue-50 last:border-0 pb-1.5 last:pb-0 mb-1.5 last:mb-0 ${calc.hasPieceOffer ? 'bg-green-50/50 rounded p-1' : ''}`}>
                                 <div className="flex justify-between items-start mb-1">
                                   <div>
                                     <p className="font-medium text-xs">{batch?.name || 'دفعة'} - #{calc.piece.piece_number}</p>
                                     <p className="text-muted-foreground text-xs">{calc.piece.surface_area} م²</p>
+                                    {calc.offerName && (
+                                      <p className={`text-xs ${calc.hasPieceOffer ? 'text-green-600 font-medium' : 'text-blue-600'}`}>
+                                        {calc.hasPieceOffer ? '✓ ' : ''}{calc.offerName}
+                                      </p>
+                                    )}
                                   </div>
                                   <p className="font-semibold text-blue-700 text-xs">{formatCurrency(calc.piecePrice)}</p>
                                 </div>
                                 <div className="text-xs text-muted-foreground space-y-0.5 pl-2">
-                                  <div>عمولة ({companyFeePercentage}%): {formatCurrency(calc.companyFeePerPiece)}</div>
+                                  <div>عمولة ({calc.companyFeePercentage}%): {formatCurrency(calc.companyFeePerPiece)}</div>
                                   <div>المستحق: {formatCurrency(calc.totalPayablePerPiece)}</div>
                                   <div className="text-green-700">العربون (مدفوع): {formatCurrency(calc.reservationPerPiece)}</div>
                                   <div>التسبقة (عند التأكيد): {formatCurrency(calc.advancePerPiece)}</div>
@@ -6503,7 +6654,7 @@ export function LandManagement() {
                                 <span className="font-medium">{formatCurrency(totalPrice)}</span>
                               </div>
                               <div className="flex justify-between">
-                                <span>عمولة الشركة ({companyFeePercentage}%):</span>
+                                <span>عمولة الشركة ({avgCompanyFeePercentage.toFixed(1)}%):</span>
                                 <span className="font-medium">{formatCurrency(companyFeeAmount)}</span>
                               </div>
                               <div className="flex justify-between border-t border-blue-100 pt-1 mt-1">
