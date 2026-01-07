@@ -844,6 +844,147 @@ export function Calendar() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Details Dialog */}
+      <Dialog open={detailsDialogOpen} onOpenChange={setDetailsDialogOpen}>
+        <DialogContent className="w-[95vw] sm:w-full max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              تفاصيل الموعد - {selectedRendezvousForDetails?.sale?.client?.name || 'غير معروف'}
+            </DialogTitle>
+          </DialogHeader>
+          {selectedRendezvousForDetails && (() => {
+            const r = selectedRendezvousForDetails
+            const sale = r.sale as any
+            const paymentType = sale?.payment_type === 'Full' ? 'بالحاضر' : sale?.payment_type === 'Installment' ? 'بالتقسيط' : sale?.payment_type || 'غير محدد'
+            const offer = sale?.selected_offer
+            
+            return (
+              <div className="space-y-4">
+                {/* Client Info */}
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <h3 className="font-semibold mb-2">معلومات العميل</h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+                    <div>
+                      <span className="font-medium">الاسم:</span> {sale?.client?.name || 'غير معروف'}
+                    </div>
+                    <div>
+                      <span className="font-medium">الهاتف:</span> {sale?.client?.phone || 'غير متوفر'}
+                    </div>
+                    {sale?.client?.email && (
+                      <div>
+                        <span className="font-medium">البريد:</span> {sale.client.email}
+                      </div>
+                    )}
+                    {sale?.client?.cin && (
+                      <div>
+                        <span className="font-medium">CIN:</span> {sale.client.cin}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Sale Details */}
+                {sale && (
+                  <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                    <h3 className="font-semibold mb-2">تفاصيل البيع</h3>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+                      <div>
+                        <span className="font-medium">رقم البيع:</span> #{r.sale_id.slice(0, 8)}
+                      </div>
+                      <div>
+                        <span className="font-medium">نوع الدفع:</span>
+                        <Badge variant="outline" className="mr-2">{paymentType}</Badge>
+                      </div>
+                      <div>
+                        <span className="font-medium">السعر الإجمالي:</span> {formatCurrency(sale.total_selling_price || 0)}
+                      </div>
+                      {sale.small_advance_amount > 0 && (
+                        <div>
+                          <span className="font-medium">العربون:</span> {formatCurrency(sale.small_advance_amount)}
+                        </div>
+                      )}
+                      {sale.big_advance_amount > 0 && (
+                        <div>
+                          <span className="font-medium">الدفعة الأولى:</span> {formatCurrency(sale.big_advance_amount)}
+                        </div>
+                      )}
+                      {sale.payment_type === 'Installment' && sale.number_of_installments && (
+                        <>
+                          <div>
+                            <span className="font-medium">عدد الأقساط:</span> {sale.number_of_installments}
+                          </div>
+                          {sale.monthly_installment_amount && (
+                            <div>
+                              <span className="font-medium">القسط الشهري:</span> {formatCurrency(sale.monthly_installment_amount)}
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Offer Details */}
+                {offer && (
+                  <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                    <h3 className="font-semibold mb-2">تفاصيل العرض</h3>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+                      <div>
+                        <span className="font-medium">اسم العرض:</span> {offer.name || 'عرض التقسيط'}
+                      </div>
+                      {offer.price_per_m2_installment && (
+                        <div>
+                          <span className="font-medium">السعر لكل م²:</span> {formatCurrency(offer.price_per_m2_installment)}
+                        </div>
+                      )}
+                      {offer.advance_amount > 0 && (
+                        <div>
+                          <span className="font-medium">التسبقة:</span> {formatCurrency(offer.advance_amount)}
+                          {offer.advance_is_percentage && <span> ({offer.advance_amount}%)</span>}
+                        </div>
+                      )}
+                      {offer.monthly_payment && (
+                        <div>
+                          <span className="font-medium">القسط الشهري:</span> {formatCurrency(offer.monthly_payment)}
+                        </div>
+                      )}
+                      {offer.company_fee_percentage && (
+                        <div>
+                          <span className="font-medium">عمولة الشركة:</span> {offer.company_fee_percentage}%
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Rendezvous Info */}
+                <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                  <h3 className="font-semibold mb-2">معلومات الموعد</h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+                    <div>
+                      <span className="font-medium">التاريخ:</span> {formatDate(r.rendezvous_date)}
+                    </div>
+                    <div>
+                      <span className="font-medium">الوقت:</span> {r.rendezvous_time}
+                    </div>
+                    {r.notes && (
+                      <div className="sm:col-span-2">
+                        <span className="font-medium">ملاحظات:</span> {r.notes}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )
+          })()}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDetailsDialogOpen(false)}>
+              إغلاق
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
