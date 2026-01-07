@@ -26,6 +26,9 @@ export function Download() {
     setDownloading(true)
     
     try {
+      let blob: Blob | null = null
+      let fileName = 'LandDev.apk'
+
       // Try method 1: Download from Supabase Storage
       try {
         const { data, error } = await supabase.storage
@@ -33,72 +36,96 @@ export function Download() {
           .download('app.apk')
 
         if (!error && data) {
-          // Create blob URL and trigger download
-          const url = window.URL.createObjectURL(data)
-          const link = document.createElement('a')
-          link.href = url
-          link.download = 'LandDev.apk'
-          document.body.appendChild(link)
-          link.click()
-          document.body.removeChild(link)
-          window.URL.revokeObjectURL(url)
-          
-          showNotification('تم بدء التحميل بنجاح', 'success')
-          setDownloading(false)
-          return
+          blob = data
         }
       } catch (storageError) {
-        console.log('Supabase Storage not available, trying direct URL...')
+        console.log('Supabase Storage download failed, trying other methods...')
       }
 
-      // Try method 2: Direct download from public folder or URL
-      try {
-        const response = await fetch(apkDirectUrl)
-        if (response.ok) {
-          const blob = await response.blob()
-          const url = window.URL.createObjectURL(blob)
-          const link = document.createElement('a')
-          link.href = url
-          link.download = 'LandDev.apk'
-          document.body.appendChild(link)
-          link.click()
+      // Try method 2: Direct download from public folder
+      if (!blob) {
+        try {
+          const response = await fetch(apkDirectUrl, {
+            method: 'GET',
+            headers: {
+              'Accept': 'application/vnd.android.package-archive, application/octet-stream, */*'
+            }
+          })
+          
+          if (response.ok) {
+            const contentType = response.headers.get('content-type')
+            // Check if response is actually APK, not HTML
+            if (contentType && (contentType.includes('octet-stream') || contentType.includes('package-archive'))) {
+              blob = await response.blob()
+            } else {
+              // If HTML, try to get from Supabase public URL
+              throw new Error('Response is not APK file')
+            }
+          }
+        } catch (fetchError) {
+          console.log('Direct URL fetch failed')
+        }
+      }
+
+      // Try method 3: Get public URL from Supabase Storage and download
+      if (!blob) {
+        try {
+          const { data: urlData } = supabase.storage
+            .from('app-downloads')
+            .getPublicUrl('app.apk', {
+              transform: {
+                width: null,
+                height: null,
+              }
+            })
+
+          if (urlData?.publicUrl) {
+            const response = await fetch(urlData.publicUrl, {
+              method: 'GET',
+              headers: {
+                'Accept': 'application/vnd.android.package-archive, application/octet-stream, */*'
+              }
+            })
+            
+            if (response.ok) {
+              const contentType = response.headers.get('content-type')
+              if (contentType && (contentType.includes('octet-stream') || contentType.includes('package-archive'))) {
+                blob = await response.blob()
+              }
+            }
+          }
+        } catch (urlError) {
+          console.log('Public URL download failed')
+        }
+      }
+
+      // If we have a blob, trigger download
+      if (blob) {
+        // Force download with proper MIME type
+        const url = window.URL.createObjectURL(new Blob([blob], { 
+          type: 'application/vnd.android.package-archive' 
+        }))
+        
+        const link = document.createElement('a')
+        link.href = url
+        link.download = fileName
+        link.style.display = 'none'
+        document.body.appendChild(link)
+        link.click()
+        
+        // Cleanup
+        setTimeout(() => {
           document.body.removeChild(link)
           window.URL.revokeObjectURL(url)
-          
-          showNotification('تم بدء التحميل بنجاح', 'success')
-          setDownloading(false)
-          return
-        }
-      } catch (fetchError) {
-        console.log('Direct URL not available')
-      }
-
-      // Try method 3: Get public URL from Supabase Storage
-      try {
-        const { data: urlData } = supabase.storage
-          .from('app-downloads')
-          .getPublicUrl('app.apk')
-
-        if (urlData?.publicUrl) {
-          // Open in new tab for download
-          const link = document.createElement('a')
-          link.href = urlData.publicUrl
-          link.download = 'LandDev.apk'
-          link.target = '_blank'
-          document.body.appendChild(link)
-          link.click()
-          document.body.removeChild(link)
-          
-          showNotification('تم فتح رابط التحميل', 'success')
-          setDownloading(false)
-          return
-        }
-      } catch (urlError) {
-        console.log('Public URL not available')
+        }, 100)
+        
+        showNotification('تم بدء التحميل بنجاح', 'success')
+        setDownloading(false)
+        return
       }
 
       // If all methods fail
-      throw new Error('لم يتم العثور على ملف APK. يرجى التواصل مع المسؤول.')
+      throw new Error('لم يتم العثور على ملف APK. يرجى التأكد من رفع الملف في Supabase Storage أو مجلد public.')
     } catch (error: any) {
       console.error('Download error:', error)
       showNotification(
@@ -109,6 +136,11 @@ export function Download() {
       setDownloading(false)
     }
   }
+
+  // Android deep link / intent URL
+  const androidPackageName = 'com.fulldevland.app' // TODO: Replace with actual package name
+  const androidIntentUrl = `intent://#Intent;package=${androidPackageName};scheme=https;end`
+  const androidPlayStoreUrl = `https://play.google.com/store/apps/details?id=${androidPackageName}`
 
   return (
     <div className="space-y-6 p-4 sm:p-6">
