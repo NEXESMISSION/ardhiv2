@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useLanguage } from '@/contexts/LanguageContext'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Smartphone, CheckCircle2, AlertCircle, Install, Share2, Globe, Download as DownloadIcon } from 'lucide-react'
+import { Smartphone, CheckCircle2, AlertCircle, Download as InstallIcon, Share2 } from 'lucide-react'
 import { showNotification } from '@/components/ui/notification'
 
 interface BeforeInstallPromptEvent extends Event {
@@ -11,7 +11,7 @@ interface BeforeInstallPromptEvent extends Event {
 }
 
 export function Download() {
-  const { t, locale } = useLanguage()
+  const { t, language } = useLanguage()
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null)
   const [isInstallable, setIsInstallable] = useState(false)
   const [isInstalled, setIsInstalled] = useState(false)
@@ -169,7 +169,7 @@ export function Download() {
                   size="lg"
                   className="w-full sm:w-auto min-w-[250px] bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white shadow-lg"
                 >
-                  <Install className="h-5 w-5 ml-2" />
+                  <DownloadIcon className="h-5 w-5 ml-2" />
                   {t('download.installApp')}
                 </Button>
               ) : (
@@ -206,7 +206,7 @@ export function Download() {
                   size="sm"
                   className="flex-1 sm:flex-none"
                 >
-                  <Globe className="h-4 w-4 ml-1" />
+                  <GlobeIcon className="h-4 w-4 ml-1" />
                   {t('download.openInBrowser')}
                 </Button>
               </div>
@@ -263,3 +263,5 @@ export function Download() {
     </div>
   )
 }
+
+
