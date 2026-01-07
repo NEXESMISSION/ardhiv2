@@ -406,6 +406,8 @@ export function RealEstateBuildings() {
     setExpenses([])
     await fetchBoxes(project.id)
     setCurrentView('boxes')
+    // Push state to enable back navigation
+    window.history.pushState({ view: 'boxes' }, '')
   }
 
   const handleViewBox = async (box: ProjectBox) => {
