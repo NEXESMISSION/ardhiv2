@@ -13,7 +13,11 @@ import {
   CreditCard,
   CheckCircle2,
   MessageSquare,
-  UserCog
+  UserCog,
+  Calendar,
+  Phone,
+  Download,
+  Briefcase
 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useLanguage } from '@/contexts/LanguageContext'
@@ -68,6 +72,30 @@ export function Home() {
       pageId: 'confirm-sales',
     },
     {
+      title: t('nav.calendar'),
+      icon: Calendar,
+      color: 'bg-pink-500',
+      route: '/calendar',
+      permission: 'edit_sales',
+      pageId: 'calendar',
+    },
+    {
+      title: t('nav.phoneCalls'),
+      icon: Phone,
+      color: 'bg-violet-500',
+      route: '/phone-calls',
+      permission: null,
+      pageId: 'phone-calls',
+    },
+    {
+      title: t('nav.download'),
+      icon: Download,
+      color: 'bg-slate-500',
+      route: '/download',
+      permission: null,
+      pageId: 'download',
+    },
+    {
       title: t('nav.installments'),
       icon: CreditCard,
       color: 'bg-indigo-500',
@@ -106,6 +134,14 @@ export function Home() {
       route: '/real-estate-buildings',
       permission: null,
       pageId: 'real-estate',
+    },
+    {
+      title: t('nav.workers'),
+      icon: Briefcase,
+      color: 'bg-amber-500',
+      route: '/workers',
+      permission: 'view_workers',
+      pageId: 'workers',
     },
     {
       title: t('nav.messages'),
