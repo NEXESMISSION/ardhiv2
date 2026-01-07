@@ -4107,7 +4107,7 @@ export function LandManagement() {
                             )}
                             <TableHead className="py-2">قطعة</TableHead>
                             <TableHead className="py-2">م²</TableHead>
-                            <TableHead className="py-2">كامل</TableHead>
+                            <TableHead className="py-2">بالحاضر</TableHead>
                             <TableHead className="py-2">الحالة</TableHead>
                             <TableHead className="py-2">إجراءات</TableHead>
                       </TableRow>
@@ -4512,7 +4512,7 @@ export function LandManagement() {
                 />
               </div>
               <div className="space-y-2">
-                  <Label htmlFor="selling_price_full">السعر (كامل) *</Label>
+                  <Label htmlFor="selling_price_full">السعر (بالحاضر) *</Label>
                 <Input
                     id="selling_price_full"
                   type="number"
@@ -4542,7 +4542,7 @@ export function LandManagement() {
                       <p className="text-sm font-medium mb-2">القيم المحسوبة تلقائياً:</p>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
                         <div>
-                          <span className="text-muted-foreground">السعر (كامل):</span>
+                          <span className="text-muted-foreground">السعر (بالحاضر):</span>
                           <span className="mr-2 font-medium text-green-600">{formatCurrency(calculated.selling_price_full)}</span>
                         </div>
                         <div>
@@ -5033,7 +5033,7 @@ export function LandManagement() {
             {editingPricePiece && (
               <div className="text-sm text-muted-foreground">
                 <p>المساحة: {editingPricePiece.surface_area} م²</p>
-                <p>السعر الحالي للكامل: {formatCurrency(editingPricePiece.selling_price_full)}</p>
+                <p>السعر الحالي بالحاضر: {formatCurrency(editingPricePiece.selling_price_full)}</p>
                 <p>السعر الحالي للتقسيط: {formatCurrency(editingPricePiece.selling_price_installment)}</p>
               </div>
             )}
