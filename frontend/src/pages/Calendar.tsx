@@ -15,7 +15,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import { formatDate, formatCurrency } from '@/lib/utils'
-import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Clock, X, Edit } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Clock, X, Edit, History } from 'lucide-react'
 import { showNotification } from '@/components/ui/notification'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import type { Sale, Client } from '@/types/database'
@@ -33,8 +33,9 @@ interface Rendezvous {
 }
 
 export function Calendar() {
-  const { user } = useAuth()
+  const { user, profile } = useAuth()
   const { t } = useLanguage()
+  const isOwner = profile?.role === 'Owner'
   const [currentDate, setCurrentDate] = useState(new Date())
   const [rendezvous, setRendezvous] = useState<Rendezvous[]>([])
   const [loading, setLoading] = useState(true)
@@ -46,6 +47,11 @@ export function Calendar() {
   const [newTime, setNewTime] = useState('')
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false)
   const [selectedRendezvousForCancel, setSelectedRendezvousForCancel] = useState<Rendezvous | null>(null)
+  const [historyDialogOpen, setHistoryDialogOpen] = useState(false)
+  const [selectedRendezvousForHistory, setSelectedRendezvousForHistory] = useState<Rendezvous | null>(null)
+  const [rendezvousHistory, setRendezvousHistory] = useState<any[]>([])
+  const [loadingHistory, setLoadingHistory] = useState(false)
+  const [lastUpdates, setLastUpdates] = useState<Record<string, { date: string; user: string }>>({})
 
   const currentMonth = currentDate.getMonth()
   const currentYear = currentDate.getFullYear()
@@ -124,6 +130,19 @@ export function Calendar() {
     }
   }, [rendezvousByDate, selectedDate])
 
+  // Fetch last update for workers when dialog opens
+  useEffect(() => {
+    if (!isOwner && selectedDateRendezvous.length > 0) {
+      // Fetch last update for each rendez-vous
+      selectedDateRendezvous.forEach(r => {
+        // Only fetch if we don't already have it
+        if (!lastUpdates[r.id]) {
+          fetchLastUpdate(r)
+        }
+      })
+    }
+  }, [selectedDateRendezvous, isOwner]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleExtend = (rendezvousItem: Rendezvous) => {
     setSelectedRendezvousForExtend(rendezvousItem)
     setNewDate(rendezvousItem.rendezvous_date)
@@ -178,6 +197,115 @@ export function Calendar() {
   const handleCancel = (rendezvousItem: Rendezvous) => {
     setSelectedRendezvousForCancel(rendezvousItem)
     setCancelDialogOpen(true)
+  }
+
+  const fetchLastUpdate = async (rendezvousItem: Rendezvous) => {
+    try {
+      // Fetch the most recent update from both histories
+      const [rendezvousHistoryResult, saleHistoryResult] = await Promise.all([
+        supabase
+          .from('sale_rendezvous_history')
+          .select(`
+            created_at,
+            changed_by_user:users(id, name, email)
+          `)
+          .eq('rendezvous_id', rendezvousItem.id)
+          .order('created_at', { ascending: false })
+          .limit(1),
+        supabase
+          .from('sales_history')
+          .select(`
+            created_at,
+            changed_by_user:users(id, name, email)
+          `)
+          .eq('sale_id', rendezvousItem.sale_id)
+          .order('created_at', { ascending: false })
+          .limit(1)
+      ])
+
+      // Get the most recent update
+      const updates = [
+        ...(rendezvousHistoryResult.data || []),
+        ...(saleHistoryResult.data || [])
+      ].sort((a: any, b: any) => 
+        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      )
+
+      if (updates.length > 0) {
+        const latest = updates[0] as any
+        setLastUpdates(prev => ({
+          ...prev,
+          [rendezvousItem.id]: {
+            date: new Date(latest.created_at).toLocaleString('ar-TN', {
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit',
+            }),
+            user: latest.changed_by_user?.name || latest.changed_by_user?.email || 'غير معروف'
+          }
+        }))
+      }
+    } catch (err) {
+      console.error('Error fetching last update:', err)
+    }
+  }
+
+  const handleViewHistory = async (rendezvousItem: Rendezvous) => {
+    setSelectedRendezvousForHistory(rendezvousItem)
+    setHistoryDialogOpen(true)
+    setLoadingHistory(true)
+    
+    try {
+      // First, find all related rendez-vous for this sale (including old ones that were rescheduled)
+      const { data: allRendezvous, error: rendezvousError } = await supabase
+        .from('sale_rendezvous')
+        .select('id')
+        .eq('sale_id', rendezvousItem.sale_id)
+        .order('created_at', { ascending: true })
+
+      if (rendezvousError) throw rendezvousError
+
+      // Get all rendez-vous IDs (current and all previous ones for this sale)
+      const rendezvousIds = (allRendezvous || []).map(r => r.id)
+
+      // Fetch history for ALL rendez-vous related to this sale
+      const [rendezvousHistoryResult, saleHistoryResult] = await Promise.all([
+        supabase
+          .from('sale_rendezvous_history')
+          .select(`
+            *,
+            changed_by_user:users(id, name, email)
+          `)
+          .in('rendezvous_id', rendezvousIds)
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('sales_history')
+          .select(`
+            *,
+            changed_by_user:users(id, name, email)
+          `)
+          .eq('sale_id', rendezvousItem.sale_id)
+          .order('created_at', { ascending: false })
+      ])
+
+      if (rendezvousHistoryResult.error) throw rendezvousHistoryResult.error
+      if (saleHistoryResult.error) throw saleHistoryResult.error
+
+      // Combine both histories and sort by date
+      const combinedHistory = [
+        ...(rendezvousHistoryResult.data || []).map((item: any) => ({ ...item, history_type: 'rendezvous' })),
+        ...(saleHistoryResult.data || []).map((item: any) => ({ ...item, history_type: 'sale' }))
+      ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+
+      setRendezvousHistory(combinedHistory)
+    } catch (err) {
+      console.error('Error fetching history:', err)
+      showNotification('حدث خطأ أثناء تحميل السجل', 'error')
+    } finally {
+      setLoadingHistory(false)
+    }
   }
 
   const handleCancelConfirm = async () => {
@@ -371,8 +499,29 @@ export function Calendar() {
                         {r.notes && (
                           <p className="text-xs text-muted-foreground mt-2">{r.notes}</p>
                         )}
+                        {!isOwner && lastUpdates[r.id] && (
+                          <div className="mt-2 p-2 bg-gray-50 rounded text-xs">
+                            <p className="text-muted-foreground">
+                              آخر تحديث: {lastUpdates[r.id].date}
+                            </p>
+                            <p className="text-muted-foreground">
+                              بواسطة: {lastUpdates[r.id].user}
+                            </p>
+                          </div>
+                        )}
                       </div>
                       <div className="flex flex-col gap-2">
+                        {isOwner && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleViewHistory(r)}
+                            className="text-xs"
+                          >
+                            <History className="h-3 w-3 ml-1" />
+                            السجل
+                          </Button>
+                        )}
                         <Button
                           variant="outline"
                           size="sm"
@@ -472,6 +621,217 @@ export function Calendar() {
         confirmText="نعم، إلغاء"
         cancelText="إلغاء"
       />
+
+      {/* History Dialog */}
+      <Dialog open={historyDialogOpen} onOpenChange={setHistoryDialogOpen}>
+        <DialogContent className="w-[95vw] sm:w-full max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              سجل التغييرات - {selectedRendezvousForHistory?.sale?.client?.name || 'غير معروف'}
+            </DialogTitle>
+          </DialogHeader>
+          {selectedRendezvousForHistory && (
+            <div className="space-y-4">
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                <p className="font-medium text-sm mb-1">
+                  العميل: {selectedRendezvousForHistory.sale?.client?.name || 'غير معروف'}
+                </p>
+                <p className="text-xs text-muted-foreground mb-1">
+                  رقم البيع: #{selectedRendezvousForHistory.sale_id.slice(0, 8)}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  التاريخ الحالي: {selectedRendezvousForHistory.rendezvous_date} {selectedRendezvousForHistory.rendezvous_time}
+                </p>
+                {selectedRendezvousForHistory.notes && (
+                  <p className="text-xs text-muted-foreground mt-2">
+                    ملاحظات: {selectedRendezvousForHistory.notes}
+                  </p>
+                )}
+              </div>
+
+              {loadingHistory ? (
+                <div className="text-center py-8">
+                  <div className="inline-block h-8 w-8 border-4 border-gray-300 border-t-gray-600 rounded-full animate-spin"></div>
+                  <p className="mt-2 text-sm text-muted-foreground">جاري تحميل السجل...</p>
+                </div>
+              ) : rendezvousHistory.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  لا يوجد سجل للتغييرات
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {rendezvousHistory.map((historyItem: any) => {
+                    const changeTypeLabels: Record<string, string> = {
+                      created: historyItem.history_type === 'sale' ? 'تم إنشاء البيع' : 'تم إنشاء الموعد',
+                      updated: historyItem.history_type === 'sale' ? 'تم تحديث البيع' : 'تم تحديث الموعد',
+                      cancelled: historyItem.history_type === 'sale' ? 'تم إلغاء البيع' : 'تم إلغاء الموعد',
+                      rescheduled: 'تم تغيير الموعد',
+                      completed: 'تم الإكمال',
+                      status_changed: 'تم تغيير الحالة',
+                      confirmed: 'تم تأكيد البيع',
+                      payment_updated: 'تم تحديث معلومات الدفع',
+                    }
+
+                    const changeTypeColors: Record<string, string> = {
+                      created: 'bg-green-100 text-green-800 border-green-200',
+                      updated: 'bg-blue-100 text-blue-800 border-blue-200',
+                      cancelled: 'bg-red-100 text-red-800 border-red-200',
+                      rescheduled: 'bg-yellow-100 text-yellow-800 border-yellow-200',
+                      completed: 'bg-purple-100 text-purple-800 border-purple-200',
+                      status_changed: 'bg-orange-100 text-orange-800 border-orange-200',
+                      confirmed: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+                      payment_updated: 'bg-cyan-100 text-cyan-800 border-cyan-200',
+                    }
+
+                    return (
+                      <Card key={historyItem.id} className="border-l-4 border-l-primary">
+                        <CardContent className="p-4">
+                          <div className="flex items-start justify-between gap-4 mb-3">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2 mb-2 flex-wrap">
+                                <Badge className={changeTypeColors[historyItem.change_type] || 'bg-gray-100 text-gray-800'}>
+                                  {changeTypeLabels[historyItem.change_type] || historyItem.change_type}
+                                </Badge>
+                                {historyItem.history_type && (
+                                  <Badge variant="outline" className="text-xs">
+                                    {historyItem.history_type === 'sale' ? 'البيع' : 'الموعد'}
+                                  </Badge>
+                                )}
+                                <span className="text-xs text-muted-foreground">
+                                  {new Date(historyItem.created_at).toLocaleString('ar-TN', {
+                                    year: 'numeric',
+                                    month: 'long',
+                                    day: 'numeric',
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                  })}
+                                </span>
+                              </div>
+                              {historyItem.change_description && (
+                                <p className="text-sm font-medium mb-2">{historyItem.change_description}</p>
+                              )}
+                              {historyItem.changed_by_user && (
+                                <p className="text-xs text-muted-foreground">
+                                  بواسطة: {historyItem.changed_by_user.name || historyItem.changed_by_user.email || 'غير معروف'}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Show rendez-vous date/time changes */}
+                          {(historyItem.old_rendezvous_date || historyItem.new_rendezvous_date) && (
+                            <div className="bg-gray-50 rounded-lg p-3 space-y-2 text-sm">
+                              {historyItem.old_rendezvous_date && (
+                                <div className="flex items-center gap-2">
+                                  <span className="text-muted-foreground min-w-[80px]">من:</span>
+                                  <span className="font-medium">
+                                    {historyItem.old_rendezvous_date} {historyItem.old_rendezvous_time}
+                                  </span>
+                                </div>
+                              )}
+                              {historyItem.new_rendezvous_date && (
+                                <div className="flex items-center gap-2">
+                                  <span className="text-muted-foreground min-w-[80px]">إلى:</span>
+                                  <span className="font-medium text-green-700">
+                                    {historyItem.new_rendezvous_date} {historyItem.new_rendezvous_time}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Show sale status changes */}
+                          {(historyItem.old_status || historyItem.new_status) && (
+                            <div className="bg-gray-50 rounded-lg p-3 space-y-2 text-sm mt-2">
+                              {historyItem.old_status && (
+                                <div className="flex items-center gap-2">
+                                  <span className="text-muted-foreground min-w-[100px]">
+                                    {historyItem.history_type === 'sale' ? 'حالة البيع السابقة:' : 'الحالة السابقة:'}
+                                  </span>
+                                  <Badge variant="outline">{historyItem.old_status}</Badge>
+                                </div>
+                              )}
+                              {historyItem.new_status && (
+                                <div className="flex items-center gap-2">
+                                  <span className="text-muted-foreground min-w-[100px]">
+                                    {historyItem.history_type === 'sale' ? 'حالة البيع الجديدة:' : 'الحالة الجديدة:'}
+                                  </span>
+                                  <Badge variant="default">{historyItem.new_status}</Badge>
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Show sale payment changes */}
+                          {historyItem.history_type === 'sale' && (
+                            <>
+                              {(historyItem.old_total_selling_price || historyItem.new_total_selling_price) && (
+                                <div className="bg-gray-50 rounded-lg p-3 space-y-2 text-sm mt-2">
+                                  {historyItem.old_total_selling_price && (
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-muted-foreground min-w-[100px]">السعر السابق:</span>
+                                      <span className="font-medium">{formatCurrency(historyItem.old_total_selling_price)}</span>
+                                    </div>
+                                  )}
+                                  {historyItem.new_total_selling_price && (
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-muted-foreground min-w-[100px]">السعر الجديد:</span>
+                                      <span className="font-medium text-green-700">{formatCurrency(historyItem.new_total_selling_price)}</span>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+
+                              {(historyItem.old_payment_type || historyItem.new_payment_type) && (
+                                <div className="bg-gray-50 rounded-lg p-3 space-y-2 text-sm mt-2">
+                                  {historyItem.old_payment_type && (
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-muted-foreground min-w-[100px]">نوع الدفع السابق:</span>
+                                      <Badge variant="outline">{historyItem.old_payment_type === 'Full' ? 'بالحاضر' : 'بالتقسيط'}</Badge>
+                                    </div>
+                                  )}
+                                  {historyItem.new_payment_type && (
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-muted-foreground min-w-[100px]">نوع الدفع الجديد:</span>
+                                      <Badge variant="default">{historyItem.new_payment_type === 'Full' ? 'بالحاضر' : 'بالتقسيط'}</Badge>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </>
+                          )}
+
+                          {(historyItem.old_notes || historyItem.new_notes) && (
+                            <div className="bg-gray-50 rounded-lg p-3 space-y-2 text-sm mt-2">
+                              {historyItem.old_notes && (
+                                <div>
+                                  <span className="text-muted-foreground text-xs">الملاحظات السابقة:</span>
+                                  <p className="text-xs mt-1">{historyItem.old_notes}</p>
+                                </div>
+                              )}
+                              {historyItem.new_notes && (
+                                <div>
+                                  <span className="text-muted-foreground text-xs">الملاحظات الجديدة:</span>
+                                  <p className="text-xs mt-1 text-green-700">{historyItem.new_notes}</p>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setHistoryDialogOpen(false)}>
+              إغلاق
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

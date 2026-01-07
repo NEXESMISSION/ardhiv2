@@ -5377,8 +5377,43 @@ export function LandManagement() {
       </Dialog>
 
       {/* Sale Creation Dialog */}
-      <Dialog open={saleDialogOpen} onOpenChange={setSaleDialogOpen}>
-        <DialogContent className="w-[95vw] sm:w-full max-w-2xl max-h-[95vh] overflow-y-auto">
+      <Dialog 
+        open={saleDialogOpen} 
+        onOpenChange={(open) => {
+          // Only allow closing if explicitly requested (not from internal clicks)
+          // This prevents accidental closes from event bubbling
+          if (!open) {
+            // Check if we have unsaved data
+            if (newClient && selectedPieces.size > 0) {
+              // Show confirmation if there's data
+              if (window.confirm('هل أنت متأكد من إغلاق النافذة؟ سيتم فقدان البيانات غير المحفوظة.')) {
+                setSaleDialogOpen(false)
+                setNewClient(null)
+                setSelectedPieces(new Set())
+              }
+            } else {
+              setSaleDialogOpen(false)
+              setNewClient(null)
+              setSelectedPieces(new Set())
+            }
+          }
+        }}
+      >
+        <DialogContent 
+          className="w-[95vw] sm:w-full max-w-2xl max-h-[95vh] overflow-y-auto"
+          onClick={(e) => {
+            // Prevent clicks inside dialog from bubbling up and closing the dialog
+            e.stopPropagation()
+          }}
+          onMouseDown={(e) => {
+            // Prevent mouse down events from bubbling
+            e.stopPropagation()
+          }}
+          onTouchStart={(e) => {
+            // Prevent touch events from bubbling (mobile)
+            e.stopPropagation()
+          }}
+        >
           <DialogHeader>
             <DialogTitle>إنشاء بيع جديد</DialogTitle>
           </DialogHeader>
@@ -5421,11 +5456,21 @@ export function LandManagement() {
                           className="h-6 w-6 ml-2 flex-shrink-0 text-red-600 hover:text-red-700 hover:bg-red-50"
                           onClick={(e) => {
                             e.stopPropagation()
+                            e.preventDefault()
                             setSelectedPieces(prev => {
                               const newSelected = new Set(prev)
                               newSelected.delete(pieceId)
+                              // Prevent removing the last piece - show warning instead
+                              if (newSelected.size === 0) {
+                                showNotification('يجب أن يكون هناك قطعة واحدة على الأقل في البيع', 'warning')
+                                return prev // Keep the original set
+                              }
                               return newSelected
                             })
+                          }}
+                          onTouchEnd={(e) => {
+                            e.stopPropagation()
+                            e.preventDefault()
                           }}
                         >
                           <X className="h-4 w-4" />
@@ -5445,7 +5490,16 @@ export function LandManagement() {
                   step="0.01"
                   min="0"
                   value={saleForm.reservation_amount}
-                  onChange={(e) => setSaleForm({ ...saleForm, reservation_amount: e.target.value })}
+                  onChange={(e) => {
+                    e.stopPropagation()
+                    setSaleForm({ ...saleForm, reservation_amount: e.target.value })
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                  }}
+                  onMouseDown={(e) => {
+                    e.stopPropagation()
+                  }}
                   placeholder="أدخل مبلغ العربون"
                 />
                 <p className="text-xs text-muted-foreground">
@@ -5501,9 +5555,17 @@ export function LandManagement() {
                       return (
                         <div
                           key={offer.id}
-                          onClick={() => {
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            e.preventDefault()
                             setSelectedOffer(offer)
                             applyOfferToSaleForm(offer)
+                          }}
+                          onMouseDown={(e) => {
+                            e.stopPropagation()
+                          }}
+                          onTouchStart={(e) => {
+                            e.stopPropagation()
                           }}
                           className={`p-3 rounded-lg border cursor-pointer transition-colors ${
                             isSelected
@@ -5543,9 +5605,16 @@ export function LandManagement() {
                               <input
                                 type="radio"
                                 checked={isSelected}
-                                onChange={() => {
+                                onChange={(e) => {
+                                  e.stopPropagation()
                                   setSelectedOffer(offer)
                                   applyOfferToSaleForm(offer)
+                                }}
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                }}
+                                onMouseDown={(e) => {
+                                  e.stopPropagation()
                                 }}
                                 className="h-4 w-4 text-green-600"
                               />
@@ -5567,6 +5636,7 @@ export function LandManagement() {
                   id="paymentType"
                   value={saleForm.payment_type}
                   onChange={(e) => {
+                    e.stopPropagation()
                     const newPaymentType = e.target.value as 'Full' | 'Installment'
                     setSaleForm({ ...saleForm, payment_type: newPaymentType })
                     // Reload offers when switching to Installment
@@ -5576,6 +5646,12 @@ export function LandManagement() {
                       setAvailableOffers([])
                       setSelectedOffer(null)
                     }
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                  }}
+                  onMouseDown={(e) => {
+                    e.stopPropagation()
                   }}
                 >
                   <option value="Full">بالحاضر</option>
@@ -5846,7 +5922,16 @@ export function LandManagement() {
                   id="deadlineDate"
                   type="date"
                   value={saleForm.deadline_date}
-                  onChange={(e) => setSaleForm({ ...saleForm, deadline_date: e.target.value })}
+                  onChange={(e) => {
+                    e.stopPropagation()
+                    setSaleForm({ ...saleForm, deadline_date: e.target.value })
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                  }}
+                  onMouseDown={(e) => {
+                    e.stopPropagation()
+                  }}
                   placeholder="mm/dd/yyyy"
                 />
                 <p className="text-xs text-muted-foreground">
@@ -5856,15 +5941,22 @@ export function LandManagement() {
             </div>
           )}
           <DialogFooter>
-            <Button variant="outline" onClick={() => {
-              setSaleDialogOpen(false)
-              setNewClient(null)
-              setSelectedPieces(new Set())
-            }}>
+            <Button 
+              variant="outline" 
+              onClick={(e) => {
+                e.stopPropagation()
+                setSaleDialogOpen(false)
+                setNewClient(null)
+                setSelectedPieces(new Set())
+              }}
+            >
               إلغاء
             </Button>
             <Button 
-              onClick={handleCreateSale}
+              onClick={(e) => {
+                e.stopPropagation()
+                handleCreateSale()
+              }}
               disabled={creatingSale || !saleForm.reservation_amount}
             >
               {creatingSale ? 'جاري الإنشاء...' : 'إنشاء البيع'}
