@@ -494,15 +494,7 @@ export function Clients() {
     ))
   }, [clients, debouncedSearchTerm])
 
-  if (loading) {
-    return (
-      <div className="flex h-64 items-center justify-center">
-        <div className="text-muted-foreground">Loading clients...</div>
-      </div>
-    )
-  }
-
-  // Calculate client statistics
+  // Calculate client statistics - MUST be before any conditional returns
   const clientStats = useMemo(() => {
     const total = clients.length
     const withSales = clients.filter(c => c.sales && c.sales.length > 0).length
@@ -510,6 +502,14 @@ export function Clients() {
     const companies = clients.filter(c => c.client_type === 'Company').length
     return { total, withSales, individuals, companies }
   }, [clients])
+
+  if (loading) {
+    return (
+      <div className="flex h-64 items-center justify-center">
+        <div className="text-muted-foreground">Loading clients...</div>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-3 sm:space-y-4 md:space-y-6 p-3 sm:p-4 md:p-6">
