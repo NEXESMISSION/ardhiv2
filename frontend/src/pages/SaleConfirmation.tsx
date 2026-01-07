@@ -101,7 +101,7 @@ export function SaleConfirmation() {
     const [hours, minutes] = time.split(':')
     const formattedTime = `${hours}:${minutes}`
     
-    return `${day} ${month} ${year} • ${formattedTime}`
+    return `${day} ${month} ${year}، ${formattedTime}`
   }
   
   const openClientDetails = async (client: Client) => {
@@ -1378,7 +1378,10 @@ export function SaleConfirmation() {
                           </div>
                         )
                       })()}
-                      <span className="text-xs text-muted-foreground">{formatDateTime(sale.created_at || sale.sale_date)}</span>
+                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                        <Clock className="h-3 w-3" />
+                        <span>{formatDateTime(sale.created_at || sale.sale_date)}</span>
+                      </div>
                     </div>
                   </div>
                 </CardHeader>

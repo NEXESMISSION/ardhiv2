@@ -30,5 +30,5 @@ export function formatDateTime(date: string | Date): string {
   const year = dateObj.getFullYear()
   const hours = dateObj.getHours().toString().padStart(2, '0')
   const minutes = dateObj.getMinutes().toString().padStart(2, '0')
-  return `${day} ${month} ${year} - ${hours}:${minutes}`
+  return `${day} ${month} ${year}، ${hours}:${minutes}`
 }
