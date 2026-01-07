@@ -3422,7 +3422,7 @@ export function LandManagement() {
         .select(`
           id, status, piece_number, selling_price_full, selling_price_installment, 
           surface_area, purchase_cost, land_batch_id,
-          land_batch:land_batches(id, price_per_m2_full, company_fee_percentage_full)
+          land_batch:land_batches!inner(id, price_per_m2_full, company_fee_percentage_full)
         `)
         .in('id', Array.from(selectedPieces))
       
@@ -3614,11 +3614,54 @@ export function LandManagement() {
         }] as any)
       }
 
-      // Update all selected pieces status to Reserved
+      // Update all selected pieces status to Reserved and save calculated prices
       for (const pieceId of selectedPieces) {
+        const piece = selectedPieceObjects.find((p: any) => p.id === pieceId)
+        if (!piece) continue
+
+        // Calculate the price that was used in the sale
+        let calculatedPrice = 0
+        let calculatedInstallmentPrice = 0
+
+        // Get batch data - land_batch might be an object or array
+        const batchData = Array.isArray(piece.land_batch) ? piece.land_batch[0] : piece.land_batch
+        const batchPricePerM2Full = (batchData as any)?.price_per_m2_full
+
+        if (saleForm.payment_type === 'Full') {
+          // For Full payment, calculate from batch price_per_m2_full for Available pieces
+          if (piece.status === 'Available' && batchPricePerM2Full) {
+            calculatedPrice = piece.surface_area * parseFloat(batchPricePerM2Full)
+          } else {
+            calculatedPrice = parseFloat(piece.selling_price_full) || 0
+          }
+        } else {
+          // For Installment payment
+          if (selectedOffer && selectedOffer.price_per_m2_installment) {
+            calculatedInstallmentPrice = piece.surface_area * selectedOffer.price_per_m2_installment
+            // Also calculate full price from batch if available
+            if (piece.status === 'Available' && batchPricePerM2Full) {
+              calculatedPrice = piece.surface_area * parseFloat(batchPricePerM2Full)
+            } else {
+              calculatedPrice = parseFloat(piece.selling_price_full) || 0
+            }
+          } else {
+            calculatedPrice = parseFloat(piece.selling_price_full) || 0
+            calculatedInstallmentPrice = parseFloat(piece.selling_price_installment) || 0
+          }
+        }
+
+        // Update piece with calculated prices and status
+        const updateData: any = { status: 'Reserved' }
+        if (calculatedPrice > 0) {
+          updateData.selling_price_full = Math.round(calculatedPrice * 100) / 100
+        }
+        if (calculatedInstallmentPrice > 0) {
+          updateData.selling_price_installment = Math.round(calculatedInstallmentPrice * 100) / 100
+        }
+
         await supabase
           .from('land_pieces')
-          .update({ status: 'Reserved' } as any)
+          .update(updateData)
           .eq('id', pieceId)
       }
 
