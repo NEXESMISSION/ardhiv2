@@ -412,19 +412,35 @@ export function RealEstateBuildings() {
     setSelectedBox(box)
     await fetchExpenses(box.id)
     setCurrentView('expenses')
+    // Push state to enable back navigation
+    window.history.pushState({ view: 'expenses' }, '')
   }
 
-  const handleBack = () => {
-    if (currentView === 'expenses') {
-      setCurrentView('boxes')
-      setSelectedBox(null)
-      setExpenses([])
-    } else if (currentView === 'boxes') {
-      setCurrentView('projects')
-      setSelectedProject(null)
-      setBoxes([])
-    }
+  const handleViewProject = (project: Project) => {
+    setSelectedProject(project)
+    fetchBoxes(project.id)
+    setCurrentView('boxes')
+    // Push state to enable back navigation
+    window.history.pushState({ view: 'boxes' }, '')
   }
+
+  // Handle browser back button for internal navigation
+  useEffect(() => {
+    const handlePopState = (e: PopStateEvent) => {
+      if (currentView === 'expenses') {
+        setCurrentView('boxes')
+        setSelectedBox(null)
+        setExpenses([])
+      } else if (currentView === 'boxes') {
+        setCurrentView('projects')
+        setSelectedProject(null)
+        setBoxes([])
+      }
+    }
+    
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [currentView])
 
   const deleteItem = async () => {
     if (!itemToDelete) return
