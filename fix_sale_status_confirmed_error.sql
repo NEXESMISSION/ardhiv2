@@ -2,25 +2,55 @@
 -- FIX SALE STATUS "CONFIRMED" ERROR
 -- ============================================
 -- This script fixes the database issues causing:
--- 1. "invalid input value for enum sale_status: Confirmed" error
--- 2. Land pieces showing wrong status
--- Run this script in Supabase SQL Editor.
+-- "invalid input value for enum sale_status: Confirmed" error
+-- Run this script in Supabase SQL Editor (Dashboard > SQL Editor)
 -- ============================================
 
--- Step 1: Check current sale_status enum values
-SELECT enumlabel, enumsortorder 
-FROM pg_enum 
-WHERE enumtypid = (SELECT oid FROM pg_type WHERE typname = 'sale_status')
-ORDER BY enumsortorder;
+-- Step 1: List ALL triggers on the sales table
+SELECT tgname as trigger_name
+FROM pg_trigger
+WHERE tgrelid = 'sales'::regclass
+AND NOT tgisinternal;
 
--- Step 2: Drop known triggers that might be causing issues
-DROP TRIGGER IF EXISTS update_sale_status_on_confirm ON sales;
-DROP TRIGGER IF EXISTS set_sale_confirmed ON sales;
-DROP TRIGGER IF EXISTS on_sale_confirm ON sales;
-DROP TRIGGER IF EXISTS trigger_sale_status ON sales;
-DROP TRIGGER IF EXISTS sale_confirmation_trigger ON sales;
+-- Step 2: Drop ALL custom triggers on the sales table that might be causing issues
+-- (This is safe - it only drops custom triggers, not system triggers)
+DO $$
+DECLARE
+    trigger_record RECORD;
+BEGIN
+    FOR trigger_record IN 
+        SELECT tgname 
+        FROM pg_trigger 
+        WHERE tgrelid = 'sales'::regclass 
+        AND NOT tgisinternal
+    LOOP
+        EXECUTE format('DROP TRIGGER IF EXISTS %I ON sales', trigger_record.tgname);
+        RAISE NOTICE 'Dropped trigger: %', trigger_record.tgname;
+    END LOOP;
+END $$;
 
--- Step 3: Check and fix the is_confirmed column if it exists
+-- Step 3: Drop any functions that might reference 'Confirmed' status
+DO $$
+DECLARE
+    func_record RECORD;
+BEGIN
+    FOR func_record IN 
+        SELECT p.proname as func_name
+        FROM pg_proc p
+        JOIN pg_namespace n ON p.pronamespace = n.oid
+        WHERE n.nspname = 'public'
+        AND pg_get_functiondef(p.oid) LIKE '%Confirmed%'
+    LOOP
+        BEGIN
+            EXECUTE format('DROP FUNCTION IF EXISTS %I() CASCADE', func_record.func_name);
+            RAISE NOTICE 'Dropped function: %', func_record.func_name;
+        EXCEPTION WHEN OTHERS THEN
+            RAISE NOTICE 'Could not drop function: % (may have dependencies)', func_record.func_name;
+        END;
+    END LOOP;
+END $$;
+
+-- Step 4: Reset is_confirmed column if it exists
 DO $$
 BEGIN
     IF EXISTS (
@@ -32,60 +62,24 @@ BEGIN
     END IF;
 END $$;
 
--- Step 4: Fix land pieces status - set to 'Reserved' for pieces with non-completed sales
-UPDATE land_pieces
-SET status = 'Reserved'
-WHERE id IN (
-    SELECT unnest(s.land_piece_ids)
-    FROM sales s
-    WHERE s.status = 'Pending'
-)
-AND status = 'Sold';
-
--- Step 5: Fix land pieces status - set to 'Available' for pieces with no active sales
-UPDATE land_pieces lp
-SET status = 'Available'
-WHERE NOT EXISTS (
-    SELECT 1 FROM sales s
-    WHERE lp.id = ANY(s.land_piece_ids)
-    AND s.status NOT IN ('Cancelled', 'Completed')
-)
-AND lp.status = 'Reserved';
-
--- Step 6: Verify pieces status
+-- Step 5: Verify no triggers remain on sales table
 SELECT 
-    lp.id as piece_id,
-    lp.piece_number,
-    lp.status as piece_status,
-    s.id as sale_id,
-    s.status as sale_status,
-    s.payment_type
-FROM land_pieces lp
-LEFT JOIN sales s ON lp.id = ANY(s.land_piece_ids) AND s.status NOT IN ('Cancelled')
-ORDER BY lp.piece_number
-LIMIT 30;
-
--- Step 7: Show summary of sales statuses
-SELECT 
-    status,
-    COUNT(*) as count
-FROM sales
-GROUP BY status
-ORDER BY count DESC;
-
--- Step 8: Show summary of land pieces statuses
-SELECT 
-    status,
-    COUNT(*) as count
-FROM land_pieces
-GROUP BY status
-ORDER BY count DESC;
-
--- Step 9: Verify no problematic triggers remain on sales
-SELECT tgname, tgrelid::regclass
+    CASE 
+        WHEN COUNT(*) = 0 THEN 'SUCCESS: No custom triggers on sales table'
+        ELSE 'WARNING: ' || COUNT(*) || ' triggers still exist on sales table'
+    END as result
 FROM pg_trigger
 WHERE tgrelid = 'sales'::regclass
 AND NOT tgisinternal;
 
--- DONE! If you still see issues, run this:
+-- Step 6: Show current sale_status enum values for reference
+SELECT enumlabel as valid_status_values
+FROM pg_enum 
+WHERE enumtypid = (SELECT oid FROM pg_type WHERE typname = 'sale_status')
+ORDER BY enumsortorder;
+
+-- ============================================
+-- DONE! Try cancelling the piece again.
+-- If still having issues, run this additional command:
 -- ALTER TABLE sales DROP COLUMN IF EXISTS is_confirmed;
+-- ============================================

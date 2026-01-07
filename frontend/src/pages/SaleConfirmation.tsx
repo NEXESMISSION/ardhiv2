@@ -639,10 +639,9 @@ export function SaleConfirmation() {
       
       if (pieceCount === 1) {
         // Only one piece - cancel the entire sale
-        // Explicitly set is_confirmed to false to prevent any trigger issues
         const { error: cancelError } = await supabase
           .from('sales')
-          .update({ status: 'Cancelled', is_confirmed: false } as any)
+          .update({ status: 'Cancelled' } as any)
           .eq('id', sale.id)
         
         if (cancelError) throw cancelError
@@ -722,7 +721,6 @@ export function SaleConfirmation() {
         const remainingProfit = sale.profit_margin - profitPerPiece
         const remainingReservation = (sale.small_advance_amount || 0) - reservationPerPiece
         
-        // Explicitly set is_confirmed to false to prevent any trigger issues
         await supabase
           .from('sales')
           .update({
@@ -733,7 +731,6 @@ export function SaleConfirmation() {
             small_advance_amount: remainingReservation,
             big_advance_amount: sale.big_advance_amount ? (sale.big_advance_amount * remainingCount / pieceCount) : 0,
             monthly_installment_amount: sale.monthly_installment_amount ? (sale.monthly_installment_amount * remainingCount / pieceCount) : null,
-            is_confirmed: false,
           } as any)
           .eq('id', sale.id)
       }
@@ -801,7 +798,6 @@ export function SaleConfirmation() {
         const updates: any = {
           company_fee_percentage: feePercentage > 0 ? feePercentage : null,
           company_fee_amount: companyFeePerPiece > 0 ? parseFloat(companyFeePerPiece.toFixed(2)) : null,
-          is_confirmed: false, // Prevent trigger from setting status to "Confirmed"
         }
 
         if (confirmationType === 'full') {
@@ -981,7 +977,7 @@ export function SaleConfirmation() {
           console.warn('Sale status was not updated to Completed, retrying...')
           const { error: retryError } = await supabase
             .from('sales')
-            .update({ status: 'Completed', is_confirmed: false } as any)
+            .update({ status: 'Completed' } as any)
             .eq('id', selectedSale.id)
           if (retryError) throw retryError
         }
