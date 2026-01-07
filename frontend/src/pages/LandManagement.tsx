@@ -1080,6 +1080,9 @@ export function LandManagement() {
         .order('is_default', { ascending: false })
         .order('created_at', { ascending: true })
       setBatchOffers((offers as PaymentOffer[]) || [])
+
+      // Note: Available pieces use batch offers directly (no need to update)
+      // Reserved pieces have their own copy of offers (created when reserved)
       
       setOfferDialogOpen(false)
       setEditingOffer(null)
@@ -3416,7 +3419,11 @@ export function LandManagement() {
       // Validate pieces are still available
       const { data: currentPieces } = await supabase
         .from('land_pieces')
-        .select('id, status, piece_number, selling_price_full, selling_price_installment, surface_area, purchase_cost, land_batch_id')
+        .select(`
+          id, status, piece_number, selling_price_full, selling_price_installment, 
+          surface_area, purchase_cost, land_batch_id,
+          land_batch:land_batches(id, price_per_m2_full, company_fee_percentage_full)
+        `)
         .in('id', Array.from(selectedPieces))
       
       const unavailablePieces = (currentPieces || []).filter((p: any) => p.status !== 'Available')
@@ -3431,15 +3438,27 @@ export function LandManagement() {
       const selectedPieceObjects = currentPieces || []
       
       const totalCost = parseFloat(selectedPieceObjects.reduce((sum, p) => sum + (parseFloat(p.purchase_cost) || 0), 0).toFixed(2))
-      const totalPrice = parseFloat(selectedPieceObjects.reduce((sum, p) => {
+      const totalPrice = parseFloat(selectedPieceObjects.reduce((sum, p: any) => {
         if (saleForm.payment_type === 'Full') {
-          return sum + (parseFloat(p.selling_price_full) || 0)
+          // For Available pieces, calculate from batch price_per_m2_full
+          // For Reserved pieces, use stored selling_price_full
+          if (p.status === 'Available' && p.land_batch?.price_per_m2_full) {
+            return sum + (p.surface_area * parseFloat(p.land_batch.price_per_m2_full))
+          } else {
+            return sum + (parseFloat(p.selling_price_full) || 0)
+          }
         } else {
           // For installment, use selected offer price if available
           if (selectedOffer && selectedOffer.price_per_m2_installment) {
             return sum + (p.surface_area * selectedOffer.price_per_m2_installment)
           } else {
-            return sum + (parseFloat(p.selling_price_installment) || parseFloat(p.selling_price_full) || 0)
+            // For Available pieces without offer, calculate from batch if possible
+            // For Reserved pieces, use stored selling_price_installment
+            if (p.status === 'Available') {
+              return sum + (parseFloat(p.selling_price_installment) || parseFloat(p.selling_price_full) || 0)
+            } else {
+              return sum + (parseFloat(p.selling_price_installment) || parseFloat(p.selling_price_full) || 0)
+            }
           }
         }
       }, 0).toFixed(2))
@@ -3462,8 +3481,9 @@ export function LandManagement() {
       // Calculate total payable for validation (price + company fee for Full payment)
       let totalPayableForValidation = totalPrice
       if (saleForm.payment_type === 'Full') {
-        const firstBatch = batches.find(b => b.id === selectedPieceObjects[0]?.land_batch_id)
-        const companyFeePercentage = (firstBatch as any)?.company_fee_percentage_full || 0
+        // Get company fee from batch - use the batch data we fetched with pieces
+        const firstPiece = selectedPieceObjects[0] as any
+        const companyFeePercentage = firstPiece?.land_batch?.company_fee_percentage_full || 0
         const companyFeeAmount = (totalPrice * companyFeePercentage) / 100
         totalPayableForValidation = totalPrice + companyFeeAmount
       }
@@ -3490,9 +3510,9 @@ export function LandManagement() {
       
       // Add company fee for Full payment
       if (saleForm.payment_type === 'Full') {
-        // Get company fee percentage from batch (use first batch's fee, or default to 0)
-        const firstBatch = batches.find(b => b.id === selectedPieceObjects[0]?.land_batch_id)
-        const companyFeePercentage = (firstBatch as any)?.company_fee_percentage_full || 0
+        // Get company fee percentage from batch - use the batch data we fetched with pieces
+        const firstPiece = selectedPieceObjects[0] as any
+        const companyFeePercentage = firstPiece?.land_batch?.company_fee_percentage_full || 0
         const companyFeeAmount = (totalPrice * companyFeePercentage) / 100
         
         if (companyFeePercentage > 0) {
@@ -4183,7 +4203,18 @@ export function LandManagement() {
                               )}
                               <TableCell className="py-2 font-medium text-center">{piece.piece_number}</TableCell>
                               <TableCell className="py-2 text-center">{piece.surface_area}</TableCell>
-                              <TableCell className="py-2 text-green-600 font-medium text-right">{formatCurrency(piece.selling_price_full || 0)}</TableCell>
+                              <TableCell className="py-2 text-green-600 font-medium text-right">
+                                {(() => {
+                                  // For Available pieces, calculate from batch price_per_m2_full
+                                  // For Reserved/Sold pieces, use stored selling_price_full
+                                  if (piece.status === 'Available' && (batch as any).price_per_m2_full) {
+                                    const calculatedPrice = piece.surface_area * parseFloat((batch as any).price_per_m2_full)
+                                    return formatCurrency(calculatedPrice)
+                                  } else {
+                                    return formatCurrency(piece.selling_price_full || 0)
+                                  }
+                                })()}
+                              </TableCell>
                               <TableCell className="py-2 text-blue-600 font-medium text-right">
                                 {(() => {
                                   // Only show installment price for reserved pieces with selected offer
@@ -5685,7 +5716,17 @@ export function LandManagement() {
                 
                 if (saleForm.payment_type === 'Full') {
                   // Full Payment Details
-                  const totalPrice = selectedPiecesData.reduce((sum, p) => sum + (p.selling_price_full || 0), 0)
+                  // For Available pieces, calculate from batch price_per_m2_full
+                  // For Reserved pieces, use stored selling_price_full
+                  const totalPrice = selectedPiecesData.reduce((sum, p) => {
+                    if (p.status === 'Available') {
+                      const batch = batches.find(b => b.id === p.land_batch_id)
+                      if ((batch as any)?.price_per_m2_full) {
+                        return sum + (p.surface_area * parseFloat((batch as any).price_per_m2_full))
+                      }
+                    }
+                    return sum + (p.selling_price_full || 0)
+                  }, 0)
                   
                   // Get company fee percentage from batch (use first batch's fee, or default to 0)
                   const firstBatch = batches.find(b => b.id === selectedPiecesData[0]?.land_batch_id)
@@ -5733,7 +5774,11 @@ export function LandManagement() {
                         )}
                         {selectedPiecesData.map((piece, idx) => {
                           const batch = batches.find(b => b.id === piece.land_batch_id)
-                          const piecePrice = piece.selling_price_full || 0
+                          // For Available pieces, calculate from batch price_per_m2_full
+                          // For Reserved pieces, use stored selling_price_full
+                          const piecePrice = piece.status === 'Available' && (batch as any)?.price_per_m2_full
+                            ? (piece.surface_area * parseFloat((batch as any).price_per_m2_full))
+                            : (piece.selling_price_full || 0)
                           const pieceCompanyFee = (piecePrice * companyFeePercentage) / 100
                           const pieceTotalPayable = piecePrice + pieceCompanyFee
                           const reservationPerPiece = reservation / selectedPiecesData.length

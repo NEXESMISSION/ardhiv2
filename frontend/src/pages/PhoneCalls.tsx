@@ -45,6 +45,7 @@ export function PhoneCalls() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [dateFilter, setDateFilter] = useState<DateFilter>('today')
   const [selectedDate, setSelectedDate] = useState('')
+  const [selectedDateForPopup, setSelectedDateForPopup] = useState<string | null>(null)
   const [batches, setBatches] = useState<LandBatch[]>([])
   
   const [form, setForm] = useState({
@@ -332,6 +333,7 @@ export function PhoneCalls() {
                 return (
                   <div
                     key={date}
+                    onClick={() => setSelectedDateForPopup(dateStr)}
                     className={`
                       aspect-square rounded-xl p-2 sm:p-3 cursor-pointer transition-all duration-200
                       flex flex-col items-center justify-center
@@ -367,101 +369,6 @@ export function PhoneCalls() {
           )}
         </CardContent>
       </Card>
-
-      {/* Phone Calls List */}
-      <div className="space-y-3">
-        {loading ? (
-          <div className="text-center py-8 text-muted-foreground">{t('common.loading')}</div>
-        ) : phoneCalls.length === 0 ? (
-          <Card>
-            <CardContent className="py-12 text-center">
-              <Phone className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-              <p className="text-muted-foreground">{t('phoneCalls.noCalls')}</p>
-            </CardContent>
-          </Card>
-        ) : (
-          phoneCalls.map((call) => {
-            const callDate = new Date(call.rendezvous_time)
-            const timeStr = callDate.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })
-            const dateStr = callDate.toLocaleDateString(locale, {
-              year: 'numeric',
-              month: 'long',
-              day: 'numeric'
-            })
-
-            return (
-              <Card key={call.id} className="hover:shadow-md transition-shadow">
-                <CardContent className="p-4">
-                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                    <div className="flex-1 space-y-2">
-                      <div className="flex items-center gap-2">
-                        <Phone className="h-4 w-4 text-muted-foreground" />
-                        <span className="font-semibold text-lg">{call.name}</span>
-                        <Badge variant={call.status === 'done' ? 'default' : call.status === 'not_done' ? 'destructive' : 'secondary'}>
-                          {call.status === 'done' ? t('phoneCalls.done') : call.status === 'not_done' ? t('phoneCalls.notDone') : t('phoneCalls.pending')}
-                        </Badge>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
-                        <div className="flex items-center gap-1">
-                          <Clock className="h-3 w-3" />
-                          <span>{dateStr} - {timeStr}</span>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <Phone className="h-3 w-3" />
-                          <span>{call.phone_number}</span>
-                        </div>
-                        {call.land_batch && (
-                          <div className="flex items-center gap-1">
-                            <MapPin className="h-3 w-3" />
-                            <span>{call.land_batch.name}</span>
-                          </div>
-                        )}
-                        <Badge variant="outline">{call.motorized}</Badge>
-                      </div>
-                      {call.notes && (
-                        <p className="text-sm text-muted-foreground mt-2 p-2 bg-gray-50 rounded">
-                          {call.notes}
-                        </p>
-                      )}
-                    </div>
-                    <div className="flex gap-2 w-full sm:w-auto">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          setStatusNote('')
-                          handleUpdateStatus(call.id, 'done')
-                        }}
-                        disabled={updatingStatus === call.id || call.status === 'done'}
-                        className="flex-1 sm:flex-none bg-green-50 hover:bg-green-100 text-green-700 border-green-200"
-                      >
-                        <CheckCircle2 className="h-4 w-4 ml-1" />
-                        {t('phoneCalls.done')}
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          const note = prompt(t('phoneCalls.addNote'))
-                          if (note !== null) {
-                            setStatusNote(note)
-                            handleUpdateStatus(call.id, 'not_done')
-                          }
-                        }}
-                        disabled={updatingStatus === call.id || call.status === 'not_done'}
-                        className="flex-1 sm:flex-none bg-red-50 hover:bg-red-100 text-red-700 border-red-200"
-                      >
-                        <XCircle className="h-4 w-4 ml-1" />
-                        {t('phoneCalls.notDone')}
-                      </Button>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            )
-          })
-        )}
-      </div>
 
       {/* Add Phone Call Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
@@ -528,6 +435,133 @@ export function PhoneCalls() {
             </Button>
             <Button onClick={handleSubmit}>
               {t('common.add')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Date Calls Popup */}
+      <Dialog open={selectedDateForPopup !== null} onOpenChange={(open) => !open && setSelectedDateForPopup(null)}>
+        <DialogContent className="w-[95vw] sm:w-full max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              {selectedDateForPopup && (() => {
+                const date = new Date(selectedDateForPopup)
+                return date.toLocaleDateString(locale, {
+                  year: 'numeric',
+                  month: 'long',
+                  day: 'numeric',
+                  weekday: 'long'
+                })
+              })()}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 mt-4">
+            {selectedDateForPopup && callsByDate[selectedDateForPopup]?.length > 0 ? (
+              callsByDate[selectedDateForPopup].map((call) => {
+                const callDate = new Date(call.rendezvous_time)
+                const timeStr = callDate.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })
+
+                return (
+                  <Card key={call.id} className="hover:shadow-md transition-shadow">
+                    <CardContent className="p-4">
+                      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                        <div className="flex-1 space-y-2">
+                          <div className="flex items-center gap-2">
+                            <Phone className="h-4 w-4 text-muted-foreground" />
+                            <span className="font-semibold text-lg">{call.name}</span>
+                            <Badge variant={call.status === 'done' ? 'default' : call.status === 'not_done' ? 'destructive' : 'secondary'}>
+                              {call.status === 'done' ? t('phoneCalls.done') : call.status === 'not_done' ? t('phoneCalls.notDone') : t('phoneCalls.pending')}
+                            </Badge>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
+                            <div className="flex items-center gap-1">
+                              <Clock className="h-3 w-3" />
+                              <span>{timeStr}</span>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <Phone className="h-3 w-3" />
+                              <span>{call.phone_number}</span>
+                            </div>
+                            {call.land_batch && (
+                              <div className="flex items-center gap-1">
+                                <MapPin className="h-3 w-3" />
+                                <span>{call.land_batch.name}</span>
+                              </div>
+                            )}
+                            <Badge variant="outline">
+                              {call.motorized === 'motorisé' ? t('phoneCalls.motorizedOption') : t('phoneCalls.nonMotorizedOption')}
+                            </Badge>
+                          </div>
+                          {call.notes && (
+                            <p className="text-sm text-muted-foreground mt-2 p-2 bg-gray-50 rounded">
+                              {call.notes}
+                            </p>
+                          )}
+                        </div>
+                        {call.status === 'pending' ? (
+                          <div className="flex gap-2 w-full sm:w-auto">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                setStatusNote('')
+                                handleUpdateStatus(call.id, 'done')
+                              }}
+                              disabled={updatingStatus === call.id}
+                              className="flex-1 sm:flex-none bg-green-50 hover:bg-green-100 text-green-700 border-green-200"
+                            >
+                              <CheckCircle2 className="h-4 w-4 ml-1" />
+                              {t('phoneCalls.done')}
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                const note = prompt(t('phoneCalls.addNote'))
+                                if (note !== null) {
+                                  setStatusNote(note)
+                                  handleUpdateStatus(call.id, 'not_done')
+                                }
+                              }}
+                              disabled={updatingStatus === call.id}
+                              className="flex-1 sm:flex-none bg-red-50 hover:bg-red-100 text-red-700 border-red-200"
+                            >
+                              <XCircle className="h-4 w-4 ml-1" />
+                              {t('phoneCalls.notDone')}
+                            </Button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            {call.status === 'done' && (
+                              <Badge variant="default" className="bg-green-100 text-green-700 border-green-200">
+                                <CheckCircle2 className="h-3 w-3 ml-1" />
+                                {t('phoneCalls.done')}
+                              </Badge>
+                            )}
+                            {call.status === 'not_done' && (
+                              <Badge variant="destructive" className="bg-red-100 text-red-700 border-red-200">
+                                <XCircle className="h-3 w-3 ml-1" />
+                                {t('phoneCalls.notDone')}
+                              </Badge>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                )
+              })
+            ) : (
+              <div className="text-center py-8">
+                <Phone className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                <p className="text-muted-foreground">{t('phoneCalls.noCalls')}</p>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSelectedDateForPopup(null)}>
+              {t('common.close')}
             </Button>
           </DialogFooter>
         </DialogContent>

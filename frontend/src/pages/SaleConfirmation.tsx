@@ -824,6 +824,53 @@ export function SaleConfirmation() {
             .update({ status: 'Reserved' } as any)
             .eq('id', selectedPiece.id)
           if (pieceError) throw pieceError
+
+          // When piece becomes Reserved, create a copy of batch offers as piece-specific offers
+          // This allows the reserved piece to have its own offers that can be modified independently
+          if (selectedPiece.land_batch_id) {
+            // Fetch all batch offers
+            const { data: batchOffers } = await supabase
+              .from('payment_offers')
+              .select('*')
+              .eq('land_batch_id', selectedPiece.land_batch_id)
+            
+            if (batchOffers && batchOffers.length > 0) {
+              // Check if piece already has offers (to avoid duplicates)
+              const { data: existingPieceOffers } = await supabase
+                .from('payment_offers')
+                .select('id')
+                .eq('land_piece_id', selectedPiece.id)
+              
+              // Only create copies if piece doesn't already have offers
+              if (!existingPieceOffers || existingPieceOffers.length === 0) {
+                // Create copies of batch offers as piece-specific offers
+                const pieceOffersToCreate = batchOffers.map((offer: any) => ({
+                  land_batch_id: null, // Piece-specific offers don't reference batch
+                  land_piece_id: selectedPiece.id,
+                  price_per_m2_installment: offer.price_per_m2_installment,
+                  company_fee_percentage: offer.company_fee_percentage,
+                  advance_amount: offer.advance_amount,
+                  advance_is_percentage: offer.advance_is_percentage,
+                  monthly_payment: offer.monthly_payment,
+                  number_of_months: offer.number_of_months,
+                  offer_name: offer.offer_name,
+                  notes: offer.notes,
+                  is_default: offer.is_default,
+                  created_by: user?.id || null,
+                }))
+
+                // Insert all piece offers
+                const { error: offersError } = await supabase
+                  .from('payment_offers')
+                  .insert(pieceOffersToCreate)
+                
+                if (offersError) {
+                  console.error('Error creating piece offers:', offersError)
+                  // Don't throw - piece status update was successful, offers are secondary
+                }
+              }
+            }
+          }
         }
 
         // Update sale status
