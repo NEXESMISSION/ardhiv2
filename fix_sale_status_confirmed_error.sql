@@ -122,15 +122,23 @@ END $$;
 
 -- Step 7: Verify no triggers remain on sales table
 SELECT 'Triggers on sales table (AFTER):' as info;
-SELECT 
-    CASE 
-        WHEN COUNT(*) = 0 THEN 'SUCCESS: No custom triggers remain on sales table'
-        ELSE 'WARNING: ' || COUNT(*) || ' triggers still exist on sales table'
-    END as result,
-    string_agg(tgname, ', ') as remaining_triggers
-FROM pg_trigger
-WHERE tgrelid = 'sales'::regclass
-AND NOT tgisinternal;
+DO $$
+DECLARE
+    trigger_count INTEGER;
+    trigger_list TEXT;
+BEGIN
+    SELECT COUNT(*), COALESCE(string_agg(tgname, ', '), '')
+    INTO trigger_count, trigger_list
+    FROM pg_trigger
+    WHERE tgrelid = 'sales'::regclass
+    AND NOT tgisinternal;
+    
+    IF trigger_count = 0 THEN
+        RAISE NOTICE 'SUCCESS: No custom triggers remain on sales table';
+    ELSE
+        RAISE NOTICE 'WARNING: % triggers still exist on sales table: %', trigger_count, trigger_list;
+    END IF;
+END $$;
 
 -- Step 8: Check for any RLS policies that might be interfering
 SELECT 'RLS Policies on sales table:' as info;
