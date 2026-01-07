@@ -54,6 +54,8 @@ export function Calendar() {
   const [lastUpdates, setLastUpdates] = useState<Record<string, { date: string; user: string }>>({})
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false)
   const [selectedRendezvousForDetails, setSelectedRendezvousForDetails] = useState<Rendezvous | null>(null)
+  const [landPiecesDetails, setLandPiecesDetails] = useState<any[]>([])
+  const [loadingPieces, setLoadingPieces] = useState(false)
 
   const currentMonth = currentDate.getMonth()
   const currentYear = currentDate.getFullYear()
@@ -583,9 +585,31 @@ export function Calendar() {
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={() => {
+                            onClick={async () => {
                               setSelectedRendezvousForDetails(r)
                               setDetailsDialogOpen(true)
+                              // Fetch land pieces details
+                              if (r.sale?.land_piece_ids && r.sale.land_piece_ids.length > 0) {
+                                setLoadingPieces(true)
+                                try {
+                                  const { data: piecesData, error: piecesError } = await supabase
+                                    .from('land_pieces')
+                                    .select('id, piece_number, surface_area, land_batch_id, land_batch:land_batches(name)')
+                                    .in('id', r.sale.land_piece_ids)
+                                  
+                                  if (piecesError) {
+                                    console.error('Error fetching land pieces:', piecesError)
+                                  } else {
+                                    setLandPiecesDetails(piecesData || [])
+                                  }
+                                } catch (err) {
+                                  console.error('Error fetching land pieces:', err)
+                                } finally {
+                                  setLoadingPieces(false)
+                                }
+                              } else {
+                                setLandPiecesDetails([])
+                              }
                             }}
                             className="text-xs"
                           >
