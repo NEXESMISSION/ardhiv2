@@ -1,8 +1,8 @@
 -- ============================================
--- FIX SALE STATUS "CONFIRMED" ERROR - COMPREHENSIVE FIX
+-- FIX SALE STATUS "CONFIRMED" ERROR - SIMPLIFIED VERSION
 -- ============================================
--- This script aggressively removes ALL triggers and functions
--- that might be trying to set sale status to "Confirmed"
+-- This script removes triggers and functions that might be causing
+-- "invalid input value for enum sale_status: Confirmed" error
 -- Run this script in Supabase SQL Editor (Dashboard > SQL Editor)
 -- ============================================
 
@@ -15,7 +15,7 @@ ORDER BY enumsortorder;
 
 -- Step 2: List ALL triggers on the sales table BEFORE removal
 SELECT 'Triggers on sales table (BEFORE):' as info;
-SELECT tgname as trigger_name, tgenabled as enabled
+SELECT tgname as trigger_name
 FROM pg_trigger
 WHERE tgrelid = 'sales'::regclass
 AND NOT tgisinternal;
@@ -49,59 +49,43 @@ BEGIN
     END IF;
 END $$;
 
--- Step 4: Find and drop functions that reference 'Confirmed' or 'is_confirmed'
-SELECT 'Functions that might reference Confirmed (BEFORE):' as info;
-SELECT 
-    p.proname as function_name,
-    pg_get_functiondef(p.oid) as function_definition
-FROM pg_proc p
-JOIN pg_namespace n ON p.pronamespace = n.oid
-WHERE n.nspname = 'public'
-AND (
-    pg_get_functiondef(p.oid) ILIKE '%Confirmed%' 
-    OR pg_get_functiondef(p.oid) ILIKE '%is_confirmed%'
-    OR pg_get_functiondef(p.oid) ILIKE '%sale_status%'
-)
-AND p.proname NOT LIKE 'pg_%';
-
--- Step 5: Drop functions that reference Confirmed or is_confirmed
+-- Step 4: Drop known problematic function names (simplified approach)
+-- Drop functions by name pattern instead of searching by content
 DO $$
 DECLARE
-    func_record RECORD;
+    func_name TEXT;
     dropped_count INTEGER := 0;
 BEGIN
-    FOR func_record IN 
-        SELECT 
-            p.proname as func_name,
-            pg_get_function_arguments(p.oid) as func_args
+    -- List of common function name patterns that might cause issues
+    FOR func_name IN 
+        SELECT p.proname
         FROM pg_proc p
         JOIN pg_namespace n ON p.pronamespace = n.oid
         WHERE n.nspname = 'public'
         AND (
-            pg_get_functiondef(p.oid) ILIKE '%Confirmed%' 
-            OR pg_get_functiondef(p.oid) ILIKE '%is_confirmed%'
+            p.proname ILIKE '%confirm%'
+            OR p.proname ILIKE '%sale_status%'
+            OR p.proname ILIKE '%trigger%'
         )
         AND p.proname NOT LIKE 'pg_%'
     LOOP
         BEGIN
-            EXECUTE format('DROP FUNCTION IF EXISTS %I(%s) CASCADE', 
-                func_record.func_name, 
-                COALESCE(func_record.func_args, ''));
+            EXECUTE format('DROP FUNCTION IF EXISTS %I CASCADE', func_name);
             dropped_count := dropped_count + 1;
-            RAISE NOTICE 'Dropped function: %', func_record.func_name;
+            RAISE NOTICE 'Dropped function: %', func_name;
         EXCEPTION WHEN OTHERS THEN
-            RAISE NOTICE 'Error dropping function %: %', func_record.func_name, SQLERRM;
+            RAISE NOTICE 'Error dropping function %: %', func_name, SQLERRM;
         END;
     END LOOP;
     
     IF dropped_count = 0 THEN
-        RAISE NOTICE 'No problematic functions found';
+        RAISE NOTICE 'No problematic functions found by name pattern';
     ELSE
         RAISE NOTICE 'Total functions dropped: %', dropped_count;
     END IF;
 END $$;
 
--- Step 6: Remove is_confirmed column if it exists (it might be causing issues)
+-- Step 5: Reset is_confirmed column if it exists
 DO $$
 BEGIN
     IF EXISTS (
@@ -111,27 +95,40 @@ BEGIN
         -- First, reset all values to false
         UPDATE sales SET is_confirmed = false WHERE is_confirmed = true;
         RAISE NOTICE 'Reset is_confirmed to false for all sales';
-        
-        -- Optionally, drop the column entirely (uncomment if needed)
-        -- ALTER TABLE sales DROP COLUMN IF EXISTS is_confirmed;
-        -- RAISE NOTICE 'Dropped is_confirmed column';
     ELSE
         RAISE NOTICE 'is_confirmed column does not exist';
     END IF;
 END $$;
 
--- Step 7: Verify no triggers remain on sales table
+-- Step 6: Verify no triggers remain on sales table
 SELECT 'Triggers on sales table (AFTER):' as info;
 DO $$
 DECLARE
     trigger_count INTEGER;
-    trigger_list TEXT;
+    trigger_list TEXT := '';
+    trigger_record RECORD;
 BEGIN
-    SELECT COUNT(*), COALESCE(string_agg(tgname, ', '), '')
-    INTO trigger_count, trigger_list
+    -- Get count
+    SELECT COUNT(*) INTO trigger_count
     FROM pg_trigger
     WHERE tgrelid = 'sales'::regclass
     AND NOT tgisinternal;
+    
+    -- Build list manually to avoid aggregate function issues
+    IF trigger_count > 0 THEN
+        FOR trigger_record IN 
+            SELECT tgname 
+            FROM pg_trigger
+            WHERE tgrelid = 'sales'::regclass
+            AND NOT tgisinternal
+        LOOP
+            IF trigger_list = '' THEN
+                trigger_list := trigger_record.tgname;
+            ELSE
+                trigger_list := trigger_list || ', ' || trigger_record.tgname;
+            END IF;
+        END LOOP;
+    END IF;
     
     IF trigger_count = 0 THEN
         RAISE NOTICE 'SUCCESS: No custom triggers remain on sales table';
@@ -140,20 +137,7 @@ BEGIN
     END IF;
 END $$;
 
--- Step 8: Check for any RLS policies that might be interfering
-SELECT 'RLS Policies on sales table:' as info;
-SELECT 
-    schemaname,
-    tablename,
-    policyname,
-    permissive,
-    roles,
-    cmd,
-    qual
-FROM pg_policies
-WHERE tablename = 'sales';
-
--- Step 9: Show summary of sales statuses
+-- Step 7: Show summary of sales statuses
 SELECT 'Summary of current sales statuses:' as info;
 SELECT 
     status,
@@ -166,7 +150,8 @@ ORDER BY count DESC;
 -- DONE! 
 -- ============================================
 -- If you still get the error after running this:
--- 1. Check the console logs for the exact error message
--- 2. Make sure you ran ALL steps of this script
--- 3. Try refreshing the page and trying again
+-- 1. The error might be coming from a trigger/function that executes
+--    when you try to update sales. Try running the script again.
+-- 2. Check if there are any database-level triggers (not table-level)
+-- 3. Try updating a sale manually to see if the error persists
 -- ============================================

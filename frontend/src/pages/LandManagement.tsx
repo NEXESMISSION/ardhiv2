@@ -3684,9 +3684,12 @@ export function LandManagement() {
       const totalCost = parseFloat(selectedPieceObjects.reduce((sum, p) => sum + (parseFloat(p.purchase_cost) || 0), 0).toFixed(2))
       const totalPrice = parseFloat(selectedPieceObjects.reduce((sum, p: any) => {
         if (saleForm.payment_type === 'Full' || saleForm.payment_type === 'PromiseOfSale') {
-          // For Available pieces, calculate from batch price_per_m2_full
-          // For Reserved pieces, use stored selling_price_full
-          if (p.status === 'Available' && p.land_batch?.price_per_m2_full) {
+          // Always use piece's selling_price_full if it exists (it may have been updated)
+          // Only fall back to batch price_per_m2_full if piece price is not set
+          if (p.selling_price_full && parseFloat(p.selling_price_full) > 0) {
+            return sum + (parseFloat(p.selling_price_full) || 0)
+          } else if (p.status === 'Available' && p.land_batch?.price_per_m2_full) {
+            // Fall back to batch price if piece price is not set
             return sum + (p.surface_area * parseFloat(p.land_batch.price_per_m2_full))
           } else {
             return sum + (parseFloat(p.selling_price_full) || 0)
@@ -3819,25 +3822,64 @@ export function LandManagement() {
       }
       
       // Add selected_offer_id if an offer was selected and payment type is Installment
-      if (saleForm.payment_type === 'Installment' && selectedOffer?.id) {
-        saleData.selected_offer_id = selectedOffer.id
+      if (saleForm.payment_type === 'Installment') {
+        // Get piece-specific offers for each piece
+        const pieceIds = Array.from(selectedPieces)
+        const { data: allPieceOffers } = await supabase
+          .from('payment_offers')
+          .select('*')
+          .in('land_piece_id', pieceIds)
+          .order('is_default', { ascending: false })
+          .order('created_at', { ascending: true })
         
-        // Calculate per piece
+        // Create a map of piece ID to its offers
+        const pieceOffersMap: Record<string, PaymentOffer[]> = {}
+        if (allPieceOffers) {
+          allPieceOffers.forEach((offer: PaymentOffer) => {
+            if (offer.land_piece_id) {
+              if (!pieceOffersMap[offer.land_piece_id]) {
+                pieceOffersMap[offer.land_piece_id] = []
+              }
+              pieceOffersMap[offer.land_piece_id].push(offer)
+            }
+          })
+        }
+        
+        // Calculate per piece - use piece-specific offer if available, otherwise use selected offer
         const pieceCount = selectedPieceObjects.length
         const reservationPerPiece = reservation / pieceCount
         
         const piecesCalculations = selectedPieceObjects.map(p => {
-          const piecePrice = selectedOffer.price_per_m2_installment 
-            ? (p.surface_area * selectedOffer.price_per_m2_installment)
+          // Check if this piece has specific offers
+          const pieceSpecificOffers = pieceOffersMap[p.id] || []
+          const offerToUse = pieceSpecificOffers.length > 0 
+            ? pieceSpecificOffers[0] // Use first piece-specific offer (prioritize default if exists)
+            : selectedOffer // Fall back to selected batch offer
+          
+          if (!offerToUse) {
+            // No offer available - use piece's stored price
+            const piecePrice = parseFloat(p.selling_price_installment) || parseFloat(p.selling_price_full) || 0
+            return {
+              companyFeePerPiece: 0,
+              advancePerPiece: 0,
+              remainingPerPiece: piecePrice - reservationPerPiece,
+              monthsPerPiece: 0,
+              monthlyAmountPerPiece: 0,
+              offerId: null
+            }
+          }
+          
+          const piecePrice = offerToUse.price_per_m2_installment 
+            ? (p.surface_area * offerToUse.price_per_m2_installment)
             : (parseFloat(p.selling_price_installment) || parseFloat(p.selling_price_full) || 0)
           
-          const companyFeePercentage = selectedOffer.company_fee_percentage || 0
+          const companyFeePercentage = offerToUse.company_fee_percentage || 0
           const companyFeePerPiece = (piecePrice * companyFeePercentage) / 100
           const totalPayablePerPiece = piecePrice + companyFeePerPiece
           
-          const advancePerPiece = selectedOffer.advance_is_percentage
-            ? (piecePrice * selectedOffer.advance_amount) / 100
-            : selectedOffer.advance_amount
+          const advancePerPiece = offerToUse.advance_is_percentage
+            ? (piecePrice * offerToUse.advance_amount) / 100
+            : offerToUse.advance_amount
           
           const remainingPerPiece = totalPayablePerPiece - reservationPerPiece - advancePerPiece
           
@@ -3845,17 +3887,17 @@ export function LandManagement() {
           let monthsPerPiece = 0
           let monthlyAmountPerPiece = 0
           
-          if (selectedOffer.monthly_payment && selectedOffer.monthly_payment > 0) {
+          if (offerToUse.monthly_payment && offerToUse.monthly_payment > 0) {
             // Offer has monthly_payment - calculate number of months
-            monthlyAmountPerPiece = selectedOffer.monthly_payment
+            monthlyAmountPerPiece = offerToUse.monthly_payment
             monthsPerPiece = remainingPerPiece > 0
-              ? Math.ceil(remainingPerPiece / selectedOffer.monthly_payment)
+              ? Math.ceil(remainingPerPiece / offerToUse.monthly_payment)
               : 0
-          } else if (selectedOffer.number_of_months && selectedOffer.number_of_months > 0) {
+          } else if (offerToUse.number_of_months && offerToUse.number_of_months > 0) {
             // Offer has number_of_months - calculate monthly payment
-            monthsPerPiece = selectedOffer.number_of_months
+            monthsPerPiece = offerToUse.number_of_months
             monthlyAmountPerPiece = remainingPerPiece > 0
-              ? remainingPerPiece / selectedOffer.number_of_months
+              ? remainingPerPiece / offerToUse.number_of_months
               : 0
           }
           
@@ -3864,20 +3906,39 @@ export function LandManagement() {
             advancePerPiece,
             remainingPerPiece,
             monthsPerPiece,
-            monthlyAmountPerPiece
+            monthlyAmountPerPiece,
+            offerId: offerToUse.id
           }
         })
         
         // Sum up totals
-        const companyFeePercentage = selectedOffer.company_fee_percentage || 0
+        // Use the most common offer ID (or selected offer if all pieces use different offers)
+        const offerIds = piecesCalculations.map(calc => calc.offerId).filter(Boolean)
+        const mostCommonOfferId = offerIds.length > 0 
+          ? offerIds.reduce((a, b, _, arr) => 
+              arr.filter(v => v === a).length >= arr.filter(v => v === b).length ? a : b
+            )
+          : selectedOffer?.id || null
+        
+        saleData.selected_offer_id = mostCommonOfferId
+        
         const companyFeeAmount = piecesCalculations.reduce((sum, calc) => sum + calc.companyFeePerPiece, 0)
         const advanceAmount = piecesCalculations.reduce((sum, calc) => sum + calc.advancePerPiece, 0)
         const maxMonths = Math.max(...piecesCalculations.map(calc => calc.monthsPerPiece), 0)
-        // For monthly amount, use the average or max - typically we use the max monthly amount needed
-        // But since each piece might have different monthly amounts, we use the maximum
+        // For monthly amount, use the maximum monthly amount needed
         const monthlyAmount = Math.max(...piecesCalculations.map(calc => calc.monthlyAmountPerPiece), 0)
         
-        saleData.company_fee_percentage = companyFeePercentage
+        // Use average company fee percentage (weighted by piece prices)
+        const totalPiecePrice = piecesCalculations.reduce((sum, calc, idx) => {
+          const p = selectedPieceObjects[idx] as any
+          const price = parseFloat(p.selling_price_installment) || parseFloat(p.selling_price_full) || 0
+          return sum + price
+        }, 0)
+        const avgCompanyFeePercentage = totalPiecePrice > 0
+          ? (companyFeeAmount / totalPiecePrice) * 100
+          : 0
+        
+        saleData.company_fee_percentage = avgCompanyFeePercentage
         saleData.company_fee_amount = companyFeeAmount
         saleData.number_of_installments = maxMonths
         saleData.monthly_installment_amount = monthlyAmount
@@ -3941,8 +4002,12 @@ export function LandManagement() {
         const batchPricePerM2Full = (batchData as any)?.price_per_m2_full
 
         if (saleForm.payment_type === 'Full' || saleForm.payment_type === 'PromiseOfSale') {
-          // For Full payment or PromiseOfSale, calculate from batch price_per_m2_full for Available pieces
-          if (piece.status === 'Available' && batchPricePerM2Full) {
+          // Always use piece's selling_price_full if it exists (it may have been updated)
+          // Only fall back to batch price_per_m2_full if piece price is not set
+          if (piece.selling_price_full && parseFloat(piece.selling_price_full) > 0) {
+            calculatedPrice = parseFloat(piece.selling_price_full) || 0
+          } else if (piece.status === 'Available' && batchPricePerM2Full) {
+            // Fall back to batch price if piece price is not set
             calculatedPrice = piece.surface_area * parseFloat(batchPricePerM2Full)
           } else {
             calculatedPrice = parseFloat(piece.selling_price_full) || 0
@@ -3951,8 +4016,12 @@ export function LandManagement() {
           // For Installment payment
           if (selectedOffer && selectedOffer.price_per_m2_installment) {
             calculatedInstallmentPrice = piece.surface_area * selectedOffer.price_per_m2_installment
-            // Also calculate full price from batch if available
-            if (piece.status === 'Available' && batchPricePerM2Full) {
+            // Always use piece's selling_price_full if it exists (it may have been updated)
+            // Only fall back to batch price_per_m2_full if piece price is not set
+            if (piece.selling_price_full && parseFloat(piece.selling_price_full) > 0) {
+              calculatedPrice = parseFloat(piece.selling_price_full) || 0
+            } else if (piece.status === 'Available' && batchPricePerM2Full) {
+              // Fall back to batch price if piece price is not set
               calculatedPrice = piece.surface_area * parseFloat(batchPricePerM2Full)
             } else {
               calculatedPrice = parseFloat(piece.selling_price_full) || 0
