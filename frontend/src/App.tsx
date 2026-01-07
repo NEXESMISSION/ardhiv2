@@ -19,6 +19,7 @@ import { RealEstateBuildings } from '@/pages/RealEstateBuildings'
 import { Workers } from '@/pages/Workers'
 import { Messages } from '@/pages/Messages'
 import { Calendar } from '@/pages/Calendar'
+import { PhoneCalls } from '@/pages/PhoneCalls'
 import { AccountDisabled } from '@/pages/AccountDisabled'
 import { LoadingProgress } from '@/components/ui/loading-progress'
 import { NotificationContainer } from '@/components/ui/notification'
@@ -275,6 +276,14 @@ function AppRoutes() {
           element={
             <PermissionProtectedRoute permission="edit_sales" pageId="calendar">
               <Calendar />
+            </PermissionProtectedRoute>
+          } 
+        />
+        <Route 
+          path="phone-calls" 
+          element={
+            <PermissionProtectedRoute permission={null} pageId="phone-calls">
+              <PhoneCalls />
             </PermissionProtectedRoute>
           } 
         />

@@ -15,7 +15,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import { formatDate, formatCurrency } from '@/lib/utils'
-import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Clock, X, Edit, History } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Clock, X, Edit, History, Info, MapPin } from 'lucide-react'
 import { showNotification } from '@/components/ui/notification'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import type { Sale, Client } from '@/types/database'
@@ -52,6 +52,8 @@ export function Calendar() {
   const [rendezvousHistory, setRendezvousHistory] = useState<any[]>([])
   const [loadingHistory, setLoadingHistory] = useState(false)
   const [lastUpdates, setLastUpdates] = useState<Record<string, { date: string; user: string }>>({})
+  const [detailsDialogOpen, setDetailsDialogOpen] = useState(false)
+  const [selectedRendezvousForDetails, setSelectedRendezvousForDetails] = useState<Rendezvous | null>(null)
 
   const currentMonth = currentDate.getMonth()
   const currentYear = currentDate.getFullYear()
@@ -81,7 +83,8 @@ export function Calendar() {
           *,
           sale:sales(
             *,
-            client:clients(*)
+            client:clients(*),
+            selected_offer:payment_offers!sales_selected_offer_id_fkey(*)
           )
         `)
         .gte('rendezvous_date', startDate)
@@ -506,70 +509,124 @@ export function Calendar() {
             </div>
           ) : (
             <div className="space-y-3">
-              {selectedDateRendezvous.map((r) => (
-                <Card key={r.id} className="border-l-4 border-l-primary">
-                  <CardContent className="p-4">
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-2">
-                          <Clock className="h-4 w-4 text-muted-foreground" />
-                          <span className="font-semibold">{r.rendezvous_time}</span>
-                        </div>
-                        <p className="font-medium text-sm mb-1">
-                          العميل: {r.sale?.client?.name || 'غير معروف'}
-                        </p>
-                        <p className="text-xs text-muted-foreground mb-1">
-                          رقم البيع: #{r.sale_id.slice(0, 8)}
-                        </p>
-                        {r.notes && (
-                          <p className="text-xs text-muted-foreground mt-2">{r.notes}</p>
-                        )}
-                        {!isOwner && lastUpdates[r.id] && (
-                          <div className="mt-2 p-2 bg-gray-50 rounded text-xs">
-                            <p className="text-muted-foreground">
-                              آخر تحديث: {lastUpdates[r.id].date}
+              {selectedDateRendezvous.map((r) => {
+                const sale = r.sale as any
+                const paymentType = sale?.payment_type === 'Full' ? 'بالحاضر' : sale?.payment_type === 'Installment' ? 'بالتقسيط' : sale?.payment_type || 'غير محدد'
+                const offer = sale?.selected_offer
+                
+                return (
+                  <Card key={r.id} className="border-l-4 border-l-primary">
+                    <CardContent className="p-4">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex-1 space-y-2">
+                          <div className="flex items-center gap-2">
+                            <Clock className="h-4 w-4 text-muted-foreground" />
+                            <span className="font-semibold">{r.rendezvous_time}</span>
+                          </div>
+                          <div>
+                            <p className="font-medium text-sm mb-1">
+                              العميل: {sale?.client?.name || 'غير معروف'}
                             </p>
-                            <p className="text-muted-foreground">
-                              بواسطة: {lastUpdates[r.id].user}
+                            <p className="text-xs text-muted-foreground mb-1">
+                              رقم البيع: #{r.sale_id.slice(0, 8)}
                             </p>
                           </div>
-                        )}
-                      </div>
-                      <div className="flex flex-col gap-2">
-                        {isOwner && (
+                          
+                          {/* Sale Details */}
+                          {sale && (
+                            <div className="bg-blue-50 border border-blue-200 rounded-lg p-2 space-y-1">
+                              <div className="flex items-center gap-2 text-xs">
+                                <span className="font-medium">نوع الدفع:</span>
+                                <Badge variant="outline" className="text-xs">
+                                  {paymentType}
+                                </Badge>
+                              </div>
+                              <div className="text-xs text-muted-foreground">
+                                <span className="font-medium">السعر الإجمالي:</span> {formatCurrency(sale.total_selling_price || 0)}
+                              </div>
+                              {sale.small_advance_amount > 0 && (
+                                <div className="text-xs text-muted-foreground">
+                                  <span className="font-medium">العربون:</span> {formatCurrency(sale.small_advance_amount)}
+                                </div>
+                              )}
+                              {sale.big_advance_amount > 0 && (
+                                <div className="text-xs text-muted-foreground">
+                                  <span className="font-medium">الدفعة الأولى:</span> {formatCurrency(sale.big_advance_amount)}
+                                </div>
+                              )}
+                              {offer && (
+                                <div className="text-xs text-muted-foreground mt-1 pt-1 border-t border-blue-300">
+                                  <span className="font-medium">العرض المختار:</span> {offer.name || 'عرض التقسيط'}
+                                  {offer.monthly_payment && (
+                                    <span className="mr-2"> - القسط الشهري: {formatCurrency(offer.monthly_payment)}</span>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                          
+                          {r.notes && (
+                            <p className="text-xs text-muted-foreground mt-2 p-2 bg-gray-50 rounded">{r.notes}</p>
+                          )}
+                          {!isOwner && lastUpdates[r.id] && (
+                            <div className="mt-2 p-2 bg-gray-50 rounded text-xs">
+                              <p className="text-muted-foreground">
+                                آخر تحديث: {lastUpdates[r.id].date}
+                              </p>
+                              <p className="text-muted-foreground">
+                                بواسطة: {lastUpdates[r.id].user}
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex flex-col gap-2">
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={() => handleViewHistory(r)}
+                            onClick={() => {
+                              setSelectedRendezvousForDetails(r)
+                              setDetailsDialogOpen(true)
+                            }}
                             className="text-xs"
                           >
-                            <History className="h-3 w-3 ml-1" />
-                            السجل
+                            <Info className="h-3 w-3 ml-1" />
+                            التفاصيل
                           </Button>
-                        )}
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleExtend(r)}
-                          className="text-xs"
-                        >
-                          <Edit className="h-3 w-3 ml-1" />
-                          تغيير
-                        </Button>
-                        <Button
-                          variant="destructive"
-                          size="sm"
-                          onClick={() => handleCancel(r)}
-                          className="text-xs"
-                        >
-                          <X className="h-3 w-3 ml-1" />
-                          إلغاء
-                        </Button>
+                          {isOwner && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleViewHistory(r)}
+                              className="text-xs"
+                            >
+                              <History className="h-3 w-3 ml-1" />
+                              السجل
+                            </Button>
+                          )}
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleExtend(r)}
+                            className="text-xs"
+                          >
+                            <Edit className="h-3 w-3 ml-1" />
+                            تغيير
+                          </Button>
+                          <Button
+                            variant="destructive"
+                            size="sm"
+                            onClick={() => handleCancel(r)}
+                            className="text-xs"
+                          >
+                            <X className="h-3 w-3 ml-1" />
+                            إلغاء
+                          </Button>
+                        </div>
                       </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
+                    </CardContent>
+                  </Card>
+                )
+              })}
             </div>
           )}
           <DialogFooter>

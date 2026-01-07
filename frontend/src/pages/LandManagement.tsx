@@ -3339,15 +3339,32 @@ export function LandManagement() {
 
       const sanitizedPhone = sanitizePhone(clientForm.phone)
       
-      // Check for duplicate CIN
-      const { data: existingClient } = await supabase
+      // Check for duplicate CIN - if found, use it instead of showing error
+      const { data: existingClients, error: checkError } = await supabase
         .from('clients')
-        .select('id, name')
+        .select('*')
         .eq('cin', sanitizedCIN)
         .limit(1)
 
-      if (existingClient && existingClient.length > 0) {
-        showNotification(`عميل برقم CIN "${sanitizedCIN}" موجود بالفعل: ${existingClient[0].name}`, 'error')
+      if (existingClients && existingClients.length > 0) {
+        const existingClient = existingClients[0]
+        // Client exists - use it instead of creating new one
+        setFoundClient(existingClient)
+        setNewClient(existingClient)
+        setClientForm({
+          name: existingClient.name,
+          cin: existingClient.cin,
+          phone: existingClient.phone || '',
+          email: existingClient.email || '',
+          address: existingClient.address || '',
+          client_type: existingClient.client_type,
+          notes: existingClient.notes || '',
+        })
+        setClientDialogOpen(false)
+        if (selectedPieces.size > 0) {
+          await loadOffersForSelectedPieces()
+          setSaleDialogOpen(true)
+        }
         setSavingClient(false)
         return
       }
@@ -3374,10 +3391,12 @@ export function LandManagement() {
       setNewClient(newClientData)
       setClientDialogOpen(false)
       
-      // Load offers for selected pieces
-      await loadOffersForSelectedPieces()
-      
-      setSaleDialogOpen(true)
+      // Only open sale dialog if there are selected pieces
+      if (selectedPieces.size > 0) {
+        // Load offers for selected pieces
+        await loadOffersForSelectedPieces()
+        setSaleDialogOpen(true)
+      }
       showNotification('تم إضافة العميل بنجاح', 'success')
     } catch (error: any) {
       console.error('Error creating client:', error)
@@ -5415,7 +5434,7 @@ export function LandManagement() {
           }}
         >
           <DialogHeader>
-            <DialogTitle>إنشاء بيع جديد</DialogTitle>
+            <DialogTitle>{t('land.createNewSale')}</DialogTitle>
           </DialogHeader>
           {newClient && (
             <div className="space-y-4">
