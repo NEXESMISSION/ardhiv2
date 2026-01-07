@@ -982,6 +982,43 @@ export function Calendar() {
                   </div>
                 )}
 
+                {/* Land Pieces */}
+                {sale?.land_piece_ids && sale.land_piece_ids.length > 0 && (
+                  <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
+                    <h3 className="font-semibold mb-2 flex items-center gap-2">
+                      <MapPin className="h-4 w-4" />
+                      قطع الأراضي ({sale.land_piece_ids.length})
+                    </h3>
+                    {loadingPieces ? (
+                      <div className="text-sm text-muted-foreground">
+                        <p>جاري تحميل تفاصيل القطع...</p>
+                      </div>
+                    ) : landPiecesDetails.length > 0 ? (
+                      <div className="space-y-2">
+                        {landPiecesDetails.map((piece: any) => (
+                          <div key={piece.id} className="bg-white border border-purple-200 rounded p-2 text-sm">
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <span className="font-medium">القطعة #{piece.piece_number}</span>
+                                {piece.surface_area && (
+                                  <span className="text-muted-foreground mr-2"> - {piece.surface_area} م²</span>
+                                )}
+                              </div>
+                              <div className="text-muted-foreground">
+                                <span className="font-medium">الدفعة:</span> {piece.land_batch?.name || 'غير معروف'}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-sm text-muted-foreground">
+                        <p>لا توجد تفاصيل متاحة للقطع</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* Rendezvous Info */}
                 <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
                   <h3 className="font-semibold mb-2">معلومات الموعد</h3>
