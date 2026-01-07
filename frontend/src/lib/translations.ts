@@ -16,8 +16,8 @@ export const translations = {
       realEstate: 'التطوير والبناء',
       workers: 'العمال',
       messages: 'الرسائل',
-      calendar: 'تقويم المواعيد',
-      phoneCalls: 'مكالمات',
+      calendar: 'موعد اتمام البيع',
+      phoneCalls: 'مواعيد',
       download: 'تحميل التطبيق',
       users: 'المستخدمين',
       security: 'الأمان',
@@ -429,10 +429,10 @@ export const translations = {
       update: 'تحديث',
       delete: 'حذف',
     },
-    // Phone Calls
+    // Appointments (formerly Phone Calls)
     phoneCalls: {
-      title: 'مكالمات',
-      addCall: 'إضافة مكالمة',
+      title: 'مواعيد',
+      addCall: 'إضافة موعد',
       phoneNumber: 'رقم الهاتف',
       name: 'الاسم',
       rendezvousDate: 'تاريخ الموعد',
@@ -523,8 +523,8 @@ export const translations = {
       realEstate: 'Développement et Construction',
       workers: 'Ouvriers',
       messages: 'Messages',
-      calendar: 'Calendrier des Rendez-vous',
-      phoneCalls: 'Appels Téléphoniques',
+      calendar: 'Rendez-vous de Finalisation de Vente',
+      phoneCalls: 'Rendez-vous',
       download: 'Télécharger l\'Application',
       users: 'Utilisateurs',
       security: 'Sécurité',
@@ -919,10 +919,10 @@ export const translations = {
       totalPaid: 'Total Payé',
       remaining: 'Restant',
     },
-    // Phone Calls
+    // Appointments (formerly Phone Calls)
     phoneCalls: {
-      title: 'Appels Téléphoniques',
-      addCall: 'Ajouter un Appel',
+      title: 'Rendez-vous',
+      addCall: 'Ajouter un Rendez-vous',
       phoneNumber: 'Numéro de Téléphone',
       name: 'Nom',
       rendezvousDate: 'Date du Rendez-vous',

@@ -502,6 +502,15 @@ export function Clients() {
     )
   }
 
+  // Calculate client statistics
+  const clientStats = useMemo(() => {
+    const total = clients.length
+    const withSales = clients.filter(c => c.sales && c.sales.length > 0).length
+    const individuals = clients.filter(c => c.client_type === 'Individual').length
+    const companies = clients.filter(c => c.client_type === 'Company').length
+    return { total, withSales, individuals, companies }
+  }, [clients])
+
   return (
     <div className="space-y-3 sm:space-y-4 md:space-y-6 p-3 sm:p-4 md:p-6">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4">
@@ -509,12 +518,38 @@ export function Clients() {
           <h1 className="text-xl sm:text-2xl md:text-3xl font-bold">إدارة العملاء</h1>
           <p className="text-muted-foreground text-xs sm:text-sm md:text-base mt-1">إدارة عملائك ومعلوماتهم</p>
         </div>
-        {hasPermission('edit_clients') && (
-          <Button onClick={() => openDialog()} className="w-full sm:w-auto">
-            <Plus className="mr-2 h-4 w-4" />
-            إضافة عميل
-          </Button>
-        )}
+        <Button onClick={() => openDialog()} className="w-full sm:w-auto">
+          <Plus className="mr-2 h-4 w-4" />
+          إضافة عميل
+        </Button>
+      </div>
+
+      {/* Stats */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
+        <Card className="bg-blue-50 border-blue-200">
+          <CardContent className="p-3 text-center">
+            <p className="text-2xl font-bold text-blue-700">{clientStats.total}</p>
+            <p className="text-xs text-blue-600">إجمالي العملاء</p>
+          </CardContent>
+        </Card>
+        <Card className="bg-green-50 border-green-200">
+          <CardContent className="p-3 text-center">
+            <p className="text-2xl font-bold text-green-700">{clientStats.withSales}</p>
+            <p className="text-xs text-green-600">لديهم مبيعات</p>
+          </CardContent>
+        </Card>
+        <Card className="bg-purple-50 border-purple-200">
+          <CardContent className="p-3 text-center">
+            <p className="text-2xl font-bold text-purple-700">{clientStats.individuals}</p>
+            <p className="text-xs text-purple-600">أفراد</p>
+          </CardContent>
+        </Card>
+        <Card className="bg-orange-50 border-orange-200">
+          <CardContent className="p-3 text-center">
+            <p className="text-2xl font-bold text-orange-700">{clientStats.companies}</p>
+            <p className="text-xs text-orange-600">شركات</p>
+          </CardContent>
+        </Card>
       </div>
 
       {/* Search */}

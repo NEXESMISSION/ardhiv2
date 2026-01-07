@@ -71,7 +71,7 @@ WHERE NOT EXISTS (
 )
 AND lp.status = 'Reserved';
 
--- Step 6: Verify pieces status
+-- Step 6: Verify pieces status (using land_batch_id instead of batch_id)
 SELECT 
     lp.id as piece_id,
     lp.piece_number,
@@ -81,7 +81,7 @@ SELECT
     s.status as sale_status,
     s.payment_type
 FROM land_pieces lp
-JOIN land_batches lb ON lp.batch_id = lb.id
+LEFT JOIN land_batches lb ON lp.land_batch_id = lb.id
 LEFT JOIN sales s ON lp.id = ANY(s.land_piece_ids) AND s.status NOT IN ('Cancelled')
 ORDER BY lb.name, lp.piece_number
 LIMIT 30;

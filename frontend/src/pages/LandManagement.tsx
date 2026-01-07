@@ -30,7 +30,7 @@ import { sanitizeText, sanitizeNotes, sanitizeEmail, sanitizePhone, sanitizeCIN 
 import { showNotification } from '@/components/ui/notification'
 import { debounce } from '@/lib/throttle'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Plus, Edit, Trash2, Map, ChevronDown, ChevronRight, Calculator, X, DollarSign, AlertTriangle, ShoppingCart, Upload, Image as ImageIcon, Settings, RotateCcw, CheckCircle, XCircle } from 'lucide-react'
+import { Plus, Edit, Trash2, Map, ChevronDown, ChevronRight, Calculator, X, DollarSign, AlertTriangle, ShoppingCart, Upload, Image as ImageIcon, Settings, RotateCcw, CheckCircle, XCircle, Eye, User } from 'lucide-react'
 import type { LandBatch, LandPiece, LandStatus, Client, PaymentOffer } from '@/types/database'
 
 interface LandBatchWithPieces extends LandBatch {
@@ -605,6 +605,44 @@ export function LandManagement() {
     selling_price_full: '',
     selling_price_installment: '',
   })
+  
+  // Sale details dialog for sold/reserved pieces
+  const [saleDetailsDialogOpen, setSaleDetailsDialogOpen] = useState(false)
+  const [saleDetailsPiece, setSaleDetailsPiece] = useState<LandPiece | null>(null)
+  const [saleDetailsData, setSaleDetailsData] = useState<any>(null)
+  const [loadingSaleDetails, setLoadingSaleDetails] = useState(false)
+  
+  const openSaleDetailsDialog = async (piece: LandPiece) => {
+    setSaleDetailsPiece(piece)
+    setSaleDetailsDialogOpen(true)
+    setLoadingSaleDetails(true)
+    setSaleDetailsData(null)
+    
+    try {
+      // Find the sale for this piece
+      const { data: salesData, error } = await supabase
+        .from('sales')
+        .select(`
+          *,
+          client:clients(*)
+        `)
+        .contains('land_piece_ids', [piece.id])
+        .not('status', 'eq', 'Cancelled')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single()
+      
+      if (error) {
+        console.error('Error fetching sale details:', error)
+      } else {
+        setSaleDetailsData(salesData)
+      }
+    } catch (err) {
+      console.error('Error loading sale details:', err)
+    } finally {
+      setLoadingSaleDetails(false)
+    }
+  }
   
   // Bulk price update dialog
   const [bulkPriceDialogOpen, setBulkPriceDialogOpen] = useState(false)
@@ -4295,6 +4333,22 @@ export function LandManagement() {
                               })()}
                             </div>
                           
+                            {/* Show sale details button for Reserved/Sold pieces */}
+                            {(piece.status === 'Reserved' || piece.status === 'Sold') && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  openSaleDetailsDialog(piece)
+                                }}
+                                className="w-full h-7 text-xs mb-2 bg-white hover:bg-gray-50"
+                              >
+                                <Eye className="h-3 w-3 ml-1" />
+                                عرض تفاصيل البيع
+                              </Button>
+                            )}
+                            
                             {/* Show sale info for reserved pieces */}
                             {piece.status === 'Reserved' && (() => {
                               const sale = reservedSales.find(s => 
@@ -6693,6 +6747,155 @@ export function LandManagement() {
             </Button>
             <Button onClick={isBatchOffer ? saveBatchOffer : savePieceOffer} disabled={!offerForm.price_per_m2_installment || (offerForm.calculation_method === 'monthly' && !offerForm.monthly_payment) || (offerForm.calculation_method === 'months' && !offerForm.number_of_months)}>
               حفظ
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Sale Details Dialog */}
+      <Dialog open={saleDetailsDialogOpen} onOpenChange={setSaleDetailsDialogOpen}>
+        <DialogContent className="w-[95vw] sm:w-full max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              تفاصيل البيع - قطعة #{saleDetailsPiece?.piece_number}
+            </DialogTitle>
+          </DialogHeader>
+          
+          {loadingSaleDetails ? (
+            <div className="flex items-center justify-center py-8">
+              <div className="h-8 w-8 border-4 border-gray-300 border-t-blue-600 rounded-full animate-spin"></div>
+            </div>
+          ) : saleDetailsData ? (
+            <div className="space-y-4">
+              {/* Client Info */}
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <h4 className="font-semibold text-blue-900 mb-2 flex items-center gap-2">
+                  <User className="h-4 w-4" />
+                  معلومات العميل
+                </h4>
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  <div>
+                    <span className="text-gray-500">الاسم:</span>
+                    <p className="font-medium">{saleDetailsData.client?.name || '-'}</p>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">رقم الهوية:</span>
+                    <p className="font-medium">{saleDetailsData.client?.cin || '-'}</p>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">الهاتف:</span>
+                    <p className="font-medium">{saleDetailsData.client?.phone || '-'}</p>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">نوع العميل:</span>
+                    <p className="font-medium">{saleDetailsData.client?.client_type === 'Individual' ? 'فردي' : 'شركة'}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Sale Info */}
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                <h4 className="font-semibold text-green-900 mb-2 flex items-center gap-2">
+                  <ShoppingCart className="h-4 w-4" />
+                  معلومات البيع
+                </h4>
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  <div>
+                    <span className="text-gray-500">نوع الدفع:</span>
+                    <p className="font-medium">
+                      {saleDetailsData.payment_type === 'Full' ? 'بالحاضر' : 
+                       saleDetailsData.payment_type === 'Installment' ? 'بالتقسيط' : 
+                       saleDetailsData.payment_type === 'PromiseOfSale' ? 'وعد بالبيع' : saleDetailsData.payment_type}
+                    </p>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">الحالة:</span>
+                    <p className="font-medium">
+                      {saleDetailsData.status === 'Pending' ? 'محجوز' :
+                       saleDetailsData.status === 'Completed' ? 'مباع' :
+                       saleDetailsData.status === 'Cancelled' ? 'ملغي' : saleDetailsData.status}
+                    </p>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">تاريخ البيع:</span>
+                    <p className="font-medium">{saleDetailsData.sale_date ? formatDate(saleDetailsData.sale_date) : '-'}</p>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">آخر أجل:</span>
+                    <p className="font-medium">{saleDetailsData.deadline_date ? formatDate(saleDetailsData.deadline_date) : '-'}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Financial Info */}
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                <h4 className="font-semibold text-yellow-900 mb-2 flex items-center gap-2">
+                  <DollarSign className="h-4 w-4" />
+                  المعلومات المالية
+                </h4>
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  <div>
+                    <span className="text-gray-500">سعر البيع:</span>
+                    <p className="font-medium text-green-600">{formatCurrency(saleDetailsData.total_selling_price || 0)}</p>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">العربون:</span>
+                    <p className="font-medium">{formatCurrency(saleDetailsData.small_advance_amount || 0)}</p>
+                  </div>
+                  {saleDetailsData.payment_type === 'Installment' && (
+                    <>
+                      <div>
+                        <span className="text-gray-500">التسبقة:</span>
+                        <p className="font-medium">{formatCurrency(saleDetailsData.big_advance_amount || 0)}</p>
+                      </div>
+                      <div>
+                        <span className="text-gray-500">عدد الأقساط:</span>
+                        <p className="font-medium">{saleDetailsData.number_of_installments || '-'}</p>
+                      </div>
+                      <div>
+                        <span className="text-gray-500">القسط الشهري:</span>
+                        <p className="font-medium">{formatCurrency(saleDetailsData.monthly_installment_amount || 0)}</p>
+                      </div>
+                    </>
+                  )}
+                  {saleDetailsData.payment_type === 'PromiseOfSale' && (
+                    <>
+                      <div>
+                        <span className="text-gray-500">المبلغ المستلم:</span>
+                        <p className="font-medium">{formatCurrency(saleDetailsData.promise_initial_payment || 0)}</p>
+                      </div>
+                      <div>
+                        <span className="text-gray-500">حالة الاستكمال:</span>
+                        <p className="font-medium">{saleDetailsData.promise_completed ? 'مكتمل' : 'قيد الانتظار'}</p>
+                      </div>
+                    </>
+                  )}
+                  {saleDetailsData.company_fee_percentage && (
+                    <div>
+                      <span className="text-gray-500">عمولة الشركة:</span>
+                      <p className="font-medium">{saleDetailsData.company_fee_percentage}% ({formatCurrency(saleDetailsData.company_fee_amount || 0)})</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Notes */}
+              {saleDetailsData.notes && (
+                <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                  <h4 className="font-semibold text-gray-900 mb-2">ملاحظات</h4>
+                  <p className="text-sm text-gray-600">{saleDetailsData.notes}</p>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="text-center py-8 text-gray-500">
+              لا توجد معلومات بيع لهذه القطعة
+            </div>
+          )}
+          
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSaleDetailsDialogOpen(false)}>
+              إغلاق
             </Button>
           </DialogFooter>
         </DialogContent>
