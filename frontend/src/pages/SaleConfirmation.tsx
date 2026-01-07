@@ -379,8 +379,9 @@ export function SaleConfirmation() {
     
     // Calculate number of months from offer if available
     if (offer && type === 'bigAdvance' && sale.payment_type === 'Installment') {
+      // Advance should be calculated from totalPayablePerPiece (price + company fee), not just price
       const advanceAmount = offer.advance_is_percentage
-        ? (calculatedPricePerPiece * offer.advance_amount) / 100
+        ? (totalPayablePerPiece * offer.advance_amount) / 100
         : offer.advance_amount
       const remainingAmount = totalPayablePerPiece - reservationPerPiece - advanceAmount
       
@@ -399,8 +400,9 @@ export function SaleConfirmation() {
     
     // Auto-fill received amount (advance) for installment from offer
     if (type === 'bigAdvance' && sale.payment_type === 'Installment' && offer) {
+      // Advance should be calculated from totalPayablePerPiece (price + company fee), not just price
       const advanceAmount = offer.advance_is_percentage
-        ? (calculatedPricePerPiece * offer.advance_amount) / 100
+        ? (totalPayablePerPiece * offer.advance_amount) / 100
         : offer.advance_amount
       setReceivedAmount(advanceAmount.toFixed(2))
     } else if (type === 'full') {
@@ -654,8 +656,9 @@ export function SaleConfirmation() {
       } else if (confirmationType === 'bigAdvance' && selectedSale.payment_type === 'Installment') {
         // For installment, use advance amount from offer
         if (selectedOffer) {
+          // Advance should be calculated from totalPayablePerPiece (price + company fee), not just price
           const advanceAmount = selectedOffer.advance_is_percentage
-            ? (pricePerPiece * selectedOffer.advance_amount) / 100
+            ? (totalPayablePerPiece * selectedOffer.advance_amount) / 100
             : selectedOffer.advance_amount
           if (Math.abs(received - advanceAmount) > 0.01) {
             setError(`التسبقة يجب أن تكون ${formatCurrency(advanceAmount)} حسب العرض المختار`)
@@ -1400,8 +1403,9 @@ export function SaleConfirmation() {
             // Calculate advance amount from offer if available
             let advanceAmount = 0
             if (calculatedOffer && confirmationType === 'bigAdvance' && selectedSale.payment_type === 'Installment') {
+              // Advance should be calculated from totalPayablePerPiece (price + company fee), not just price
               advanceAmount = calculatedOffer.advance_is_percentage
-                ? (pricePerPiece * calculatedOffer.advance_amount) / 100
+                ? (totalPayablePerPiece * calculatedOffer.advance_amount) / 100
                 : calculatedOffer.advance_amount
             } else if (confirmationType === 'full') {
               advanceAmount = totalPayablePerPiece - reservationPerPiece
@@ -1682,8 +1686,11 @@ export function SaleConfirmation() {
             } else if (pendingConfirmationType === 'bigAdvance' && selectedSale.payment_type === 'Installment') {
               const calculatedOffer = offerToUse
               if (calculatedOffer) {
+                // Advance should be calculated from totalPayablePerPiece (price + company fee), not just price
+                // We need to recalculate totalPayablePerPiece here
+                const { totalPayablePerPiece: totalPayable } = calculatePieceValues(selectedSale, selectedPiece, calculatedOffer)
                 amountToReceive = calculatedOffer.advance_is_percentage
-                  ? (pricePerPiece * calculatedOffer.advance_amount) / 100
+                  ? (totalPayable * calculatedOffer.advance_amount) / 100
                   : calculatedOffer.advance_amount
               }
             }
