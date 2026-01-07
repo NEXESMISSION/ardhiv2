@@ -30,7 +30,7 @@ import { sanitizeText, sanitizeNotes, sanitizeEmail, sanitizePhone, sanitizeCIN 
 import { showNotification } from '@/components/ui/notification'
 import { debounce } from '@/lib/throttle'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Plus, Edit, Trash2, Map, ChevronDown, ChevronRight, Calculator, X, DollarSign, AlertTriangle, ShoppingCart, Upload, Image as ImageIcon, Settings, RotateCcw } from 'lucide-react'
+import { Plus, Edit, Trash2, Map, ChevronDown, ChevronRight, Calculator, X, DollarSign, AlertTriangle, ShoppingCart, Upload, Image as ImageIcon, Settings, RotateCcw, CheckCircle, XCircle } from 'lucide-react'
 import type { LandBatch, LandPiece, LandStatus, Client, PaymentOffer } from '@/types/database'
 
 interface LandBatchWithPieces extends LandBatch {
@@ -304,10 +304,11 @@ export function LandManagement() {
     notes: '',
   })
   const [saleForm, setSaleForm] = useState({
-    payment_type: 'Full' as 'Full' | 'Installment',
+    payment_type: 'Full' as 'Full' | 'Installment' | 'PromiseOfSale',
     reservation_amount: '',
     deadline_date: '',
     selected_offer_id: '',
+    promise_initial_payment: '',
   })
   const [availableOffers, setAvailableOffers] = useState<PaymentOffer[]>([])
   const [selectedOffer, setSelectedOffer] = useState<PaymentOffer | null>(null)
@@ -330,21 +331,40 @@ export function LandManagement() {
     []
   )
 
-  // Debounced CIN search
+  // State for client search status
+  const [clientSearchStatus, setClientSearchStatus] = useState<'idle' | 'searching' | 'found' | 'not_found'>('idle')
+  
+  // State for sale form client search
+  const [saleClientCIN, setSaleClientCIN] = useState('')
+  const [saleClientSearchStatus, setSaleClientSearchStatus] = useState<'idle' | 'searching' | 'found' | 'not_found'>('idle')
+  const [saleClientSearching, setSaleClientSearching] = useState(false)
+  const [saleClientFound, setSaleClientFound] = useState<Client | null>(null)
+  
+  // State for clients statistics
+  const [clientsStats, setClientsStats] = useState({
+    total: 0,
+    individuals: 0,
+    companies: 0,
+  })
+
+  // Debounced CIN search - starts searching after 2 characters
   const debouncedCINSearch = useCallback(
     debounce(async (cin: string) => {
-      if (!cin || cin.trim().length < 3) {
+      if (!cin || cin.trim().length < 2) {
         setFoundClient(null)
+        setClientSearchStatus('idle')
         return
       }
 
       const sanitizedCIN = sanitizeCIN(cin)
-      if (!sanitizedCIN) {
+      if (!sanitizedCIN || sanitizedCIN.length < 2) {
         setFoundClient(null)
+        setClientSearchStatus('idle')
         return
       }
 
       setSearchingClient(true)
+      setClientSearchStatus('searching')
       try {
         const { data, error } = await supabase
           .from('clients')
@@ -355,6 +375,7 @@ export function LandManagement() {
 
         if (!error && data) {
           setFoundClient(data)
+          setClientSearchStatus('found')
           // Auto-fill form with found client data
           setClientForm({
             name: data.name,
@@ -368,15 +389,105 @@ export function LandManagement() {
           setNewClient(data) // Set as selected client
         } else {
           setFoundClient(null)
+          // Only show "not found" if CIN is long enough to be valid
+          if (sanitizedCIN.length >= 4) {
+            setClientSearchStatus('not_found')
+          } else {
+            setClientSearchStatus('idle')
+          }
         }
       } catch (error) {
         setFoundClient(null)
+        if (sanitizedCIN.length >= 4) {
+          setClientSearchStatus('not_found')
+        } else {
+          setClientSearchStatus('idle')
+        }
       } finally {
         setSearchingClient(false)
       }
-    }, 500),
+    }, 400), // Reduced delay for faster response
     []
   )
+
+  // Debounced CIN search for sale form
+  const debouncedSaleCINSearch = useCallback(
+    debounce(async (cin: string) => {
+      if (!cin || cin.trim().length < 2) {
+        setSaleClientFound(null)
+        setSaleClientSearchStatus('idle')
+        return
+      }
+
+      const sanitizedCIN = sanitizeCIN(cin)
+      if (!sanitizedCIN || sanitizedCIN.length < 2) {
+        setSaleClientFound(null)
+        setSaleClientSearchStatus('idle')
+        return
+      }
+
+      setSaleClientSearching(true)
+      setSaleClientSearchStatus('searching')
+      try {
+        const { data, error } = await supabase
+          .from('clients')
+          .select('*')
+          .eq('cin', sanitizedCIN)
+          .limit(1)
+          .single()
+
+        if (!error && data) {
+          setSaleClientFound(data)
+          setSaleClientSearchStatus('found')
+          setNewClient(data) // Set as selected client for sale
+        } else {
+          setSaleClientFound(null)
+          if (sanitizedCIN.length >= 4) {
+            setSaleClientSearchStatus('not_found')
+          } else {
+            setSaleClientSearchStatus('idle')
+          }
+        }
+      } catch (error) {
+        setSaleClientFound(null)
+        if (sanitizedCIN.length >= 4) {
+          setSaleClientSearchStatus('not_found')
+        } else {
+          setSaleClientSearchStatus('idle')
+        }
+      } finally {
+        setSaleClientSearching(false)
+      }
+    }, 400),
+    []
+  )
+
+  // Fetch clients statistics
+  const fetchClientsStats = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('clients')
+        .select('client_type')
+
+      if (!error && data) {
+        const total = data.length
+        const individuals = data.filter(c => c.client_type === 'Individual').length
+        const companies = data.filter(c => c.client_type === 'Company').length
+        
+        setClientsStats({
+          total,
+          individuals,
+          companies,
+        })
+      }
+    } catch (error) {
+      console.error('Error fetching clients stats:', error)
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchClientsStats()
+  }, [fetchClientsStats])
 
   // Batch dialog
   const [batchDialogOpen, setBatchDialogOpen] = useState(false)
@@ -2004,7 +2115,7 @@ export function LandManagement() {
         .from('reservations')
         .select('id')
         .contains('land_piece_ids', [pieceToDelete.id])
-        .in('status', ['Pending', 'Confirmed'])
+        .in('status', ['Pending', 'Completed'])
 
       if (reservations && reservations.length > 0) {
         setError('لا يمكن حذف قطعة محجوزة. يرجى إلغاء الحجز أولاً')
@@ -3439,7 +3550,7 @@ export function LandManagement() {
       
       const totalCost = parseFloat(selectedPieceObjects.reduce((sum, p) => sum + (parseFloat(p.purchase_cost) || 0), 0).toFixed(2))
       const totalPrice = parseFloat(selectedPieceObjects.reduce((sum, p: any) => {
-        if (saleForm.payment_type === 'Full') {
+        if (saleForm.payment_type === 'Full' || saleForm.payment_type === 'PromiseOfSale') {
           // For Available pieces, calculate from batch price_per_m2_full
           // For Reserved pieces, use stored selling_price_full
           if (p.status === 'Available' && p.land_batch?.price_per_m2_full) {
@@ -3478,9 +3589,9 @@ export function LandManagement() {
         return
       }
       
-      // Calculate total payable for validation (price + company fee for Full payment)
+      // Calculate total payable for validation (price + company fee for Full payment or PromiseOfSale)
       let totalPayableForValidation = totalPrice
-      if (saleForm.payment_type === 'Full') {
+      if (saleForm.payment_type === 'Full' || saleForm.payment_type === 'PromiseOfSale') {
         // Get company fee from batch - use the batch data we fetched with pieces
         const firstPiece = selectedPieceObjects[0] as any
         const companyFeePercentage = firstPiece?.land_batch?.company_fee_percentage_full || 0
@@ -3508,8 +3619,30 @@ export function LandManagement() {
         created_by: user?.id || null,
       }
       
-      // Add company fee for Full payment
-      if (saleForm.payment_type === 'Full') {
+      // Add Promise of Sale fields if payment type is PromiseOfSale
+      if (saleForm.payment_type === 'PromiseOfSale') {
+        // Validate Promise of Sale fields
+        if (!saleForm.promise_initial_payment || parseFloat(saleForm.promise_initial_payment) <= 0) {
+          showNotification('يرجى إدخال المبلغ المستلم الآن', 'error')
+          setCreatingSale(false)
+          return
+        }
+        
+        const initialPayment = parseFloat(saleForm.promise_initial_payment)
+        const totalWithFee = totalPayableForValidation
+        if (initialPayment >= totalWithFee) {
+          showNotification('المبلغ المستلم الآن يجب أن يكون أقل من المبلغ الإجمالي المستحق', 'error')
+          setCreatingSale(false)
+          return
+        }
+        
+        saleData.promise_initial_payment = initialPayment
+        saleData.promise_completion_date = saleForm.deadline_date // Use deadline_date as completion date
+        saleData.promise_completed = false
+      }
+      
+      // Add company fee for Full payment or PromiseOfSale
+      if (saleForm.payment_type === 'Full' || saleForm.payment_type === 'PromiseOfSale') {
         // Get company fee percentage from batch - use the batch data we fetched with pieces
         const firstPiece = selectedPieceObjects[0] as any
         const companyFeePercentage = firstPiece?.land_batch?.company_fee_percentage_full || 0
@@ -3519,6 +3652,37 @@ export function LandManagement() {
           saleData.company_fee_percentage = companyFeePercentage
           saleData.company_fee_amount = parseFloat(companyFeeAmount.toFixed(2))
         }
+      }
+      
+      // Add Promise of Sale fields if payment type is PromiseOfSale
+      if (saleForm.payment_type === 'PromiseOfSale') {
+        // Validate Promise of Sale fields
+        if (!saleForm.promise_initial_payment || parseFloat(saleForm.promise_initial_payment) <= 0) {
+          showNotification('يرجى إدخال المبلغ المستلم الآن', 'error')
+          setCreatingSale(false)
+          return
+        }
+        
+        const initialPayment = parseFloat(saleForm.promise_initial_payment)
+        if (initialPayment >= totalPrice) {
+          showNotification('المبلغ المستلم الآن يجب أن يكون أقل من السعر الإجمالي', 'error')
+          setCreatingSale(false)
+          return
+        }
+        
+        // Add company fee for PromiseOfSale (same as Full payment)
+        const firstPiece = selectedPieceObjects[0] as any
+        const companyFeePercentage = firstPiece?.land_batch?.company_fee_percentage_full || 0
+        const companyFeeAmount = (totalPrice * companyFeePercentage) / 100
+        
+        if (companyFeePercentage > 0) {
+          saleData.company_fee_percentage = companyFeePercentage
+          saleData.company_fee_amount = parseFloat(companyFeeAmount.toFixed(2))
+        }
+        
+        saleData.promise_initial_payment = initialPayment
+        saleData.promise_completion_date = saleForm.deadline_date // Use deadline_date as completion date
+        saleData.promise_completed = false
       }
       
       // Add selected_offer_id if an offer was selected and payment type is Installment
@@ -3613,6 +3777,22 @@ export function LandManagement() {
           recorded_by: user?.id || null,
         }] as any)
       }
+      
+      // Create initial payment for PromiseOfSale
+      if (saleForm.payment_type === 'PromiseOfSale' && newSale && saleForm.promise_initial_payment) {
+        const initialPayment = parseFloat(saleForm.promise_initial_payment)
+        if (initialPayment > 0) {
+          await supabase.from('payments').insert([{
+            client_id: newClient.id,
+            sale_id: newSale.id,
+            amount_paid: initialPayment,
+            payment_type: 'Partial', // Use Partial for promise initial payment
+            payment_date: new Date().toISOString().split('T')[0],
+            recorded_by: user?.id || null,
+            notes: 'دفعة أولية لوعد البيع',
+          }] as any)
+        }
+      }
 
       // Update all selected pieces status to Reserved and save calculated prices
       for (const pieceId of selectedPieces) {
@@ -3627,8 +3807,8 @@ export function LandManagement() {
         const batchData = Array.isArray(piece.land_batch) ? piece.land_batch[0] : piece.land_batch
         const batchPricePerM2Full = (batchData as any)?.price_per_m2_full
 
-        if (saleForm.payment_type === 'Full') {
-          // For Full payment, calculate from batch price_per_m2_full for Available pieces
+        if (saleForm.payment_type === 'Full' || saleForm.payment_type === 'PromiseOfSale') {
+          // For Full payment or PromiseOfSale, calculate from batch price_per_m2_full for Available pieces
           if (piece.status === 'Available' && batchPricePerM2Full) {
             calculatedPrice = piece.surface_area * parseFloat(batchPricePerM2Full)
           } else {
@@ -3683,6 +3863,7 @@ export function LandManagement() {
         reservation_amount: '',
         deadline_date: '',
         selected_offer_id: '',
+                  promise_initial_payment: '',
       })
       setAvailableOffers([])
       setSelectedOffer(null)
@@ -5343,29 +5524,20 @@ export function LandManagement() {
           })
           setFoundClient(null)
           setNewClient(null)
+          setClientSearchStatus('idle')
         } else {
           // Clear found client when dialog opens (so message only shows after search)
           setFoundClient(null)
+          setClientSearchStatus('idle')
         }
       }}>
         <DialogContent className="w-[95vw] sm:w-full max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{foundClient ? 'العميل موجود' : 'إضافة عميل جديد'}</DialogTitle>
+            <DialogTitle>إضافة عميل جديد</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
-            {foundClient && clientForm.cin && clientForm.cin.trim().length >= 3 && (
-              <div className="bg-green-50 border border-green-200 rounded-lg p-2.5">
-                <div className="flex items-start gap-2">
-                  <AlertTriangle className="h-4 w-4 text-green-600 mt-0.5 flex-shrink-0" />
-                  <div className="text-xs text-green-800">
-                    <p className="font-medium mb-0.5">تم العثور على عميل بهذا الرقم</p>
-                    <p className="text-xs">تم ملء البيانات تلقائياً. يمكنك تعديلها أو المتابعة.</p>
-                  </div>
-                </div>
-              </div>
-            )}
             <div className="space-y-1.5">
-              <Label htmlFor="clientCIN" className="text-sm">رقم CIN *</Label>
+              <Label htmlFor="clientCIN" className="text-sm">رقم الهوية *</Label>
               <div className="relative">
                 <Input
                   id="clientCIN"
@@ -5377,19 +5549,54 @@ export function LandManagement() {
                     if (foundClient && newCIN !== foundClient.cin) {
                       setFoundClient(null)
                       setNewClient(null)
+                      setClientSearchStatus('idle')
                     }
                     // Trigger search
                     debouncedCINSearch(newCIN)
                   }}
-                  placeholder="رقم CIN"
-                  className={searchingClient ? 'pr-10 h-9' : 'h-9'}
+                  placeholder="رقم الهوية"
+                  className={`h-9 ${searchingClient ? 'pr-10' : ''} ${clientSearchStatus === 'found' ? 'border-green-500' : clientSearchStatus === 'not_found' ? 'border-blue-300' : ''}`}
+                  autoFocus
                 />
                 {searchingClient && (
                   <div className="absolute left-3 top-1/2 -translate-y-1/2">
                     <div className="h-4 w-4 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin"></div>
                   </div>
                 )}
+                {!searchingClient && clientForm.cin && clientForm.cin.trim().length >= 2 && (
+                  <div className="absolute left-3 top-1/2 -translate-y-1/2">
+                    {clientSearchStatus === 'found' && (
+                      <CheckCircle className="h-4 w-4 text-green-600" />
+                    )}
+                    {clientSearchStatus === 'not_found' && (
+                      <XCircle className="h-4 w-4 text-blue-500" />
+                )}
               </div>
+                )}
+              </div>
+              {foundClient && clientForm.cin && clientForm.cin.trim().length >= 2 && (
+                <div className="bg-green-50 border border-green-200 rounded-lg p-2.5 mt-1">
+                  <div className="flex items-start gap-2">
+                    <CheckCircle className="h-4 w-4 text-green-600 mt-0.5 flex-shrink-0" />
+                    <div className="text-xs text-green-800 flex-1">
+                      <p className="font-medium mb-0.5">✓ تم العثور على عميل: {foundClient.name}</p>
+                      <p className="text-xs">CIN: {foundClient.cin} {foundClient.phone && `| الهاتف: ${foundClient.phone}`}</p>
+                      <p className="text-xs mt-1">تم ملء البيانات تلقائياً. يمكنك تعديلها أو المتابعة.</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+              {clientSearchStatus === 'not_found' && !foundClient && clientForm.cin && clientForm.cin.trim().length >= 4 && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-2.5 mt-1">
+                  <div className="flex items-start gap-2">
+                    <XCircle className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
+                    <div className="text-xs text-blue-800">
+                      <p className="font-medium mb-0.5">لا يوجد عميل بهذا الرقم</p>
+                      <p className="text-xs">يمكنك المتابعة لإضافة عميل جديد.</p>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="clientName" className="text-sm">الاسم *</Label>
@@ -5407,8 +5614,9 @@ export function LandManagement() {
                 id="clientPhone"
                 value={clientForm.phone}
                 onChange={(e) => setClientForm({ ...clientForm, phone: e.target.value })}
-                placeholder="رقم الهاتف"
+                placeholder="مثال: 5822092120192614/10/593"
                 className="h-9"
+                maxLength={50}
               />
             </div>
             <div className="space-y-1.5">
@@ -5494,11 +5702,17 @@ export function LandManagement() {
                 setSaleDialogOpen(false)
                 setNewClient(null)
                 setSelectedPieces(new Set())
+                setSaleClientCIN('')
+                setSaleClientFound(null)
+                setSaleClientSearchStatus('idle')
               }
             } else {
               setSaleDialogOpen(false)
               setNewClient(null)
               setSelectedPieces(new Set())
+              setSaleClientCIN('')
+              setSaleClientFound(null)
+              setSaleClientSearchStatus('idle')
             }
           }
         }}
@@ -5593,10 +5807,16 @@ export function LandManagement() {
                   type="number"
                   step="0.01"
                   min="0"
-                  value={saleForm.reservation_amount}
+                  defaultValue={saleForm.reservation_amount}
+                  key={`reservation-${saleDialogOpen}`}
+                  onBlur={(e) => {
+                    e.stopPropagation()
+                    setSaleForm(prev => ({ ...prev, reservation_amount: e.target.value }))
+                  }}
                   onChange={(e) => {
                     e.stopPropagation()
-                    setSaleForm({ ...saleForm, reservation_amount: e.target.value })
+                    // Use functional update to avoid stale closure
+                    setSaleForm(prev => ({ ...prev, reservation_amount: e.target.value }))
                   }}
                   onClick={(e) => {
                     e.stopPropagation()
@@ -5741,7 +5961,7 @@ export function LandManagement() {
                   value={saleForm.payment_type}
                   onChange={(e) => {
                     e.stopPropagation()
-                    const newPaymentType = e.target.value as 'Full' | 'Installment'
+                    const newPaymentType = e.target.value as 'Full' | 'Installment' | 'PromiseOfSale'
                     setSaleForm({ ...saleForm, payment_type: newPaymentType })
                     // Reload offers when switching to Installment
                     if (newPaymentType === 'Installment') {
@@ -5760,16 +5980,50 @@ export function LandManagement() {
                 >
                   <option value="Full">بالحاضر</option>
                   <option value="Installment">بالتقسيط</option>
+                  <option value="PromiseOfSale">وعد بالبيع (Les Promesses de Vente)</option>
                 </Select>
               </div>
+
+              {/* Promise of Sale Fields */}
+              {saleForm.payment_type === 'PromiseOfSale' && (
+                <div className="space-y-3 p-3 bg-blue-50 rounded-lg border border-blue-200">
+                  <p className="text-sm font-medium text-blue-800 mb-2">معلومات وعد البيع</p>
+                  
+                  <div className="space-y-2">
+                    <Label htmlFor="promiseInitialPayment" className="text-sm">المبلغ المستلم الآن *</Label>
+                    <Input
+                      id="promiseInitialPayment"
+                      type="number"
+                      value={saleForm.promise_initial_payment}
+                      onChange={(e) => {
+                        e.stopPropagation()
+                        setSaleForm({ ...saleForm, promise_initial_payment: e.target.value })
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                      }}
+                      onMouseDown={(e) => {
+                        e.stopPropagation()
+                      }}
+                      placeholder="المبلغ المستلم الآن"
+                      className="h-9"
+                      min="0"
+                      step="0.01"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      المبلغ الذي سيتم استلامه الآن. الباقي سيتم تأكيده في صفحة تأكيد المبيعات.
+                    </p>
+                  </div>
+                </div>
+              )}
 
               {/* Sale Details Summary - Different for Full vs Installment */}
               {(() => {
                 const selectedPieceIds = Array.from(selectedPieces)
                 const selectedPiecesData = batches.flatMap(b => b.land_pieces).filter(p => selectedPieceIds.includes(p.id))
                 
-                if (saleForm.payment_type === 'Full') {
-                  // Full Payment Details
+                if (saleForm.payment_type === 'Full' || saleForm.payment_type === 'PromiseOfSale') {
+                  // Full Payment or Promise of Sale Details
                   // For Available pieces, calculate from batch price_per_m2_full
                   // For Reserved pieces, use stored selling_price_full
                   const totalPrice = selectedPiecesData.reduce((sum, p) => {
@@ -5790,11 +6044,23 @@ export function LandManagement() {
                   
                   // Get reservation amount from form
                   const reservation = parseFloat(saleForm.reservation_amount) || 0
-                  const remainingAfterReservation = totalPayable - reservation
+                  
+                  // For PromiseOfSale, get initial payment
+                  const initialPayment = saleForm.payment_type === 'PromiseOfSale' 
+                    ? (parseFloat(saleForm.promise_initial_payment) || 0)
+                    : 0
+                  
+                  // Calculate remaining
+                  let remainingAfterReservation = totalPayable - reservation
+                  if (saleForm.payment_type === 'PromiseOfSale') {
+                    remainingAfterReservation = totalPayable - reservation - initialPayment
+                  }
                   
                   return (
-                    <div className="bg-green-50 border border-green-200 rounded-lg p-4 space-y-3">
-                      <p className="font-semibold text-green-800 text-sm mb-2">تفاصيل البيع (بالحاضر):</p>
+                    <div className={`${saleForm.payment_type === 'PromiseOfSale' ? 'bg-purple-50 border-purple-200' : 'bg-green-50 border-green-200'} border rounded-lg p-4 space-y-3`}>
+                      <p className={`font-semibold ${saleForm.payment_type === 'PromiseOfSale' ? 'text-purple-800' : 'text-green-800'} text-sm mb-2`}>
+                        {saleForm.payment_type === 'PromiseOfSale' ? 'تفاصيل البيع (وعد بالبيع):' : 'تفاصيل البيع (بالحاضر):'}
+                      </p>
                       <div className="space-y-2 text-sm">
                         <div className="flex justify-between">
                           <span className="text-muted-foreground">عدد القطع:</span>
@@ -5810,19 +6076,37 @@ export function LandManagement() {
                             <span className="font-medium text-green-700">{formatCurrency(companyFeeAmount)}</span>
                           </div>
                         )}
-                        <div className="flex justify-between border-t border-green-200 pt-2">
+                        <div className={`flex justify-between border-t ${saleForm.payment_type === 'PromiseOfSale' ? 'border-purple-200' : 'border-green-200'} pt-2`}>
                           <span className="font-medium text-muted-foreground">المبلغ الإجمالي المستحق:</span>
-                          <span className="font-semibold text-green-800">{formatCurrency(totalPayable)}</span>
+                          <span className={`font-semibold ${saleForm.payment_type === 'PromiseOfSale' ? 'text-purple-800' : 'text-green-800'}`}>{formatCurrency(totalPayable)}</span>
                         </div>
                         {reservation > 0 && (
                           <>
-                            <div className="flex justify-between text-green-700">
+                            <div className={`flex justify-between ${saleForm.payment_type === 'PromiseOfSale' ? 'text-purple-700' : 'text-green-700'}`}>
                               <span>العربون (مدفوع عند الحجز):</span>
                               <span className="font-medium">{formatCurrency(reservation)}</span>
                             </div>
-                            <div className="flex justify-between border-t border-green-200 pt-2">
+                            {saleForm.payment_type === 'PromiseOfSale' && initialPayment > 0 && (
+                              <div className={`flex justify-between ${saleForm.payment_type === 'PromiseOfSale' ? 'text-purple-700' : 'text-green-700'}`}>
+                                <span>المبلغ المستلم الآن:</span>
+                                <span className="font-medium">{formatCurrency(initialPayment)}</span>
+                              </div>
+                            )}
+                            <div className={`flex justify-between border-t ${saleForm.payment_type === 'PromiseOfSale' ? 'border-purple-200' : 'border-green-200'} pt-2`}>
                               <span className="font-medium text-muted-foreground">المبلغ المتبقي:</span>
-                              <span className="font-semibold text-green-800">{formatCurrency(remainingAfterReservation)}</span>
+                              <span className={`font-semibold ${saleForm.payment_type === 'PromiseOfSale' ? 'text-purple-800' : 'text-green-800'}`}>{formatCurrency(Math.max(0, remainingAfterReservation))}</span>
+                            </div>
+                          </>
+                        )}
+                        {saleForm.payment_type === 'PromiseOfSale' && reservation === 0 && initialPayment > 0 && (
+                          <>
+                            <div className="flex justify-between text-purple-700">
+                              <span>المبلغ المستلم الآن:</span>
+                              <span className="font-medium">{formatCurrency(initialPayment)}</span>
+                            </div>
+                            <div className="flex justify-between border-t border-purple-200 pt-2">
+                              <span className="font-medium text-muted-foreground">المبلغ المتبقي:</span>
+                              <span className="font-semibold text-purple-800">{formatCurrency(Math.max(0, remainingAfterReservation))}</span>
                             </div>
                           </>
                         )}
@@ -5836,27 +6120,35 @@ export function LandManagement() {
                           const pieceCompanyFee = (piecePrice * companyFeePercentage) / 100
                           const pieceTotalPayable = piecePrice + pieceCompanyFee
                           const reservationPerPiece = reservation / selectedPiecesData.length
-                          const pieceRemaining = pieceTotalPayable - reservationPerPiece
+                          const initialPaymentPerPiece = saleForm.payment_type === 'PromiseOfSale' 
+                            ? (initialPayment / selectedPiecesData.length)
+                            : 0
+                          const pieceRemaining = saleForm.payment_type === 'PromiseOfSale'
+                            ? (pieceTotalPayable - reservationPerPiece - initialPaymentPerPiece)
+                            : (pieceTotalPayable - reservationPerPiece)
                           
                           return (
-                            <div key={piece.id} className="bg-white rounded p-2 border border-green-100">
+                            <div key={piece.id} className={`bg-white rounded p-2 border ${saleForm.payment_type === 'PromiseOfSale' ? 'border-purple-100' : 'border-green-100'}`}>
                               <div className="flex justify-between items-start mb-1">
                                 <div className="flex-1">
                                   <p className="font-medium text-xs">{batch?.name || 'دفعة'} - #{piece.piece_number}</p>
                                   <p className="text-xs text-muted-foreground">{piece.surface_area} م²</p>
                                 </div>
-                                <p className="font-semibold text-green-700 text-sm">{formatCurrency(piecePrice)}</p>
+                                <p className={`font-semibold text-sm ${saleForm.payment_type === 'PromiseOfSale' ? 'text-purple-700' : 'text-green-700'}`}>{formatCurrency(piecePrice)}</p>
                               </div>
-                              <div className="text-xs text-muted-foreground space-y-0.5 pl-2 border-t border-green-50 pt-1 mt-1">
+                              <div className={`text-xs text-muted-foreground space-y-0.5 pl-2 border-t ${saleForm.payment_type === 'PromiseOfSale' ? 'border-purple-50' : 'border-green-50'} pt-1 mt-1`}>
                                 {companyFeePercentage > 0 && (
                                   <div>عمولة ({companyFeePercentage}%): {formatCurrency(pieceCompanyFee)}</div>
                                 )}
                                 <div>المستحق: {formatCurrency(pieceTotalPayable)}</div>
                                 {reservation > 0 && (
-                                  <>
-                                    <div className="text-green-700">العربون (مدفوع): {formatCurrency(reservationPerPiece)}</div>
-                                    <div>المتبقي: {formatCurrency(pieceRemaining)}</div>
-                                  </>
+                                  <div className={saleForm.payment_type === 'PromiseOfSale' ? 'text-purple-700' : 'text-green-700'}>العربون (مدفوع): {formatCurrency(reservationPerPiece)}</div>
+                                )}
+                                {saleForm.payment_type === 'PromiseOfSale' && initialPaymentPerPiece > 0 && (
+                                  <div className="text-purple-700">المستلم الآن: {formatCurrency(initialPaymentPerPiece)}</div>
+                                )}
+                                {(reservation > 0 || (saleForm.payment_type === 'PromiseOfSale' && initialPaymentPerPiece > 0)) && (
+                                  <div>المتبقي: {formatCurrency(Math.max(0, pieceRemaining))}</div>
                                 )}
                               </div>
                             </div>

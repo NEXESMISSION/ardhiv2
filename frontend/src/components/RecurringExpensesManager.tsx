@@ -19,6 +19,7 @@ import { formatCurrency, formatDate } from '@/lib/utils'
 import { Plus, Edit, Trash2, Play, Pause, Calendar, Clock, Repeat } from 'lucide-react'
 import type { RecurringExpenseTemplate, ExpenseCategory, RecurrenceType, PaymentMethod } from '@/types/database'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { showNotification } from '@/components/ui/notification'
 
 const RECURRENCE_TYPES: { value: RecurrenceType; label: string }[] = [
   { value: 'Daily', label: 'يومي' },
@@ -199,9 +200,10 @@ export function RecurringExpensesManager({ categories }: RecurringExpensesManage
 
       setDialogOpen(false)
       fetchTemplates()
+      showNotification('تم حفظ القالب بنجاح', 'success')
     } catch (error: any) {
       console.error('Error saving template:', error)
-      alert('حدث خطأ أثناء الحفظ: ' + error.message)
+      showNotification('حدث خطأ أثناء الحفظ: ' + error.message, 'error')
     }
   }
 
@@ -219,9 +221,10 @@ export function RecurringExpensesManager({ categories }: RecurringExpensesManage
       setDeleteConfirmOpen(false)
       setTemplateToDelete(null)
       fetchTemplates()
+      showNotification('تم حذف القالب بنجاح', 'success')
     } catch (error: any) {
       console.error('Error deleting template:', error)
-      alert('حدث خطأ أثناء الحذف: ' + error.message)
+      showNotification('حدث خطأ أثناء الحذف: ' + error.message, 'error')
     }
   }
 
@@ -234,9 +237,10 @@ export function RecurringExpensesManager({ categories }: RecurringExpensesManage
 
       if (error) throw error
       fetchTemplates()
+      showNotification('تم تحديث حالة القالب', 'success')
     } catch (error: any) {
       console.error('Error toggling template:', error)
-      alert('حدث خطأ: ' + error.message)
+      showNotification('حدث خطأ: ' + error.message, 'error')
     }
   }
 
@@ -245,11 +249,11 @@ export function RecurringExpensesManager({ categories }: RecurringExpensesManage
       const { data, error } = await supabase.rpc('generate_recurring_expenses')
 
       if (error) throw error
-      alert('تم إنشاء المصاريف المتكررة بنجاح')
+      showNotification('تم إنشاء المصاريف المتكررة بنجاح', 'success')
       fetchTemplates()
     } catch (error: any) {
       console.error('Error generating expenses:', error)
-      alert('حدث خطأ: ' + error.message)
+      showNotification('حدث خطأ: ' + error.message, 'error')
     }
   }
 

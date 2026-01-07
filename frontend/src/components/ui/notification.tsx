@@ -1,20 +1,15 @@
 import { useEffect, useState } from 'react'
-import { X, CheckCircle, AlertCircle, AlertTriangle, Info } from 'lucide-react'
+import { X, CheckCircle, AlertCircle, AlertTriangle, Info, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-export type NotificationType = 'success' | 'error' | 'warning' | 'info'
+export type NotificationType = 'success' | 'error' | 'warning' | 'info' | 'loading' | 'neutral'
 
 interface Notification {
   id: string
   message: string
   type: NotificationType
   duration?: number
-}
-
-interface NotificationContextType {
-  notifications: Notification[]
-  showNotification: (message: string, type?: NotificationType, duration?: number) => void
-  removeNotification: (id: string) => void
+  title?: string
 }
 
 // Global notification state
@@ -26,16 +21,27 @@ const notify = (notifications: Notification[]) => {
   listeners.forEach(listener => listener(notifications))
 }
 
-export const showNotification = (message: string, type: NotificationType = 'info', duration: number = 5000) => {
+export const showNotification = (
+  message: string, 
+  type: NotificationType = 'info', 
+  duration?: number,
+  title?: string
+) => {
   const id = Math.random().toString(36).substring(7)
-  const notification: Notification = { id, message, type, duration }
+  
+  // Set default duration based on type
+  // Errors stay longer, success/info disappear faster
+  const defaultDuration = type === 'error' ? 8000 : type === 'loading' ? 0 : 3000
+  const finalDuration = duration !== undefined ? duration : defaultDuration
+  
+  const notification: Notification = { id, message, type, duration: finalDuration, title }
   
   notify([...notificationState, notification])
   
-  if (duration > 0) {
+  if (finalDuration > 0) {
     setTimeout(() => {
       notify(notificationState.filter(n => n.id !== id))
-    }, duration)
+    }, finalDuration)
   }
   
   return id
@@ -43,6 +49,36 @@ export const showNotification = (message: string, type: NotificationType = 'info
 
 export const removeNotification = (id: string) => {
   notify(notificationState.filter(n => n.id !== id))
+}
+
+// Update a notification (useful for loading -> success/error transitions)
+export const updateNotification = (
+  id: string, 
+  message: string, 
+  type: NotificationType,
+  duration?: number,
+  title?: string
+) => {
+  const existingIndex = notificationState.findIndex(n => n.id === id)
+  if (existingIndex === -1) return
+  
+  const finalDuration = duration !== undefined ? duration : (type === 'error' ? 8000 : 3000)
+  
+  const updated = [...notificationState]
+  updated[existingIndex] = { 
+    ...updated[existingIndex], 
+    message, 
+    type, 
+    duration: finalDuration,
+    title: title || updated[existingIndex].title
+  }
+  notify(updated)
+  
+  if (finalDuration > 0) {
+    setTimeout(() => {
+      notify(notificationState.filter(n => n.id !== id))
+    }, finalDuration)
+  }
 }
 
 export function NotificationContainer() {
@@ -67,36 +103,98 @@ export function NotificationContainer() {
     error: AlertCircle,
     warning: AlertTriangle,
     info: Info,
+    loading: Loader2,
+    neutral: Info,
   }
 
-  const colors = {
-    success: 'bg-green-50 border-green-200 text-green-800',
-    error: 'bg-red-50 border-red-200 text-red-800',
-    warning: 'bg-yellow-50 border-yellow-200 text-yellow-800',
-    info: 'bg-blue-50 border-blue-200 text-blue-800',
+  const getAlertStyles = (type: NotificationType) => {
+    switch (type) {
+      case 'success':
+        return {
+          container: 'bg-[#ecfdf5] border-l-[5px] border-l-[#10b981]',
+          text: 'text-[#065f46]',
+          icon: 'text-[#10b981]',
+        }
+      case 'error':
+        return {
+          container: 'bg-[#fef2f2] border-l-[5px] border-l-[#ef4444]',
+          text: 'text-[#7f1d1d]',
+          icon: 'text-[#ef4444]',
+        }
+      case 'warning':
+        return {
+          container: 'bg-[#fffbeb] border-l-[5px] border-l-[#f59e0b]',
+          text: 'text-[#78350f]',
+          icon: 'text-[#f59e0b]',
+        }
+      case 'info':
+        return {
+          container: 'bg-gradient-to-r from-[#2563eb] to-[#1e40af] border-l-[6px] border-l-[#60a5fa]',
+          text: 'text-[#eff6ff]',
+          icon: 'text-[#60a5fa]',
+        }
+      case 'loading':
+        return {
+          container: 'bg-gradient-to-r from-[#2563eb] to-[#1e40af] border-l-[6px] border-l-[#60a5fa]',
+          text: 'text-[#eff6ff]',
+          icon: 'text-[#60a5fa]',
+        }
+      case 'neutral':
+        return {
+          container: 'bg-white border-l-[6px] border-l-[#94a3b8]',
+          text: 'text-[#020617]',
+          icon: 'text-[#64748b]',
+        }
+      default:
+        return {
+          container: 'bg-white border-l-[6px] border-l-[#94a3b8]',
+          text: 'text-[#020617]',
+          icon: 'text-[#64748b]',
+        }
+    }
   }
 
   return (
-    <div className="fixed top-16 left-4 right-4 z-[10000] flex flex-col gap-2 pointer-events-none md:top-4">
+    <div 
+      className="fixed top-4 left-4 right-4 flex flex-col items-center gap-3 pointer-events-none"
+      style={{ zIndex: 99999 }}
+    >
       {notifications.map((notification) => {
         const Icon = icons[notification.type]
+        const styles = getAlertStyles(notification.type)
+        const isLoading = notification.type === 'loading'
+        
         return (
           <div
             key={notification.id}
             className={cn(
-              'pointer-events-auto max-w-md mx-auto w-full rounded-lg border-2 shadow-2xl p-3 sm:p-4 flex items-start gap-3 animate-in slide-in-from-top-5',
-              colors[notification.type]
+              'pointer-events-auto w-full max-w-[440px] rounded-[14px] p-[18px_22px] flex items-start gap-[14px]',
+              'shadow-[0_10px_30px_rgba(0,0,0,0.5),inset_0_0_0_1px_rgba(255,255,255,0.08)]',
+              'animate-in slide-in-from-top-2 duration-300',
+              styles.container
             )}
           >
-            <Icon className="h-5 w-5 mt-0.5 flex-shrink-0" />
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium break-words">{notification.message}</p>
+            <Icon 
+              className={cn(
+                'h-5 w-5 flex-shrink-0 mt-0.5',
+                styles.icon,
+                isLoading && 'animate-spin'
+              )} 
+            />
+            <div className={cn('flex-1 min-w-0 leading-[1.5]', styles.text)}>
+              {notification.title && (
+                <strong className="font-semibold mr-2">{notification.title}</strong>
+              )}
+              <span className="text-[15px] font-medium break-words">{notification.message}</span>
             </div>
             <button
               onClick={() => removeNotification(notification.id)}
-              className="flex-shrink-0 rounded-full bg-red-500 hover:bg-red-600 text-white transition-colors p-1.5 flex items-center justify-center"
+              className={cn(
+                'flex-shrink-0 text-[18px] opacity-60 hover:opacity-100 transition-opacity bg-transparent border-none cursor-pointer ml-auto',
+                styles.text
+              )}
             >
-              <X className="h-4 w-4" />
+              <X className="h-5 w-5" />
             </button>
           </div>
         )
@@ -104,4 +202,3 @@ export function NotificationContainer() {
     </div>
   )
 }
-

@@ -31,29 +31,37 @@ export function sanitizeEmail(email: string): string {
 }
 
 /**
- * Sanitize phone number - keep only digits and + sign
+ * Sanitize phone number - keep digits, + sign, and common separators (/, -, space, parentheses)
+ * Allows formatting like: 5822092120192614/10/593 or 03-123-456
  */
 export function sanitizePhone(phone: string): string {
   if (!phone) return ''
   
   return phone
     .trim()
-    .replace(/[^\d+]/g, '') // Keep only digits and +
-    .slice(0, 20) // Max phone length
+    .replace(/[<>]/g, '') // Remove < and > to prevent HTML injection
+    .replace(/javascript:/gi, '') // Remove javascript: protocol
+    .replace(/on\w+=/gi, '') // Remove event handlers (onclick, onerror, etc.)
+    .replace(/[^\d+\/\-\(\)\s]/g, '') // Keep digits, +, /, -, (, ), and spaces
+    .slice(0, 50) // Max phone length (increased to accommodate separators)
 }
 
 /**
  * Validate Lebanese phone number format
  * Lebanese numbers: 03/70/71/76/78/79/81 followed by 6 digits
  * Or international format: +961 followed by the number
+ * Strips separators before validation
  */
 export function validateLebanesePhone(phone: string): boolean {
   if (!phone || !phone.trim()) return false
   
   const cleaned = sanitizePhone(phone)
   
+  // Remove all non-digit characters except + for validation
+  const digitsOnly = cleaned.replace(/[^\d+]/g, '')
+  
   // Remove leading + if present for validation
-  const withoutPlus = cleaned.replace(/^\+/, '')
+  const withoutPlus = digitsOnly.replace(/^\+/, '')
   
   // Lebanese format: 03, 70, 71, 76, 78, 79, 81 followed by 6 digits (8 digits total)
   // Or with country code: 961 followed by the above (11 digits total)

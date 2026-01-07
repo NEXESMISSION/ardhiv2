@@ -27,7 +27,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import { formatCurrency, formatDate } from '@/lib/utils'
-import { Plus, Edit, Trash2, User, Eye, ShoppingCart, AlertCircle } from 'lucide-react'
+import { Plus, Edit, Trash2, User, Eye, ShoppingCart, AlertCircle, CheckCircle, XCircle } from 'lucide-react'
 import type { Client, Sale, Reservation } from '@/types/database'
 
 interface ClientWithRelations extends Client {
@@ -36,7 +36,7 @@ interface ClientWithRelations extends Client {
 }
 
 export function Clients() {
-  const { hasPermission, user } = useAuth()
+  const { hasPermission, user, profile } = useAuth()
   const { t } = useLanguage()
   const [clients, setClients] = useState<ClientWithRelations[]>([])
   const [loading, setLoading] = useState(true)
@@ -44,8 +44,82 @@ export function Clients() {
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('')
   
   // Debounced search
-  const debouncedSearchFn = useCallback(
-    debounce((value: string) => setDebouncedSearchTerm(value), 300),
+  const debouncedSearchFn = useMemo(
+    () => debounce((value: string) => setDebouncedSearchTerm(value), 300),
+    []
+  )
+
+  // Client search states
+  const [clientSearchStatus, setClientSearchStatus] = useState<'idle' | 'searching' | 'found' | 'not_found'>('idle')
+  const [searchingClient, setSearchingClient] = useState(false)
+  const [foundClient, setFoundClient] = useState<Client | null>(null)
+
+  // Debounced CIN search for client form
+  const debouncedCINSearch = useMemo(
+    () => debounce(async (cin: string, isEditing: boolean) => {
+      // Don't search if editing existing client
+      if (isEditing) {
+        setFoundClient(null)
+        setClientSearchStatus('idle')
+        return
+      }
+
+      if (!cin || cin.trim().length < 2) {
+        setFoundClient(null)
+        setClientSearchStatus('idle')
+        return
+      }
+
+      const sanitizedCIN = sanitizeCIN(cin)
+      if (!sanitizedCIN || sanitizedCIN.length < 2) {
+        setFoundClient(null)
+        setClientSearchStatus('idle')
+        return
+      }
+
+      setSearchingClient(true)
+      setClientSearchStatus('searching')
+      try {
+        const { data, error } = await supabase
+          .from('clients')
+          .select('*')
+          .eq('cin', sanitizedCIN)
+          .limit(1)
+          .single()
+
+        if (!error && data) {
+          setFoundClient(data)
+          setClientSearchStatus('found')
+          // Auto-fill form with found client data
+          setForm({
+            name: data.name,
+            cin: data.cin,
+            phone: data.phone || '',
+            email: data.email || '',
+            address: data.address || '',
+            client_type: data.client_type,
+            notes: data.notes || '',
+          })
+        } else {
+          setFoundClient(null)
+          // Only show "not found" if CIN is long enough to be valid
+          if (sanitizedCIN.length >= 4) {
+            setClientSearchStatus('not_found')
+          } else {
+            setClientSearchStatus('idle')
+          }
+        }
+      } catch (error) {
+        setFoundClient(null)
+        if (sanitizedCIN.length >= 4) {
+          setClientSearchStatus('not_found')
+        } else {
+          setClientSearchStatus('idle')
+        }
+      } finally {
+        setSearchingClient(false)
+      }
+    }, 400),
     []
   )
 
@@ -72,6 +146,7 @@ export function Clients() {
 
   const fetchClients = async () => {
     try {
+      setLoading(true)
       const { data, error } = await supabase
         .from('clients')
         .select(`
@@ -81,10 +156,16 @@ export function Clients() {
         `)
         .order('name', { ascending: true })
 
-      if (error) throw error
+      if (error) {
+        console.error('Error fetching clients:', error)
+        throw error
+      }
+      
+      console.log('Fetched clients:', data?.length || 0)
       setClients((data as ClientWithRelations[]) || [])
     } catch (error) {
-      // Error fetching clients - silent fail
+      console.error('Error in fetchClients:', error)
+      setErrorMessage('خطأ في تحميل قائمة العملاء')
     } finally {
       setLoading(false)
     }
@@ -102,6 +183,8 @@ export function Clients() {
         client_type: client.client_type,
         notes: client.notes || '',
       })
+      setFoundClient(null)
+      setClientSearchStatus('idle')
     } else {
       setEditingClient(null)
       setForm({
@@ -113,6 +196,8 @@ export function Clients() {
         client_type: 'Individual',
         notes: '',
       })
+      setFoundClient(null)
+      setClientSearchStatus('idle')
     }
     setDialogOpen(true)
   }
@@ -121,6 +206,7 @@ export function Clients() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [clientToDelete, setClientToDelete] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   const saveClient = async () => {
     if (saving) return // Prevent double submission
@@ -208,9 +294,11 @@ export function Clients() {
       }
 
       setDialogOpen(false)
+      setErrorMessage(null)
       fetchClients()
-    } catch (error) {
-      setErrorMessage('خطأ في حفظ العميل')
+    } catch (error: any) {
+      console.error('Error saving client:', error)
+      setErrorMessage(error?.message || 'خطأ في حفظ العميل')
     } finally {
       setSaving(false)
     }
@@ -222,21 +310,106 @@ export function Clients() {
   }
 
   const confirmDelete = async () => {
-    if (!clientToDelete) return
+    if (!clientToDelete || deleting) return
+
+    setDeleting(true)
+    setErrorMessage(null)
 
     try {
-      const { error } = await supabase
+      // Check permissions
+      if (!hasPermission('delete_clients')) {
+        setErrorMessage('ليس لديك صلاحية لحذف العملاء')
+        setDeleting(false)
+        return
+      }
+
+      // Check if client has sales or reservations
+      const client = clients.find(c => c.id === clientToDelete)
+      if (client && ((client.sales && client.sales.length > 0) || (client.reservations && client.reservations.length > 0))) {
+        setErrorMessage('لا يمكن حذف العميل لأنه لديه مبيعات أو حجوزات مرتبطة به')
+        setDeleteConfirmOpen(false)
+        setClientToDelete(null)
+        setDeleting(false)
+        return
+      }
+
+      console.log('Attempting to delete client:', clientToDelete)
+      console.log('Current user:', user?.id)
+      console.log('User profile:', profile)
+      console.log('User role:', profile?.role)
+      console.log('Has delete permission:', hasPermission('delete_clients'))
+      
+      // First verify the client exists
+      const { data: clientCheck, error: checkError } = await supabase
+        .from('clients')
+        .select('id, name')
+        .eq('id', clientToDelete)
+        .single()
+      
+      if (checkError || !clientCheck) {
+        console.error('Client not found:', checkError)
+        throw new Error('العميل غير موجود')
+      }
+      
+      console.log('Client found:', clientCheck)
+      
+      // Try delete without select first to see the actual error
+      const { error: deleteError } = await supabase
         .from('clients')
         .delete()
         .eq('id', clientToDelete)
-      if (error) throw error
-      fetchClients()
+      
+      if (deleteError) {
+        console.error('Delete error:', deleteError)
+        throw deleteError
+      }
+      
+      // Verify deletion by checking if client still exists
+      const { data: verifyData, error: verifyError } = await supabase
+        .from('clients')
+        .select('id')
+        .eq('id', clientToDelete)
+        .single()
+      
+      if (verifyError && verifyError.code !== 'PGRST116') {
+        // PGRST116 means no rows found, which is what we want
+        console.error('Verification error:', verifyError)
+      }
+      
+      if (verifyData) {
+        console.warn('Client still exists after delete - RLS policy may be blocking')
+        throw new Error('فشل الحذف - قد لا يكون لديك صلاحية. يرجى التحقق من صلاحياتك.')
+      }
+      
+      console.log('Delete successful - client removed')
+      
+      // Remove from local state immediately for better UX
+      setClients(prevClients => prevClients.filter(c => c.id !== clientToDelete))
+      
+      // Then refresh from server to ensure consistency
+      await fetchClients()
+      
       setDeleteConfirmOpen(false)
       setClientToDelete(null)
-    } catch (error) {
-      setErrorMessage('خطأ في حذف العميل')
-      setDeleteConfirmOpen(false)
-      setClientToDelete(null)
+      setErrorMessage(null)
+    } catch (error: any) {
+      console.error('Error deleting client:', error)
+      let errorMsg = 'خطأ في حذف العميل'
+      
+      if (error?.code === '23503' || error?.message?.includes('foreign key')) {
+        errorMsg = 'لا يمكن حذف العميل لأنه مرتبط ببيانات أخرى (مبيعات أو حجوزات)'
+      } else if (error?.code === '42501' || error?.message?.includes('permission') || error?.message?.includes('403')) {
+        errorMsg = 'ليس لديك صلاحية لحذف العملاء'
+      } else if (error?.message) {
+        errorMsg = `خطأ: ${error.message}`
+      }
+      
+      setErrorMessage(errorMsg)
+      // Keep dialog open so user can see the error
+      // setDeleteConfirmOpen(false)
+      // setClientToDelete(null)
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -424,10 +597,20 @@ export function Clients() {
                       )}
                       {hasPermission('delete_clients') && (
                         <Button
+                          type="button"
                           variant="outline"
                           size="sm"
                           className="text-xs h-8"
-                          onClick={() => deleteClient(client.id)}
+                          onClick={(e) => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            deleteClient(client.id)
+                          }}
+                          onTouchEnd={(e) => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            deleteClient(client.id)
+                          }}
                         >
                           <Trash2 className="h-3 w-3" />
                         </Button>
@@ -498,10 +681,20 @@ export function Clients() {
                         )}
                         {hasPermission('delete_clients') && (
                           <Button
+                            type="button"
                             variant="ghost"
                             size="icon"
-                                className="h-8 w-8"
-                            onClick={() => deleteClient(client.id)}
+                            className="h-8 w-8"
+                            onClick={(e) => {
+                              e.preventDefault()
+                              e.stopPropagation()
+                              deleteClient(client.id)
+                            }}
+                            onTouchEnd={(e) => {
+                              e.preventDefault()
+                              e.stopPropagation()
+                              deleteClient(client.id)
+                            }}
                           >
                             <Trash2 className="h-4 w-4" />
                           </Button>
@@ -521,25 +714,106 @@ export function Clients() {
       {/* Delete Confirmation Dialog */}
       <ConfirmDialog
         open={deleteConfirmOpen}
-        onOpenChange={setDeleteConfirmOpen}
+        onOpenChange={(open) => {
+          if (!open && !deleting) {
+            setDeleteConfirmOpen(false)
+            setClientToDelete(null)
+            setErrorMessage(null)
+          }
+        }}
         onConfirm={confirmDelete}
         title="تأكيد الحذف"
         description="هل أنت متأكد من حذف هذا العميل؟ لا يمكن التراجع عن هذا الإجراء."
-        confirmText="حذف"
+        confirmText={deleting ? 'جاري الحذف...' : 'حذف'}
         cancelText="إلغاء"
         variant="destructive"
+        disabled={deleting}
+        errorMessage={errorMessage}
       />
 
       {/* Client Dialog */}
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <DialogContent className="w-[95vw] sm:w-full max-w-2xl max-h-[95vh] overflow-y-auto">
+      <Dialog open={dialogOpen} onOpenChange={(open) => {
+        if (!open && !saving) {
+          setDialogOpen(false)
+          setErrorMessage(null)
+        }
+      }}>
+          <DialogContent 
+            className="w-[95vw] sm:w-full max-w-2xl max-h-[95vh] overflow-y-auto"
+            preventClose={saving}
+          >
           <DialogHeader>
             <DialogTitle>{editingClient ? 'تعديل العميل' : 'إضافة عميل جديد'}</DialogTitle>
           </DialogHeader>
           <div className="space-y-3 sm:space-y-4">
+            {/* CIN Field - First Field */}
+            <div className="space-y-1.5 sm:space-y-2">
+              <Label htmlFor="cin" className="text-xs sm:text-sm">رقم الهوية *</Label>
+              <div className="relative">
+                <Input
+                  id="cin"
+                  value={form.cin}
+                  onChange={(e) => {
+                    const newCIN = e.target.value
+                    setForm({ ...form, cin: newCIN })
+                    // Clear found client if CIN changes
+                    if (foundClient && newCIN !== foundClient.cin) {
+                      setFoundClient(null)
+                      setClientSearchStatus('idle')
+                    }
+                    // Trigger search only if not editing
+                    debouncedCINSearch(newCIN, !!editingClient)
+                  }}
+                  maxLength={50}
+                  placeholder="رقم الهوية"
+                  className={`h-9 ${searchingClient ? 'pr-10' : ''} ${clientSearchStatus === 'found' ? 'border-green-500' : clientSearchStatus === 'not_found' ? 'border-blue-300' : ''}`}
+                  autoFocus={!editingClient}
+                  disabled={!!editingClient}
+                />
+                {searchingClient && (
+                  <div className="absolute left-3 top-1/2 -translate-y-1/2">
+                    <div className="h-4 w-4 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin"></div>
+                  </div>
+                )}
+                {!searchingClient && form.cin && form.cin.trim().length >= 2 && !editingClient && (
+                  <div className="absolute left-3 top-1/2 -translate-y-1/2">
+                    {clientSearchStatus === 'found' && (
+                      <CheckCircle className="h-4 w-4 text-green-600" />
+                    )}
+                    {clientSearchStatus === 'not_found' && (
+                      <XCircle className="h-4 w-4 text-blue-500" />
+                    )}
+                  </div>
+                )}
+              </div>
+              {foundClient && form.cin && form.cin.trim().length >= 2 && !editingClient && (
+                <div className="bg-green-50 border border-green-200 rounded-lg p-2.5 mt-1">
+                  <div className="flex items-start gap-2">
+                    <CheckCircle className="h-4 w-4 text-green-600 mt-0.5 flex-shrink-0" />
+                    <div className="text-xs text-green-800 flex-1">
+                      <p className="font-medium mb-0.5">✓ تم العثور على عميل: {foundClient.name}</p>
+                      <p className="text-xs">CIN: {foundClient.cin} {foundClient.phone && `| الهاتف: ${foundClient.phone}`}</p>
+                      <p className="text-xs mt-1">تم ملء البيانات تلقائياً. يمكنك تعديلها أو المتابعة.</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+              {clientSearchStatus === 'not_found' && !foundClient && form.cin && form.cin.trim().length >= 4 && !editingClient && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-2.5 mt-1">
+                  <div className="flex items-start gap-2">
+                    <XCircle className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
+                    <div className="text-xs text-blue-800">
+                      <p className="font-medium mb-0.5">لا يوجد عميل بهذا الرقم</p>
+                      <p className="text-xs">يمكنك المتابعة لإضافة عميل جديد.</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
               <div className="space-y-1.5 sm:space-y-2">
-                <Label htmlFor="name" className="text-xs sm:text-sm">الاسم</Label>
+                <Label htmlFor="name" className="text-xs sm:text-sm">الاسم *</Label>
                 <Input
                   id="name"
                   value={form.name}
@@ -548,13 +822,16 @@ export function Clients() {
                 />
               </div>
               <div className="space-y-1.5 sm:space-y-2">
-                <Label htmlFor="cin" className="text-xs sm:text-sm">رقم الهوية</Label>
-                <Input
-                  id="cin"
-                  value={form.cin}
-                  onChange={(e) => setForm({ ...form, cin: e.target.value })}
-                  maxLength={50}
-                />
+                <Label htmlFor="client_type" className="text-xs sm:text-sm">النوع</Label>
+                <select
+                  id="client_type"
+                  value={form.client_type}
+                  onChange={(e) => setForm({ ...form, client_type: e.target.value as 'Individual' | 'Company' })}
+                  className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <option value="Individual">فردي</option>
+                  <option value="Company">شركة</option>
+                </select>
               </div>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
@@ -564,7 +841,8 @@ export function Clients() {
                   id="phone"
                   value={form.phone}
                   onChange={(e) => setForm({ ...form, phone: e.target.value })}
-                  maxLength={20}
+                  maxLength={50}
+                  placeholder="مثال: 5822092120192614/10/593"
                 />
               </div>
               <div className="space-y-1.5 sm:space-y-2">
@@ -605,13 +883,38 @@ export function Clients() {
             )}
           </div>
           <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => {
-              setDialogOpen(false)
-              setErrorMessage(null)
-            }} className="w-full sm:w-auto">
+            <Button 
+              type="button"
+              variant="outline" 
+              onClick={() => {
+                setDialogOpen(false)
+                setErrorMessage(null)
+                setFoundClient(null)
+                setClientSearchStatus('idle')
+              }} 
+              className="w-full sm:w-auto"
+            >
               إلغاء
             </Button>
-            <Button onClick={saveClient} disabled={saving} className="w-full sm:w-auto">حفظ</Button>
+            <Button 
+              type="button"
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                saveClient()
+              }}
+              onTouchEnd={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                if (!saving) {
+                  saveClient()
+                }
+              }}
+              disabled={saving} 
+              className="w-full sm:w-auto touch-manipulation"
+            >
+              {saving ? 'جاري الحفظ...' : 'حفظ'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

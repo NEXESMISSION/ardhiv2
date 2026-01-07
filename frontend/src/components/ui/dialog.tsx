@@ -113,14 +113,34 @@ function DialogPortal({ children }: { children: React.ReactNode }) {
   return <>{children}</>
 }
 
-function DialogOverlay({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
+function DialogOverlay({ className, ...props }: React.HTMLAttributes<HTMLDivElement> & { preventClose?: boolean }) {
   const context = React.useContext(DialogContext)
   if (!context) throw new Error("DialogOverlay must be used within Dialog")
+  const { preventClose, ...restProps } = props
 
   const handleOverlayClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    // Don't close if preventClose is true
+    if (preventClose) {
+      e.preventDefault()
+      e.stopPropagation()
+      return
+    }
     // Only close if clicking directly on the overlay, not on child elements
     if (e.target === e.currentTarget) {
       context.setOpen(false)
+    }
+  }
+
+  const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    // Don't close if preventClose is true
+    if (preventClose) {
+      e.preventDefault()
+      e.stopPropagation()
+      return
+    }
+    // Prevent touch events from propagating
+    if (e.target === e.currentTarget) {
+      e.stopPropagation()
     }
   }
 
@@ -137,21 +157,16 @@ function DialogOverlay({ className, ...props }: React.HTMLAttributes<HTMLDivElem
           e.stopPropagation()
         }
       }}
-      onTouchStart={(e) => {
-        // Prevent touch events from propagating
-        if (e.target === e.currentTarget) {
-          e.stopPropagation()
-        }
-      }}
-      {...props}
+      onTouchStart={handleTouchStart}
+      {...restProps}
     />
   )
 }
 
 const DialogContent = React.forwardRef<
   HTMLDivElement,
-  React.HTMLAttributes<HTMLDivElement>
->(({ className, children, onClick, ...props }, ref) => {
+  React.HTMLAttributes<HTMLDivElement> & { preventClose?: boolean }
+>(({ className, children, onClick, preventClose, ...props }, ref) => {
   const context = React.useContext(DialogContext)
   if (!context) throw new Error("DialogContent must be used within Dialog")
 
@@ -176,9 +191,13 @@ const DialogContent = React.forwardRef<
     e.stopPropagation()
   }
 
+  const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    e.stopPropagation()
+  }
+
   return (
     <DialogPortal>
-      <DialogOverlay />
+      <DialogOverlay preventClose={preventClose} />
       <div className={cn(
         "fixed inset-0 z-[100] flex items-center justify-center p-2 sm:p-4",
         isNotificationDialog && "md:items-start md:justify-start md:left-[16rem] md:right-auto md:top-4 md:inset-auto md:p-0"
@@ -192,6 +211,7 @@ const DialogContent = React.forwardRef<
         onClick={handleClick}
         onMouseDown={handleMouseDown}
         onMouseUp={handleMouseUp}
+        onTouchStart={handleTouchStart}
         {...props}
       >
           {/* Content with balanced padding - responsive for mobile */}

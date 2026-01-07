@@ -109,7 +109,7 @@ export function LandAvailability() {
       const { data: reservationsData } = await supabase
         .from('reservations')
         .select('*, client:clients(*)')
-        .in('status', ['Pending', 'Confirmed'])
+        .in('status', ['Pending', 'Completed'])
 
       const batchMap = new Map<string, { id: string; name: string }>()
       ;(piecesData || []).forEach((p: any) => {

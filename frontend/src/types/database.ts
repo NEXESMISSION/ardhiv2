@@ -1,11 +1,11 @@
 export type LandStatus = 'Available' | 'Reserved' | 'Sold' | 'Cancelled'
-export type PaymentType = 'Full' | 'Installment'
+export type PaymentType = 'Full' | 'Installment' | 'PromiseOfSale'
 export type SaleStatus = 'Pending' | 'AwaitingPayment' | 'InstallmentsOngoing' | 'Completed' | 'Cancelled'
 export type ReservationStatus = 'Pending' | 'Confirmed' | 'Cancelled' | 'Expired'
 export type ExpenseStatus = 'Pending' | 'Approved' | 'Rejected'
 export type PaymentMethod = 'Cash' | 'BankTransfer' | 'Check' | 'CreditCard' | 'Other'
 export type InstallmentStatus = 'Unpaid' | 'Paid' | 'Late' | 'Partial'
-export type PaymentRecordType = 'BigAdvance' | 'SmallAdvance' | 'Installment' | 'Full' | 'Partial' | 'Field' | 'Refund'
+export type PaymentRecordType = 'BigAdvance' | 'SmallAdvance' | 'Installment' | 'Full' | 'Partial' | 'Field' | 'Refund' | 'InitialPayment'
 export type UserRole = 'Owner' | 'Worker'
 export type UserStatus = 'Active' | 'Inactive'
 export type WorkerAvailabilityStatus = 'Available' | 'Busy' | 'Unavailable'
@@ -149,6 +149,10 @@ export interface Sale {
   number_of_installments: number | null
   monthly_installment_amount: number | null
   selected_offer_id: string | null
+  // Promise of Sale fields
+  promise_initial_payment: number | null
+  promise_completion_date: string | null
+  promise_completed: boolean | null
   status: SaleStatus
   sale_date: string
   deadline_date: string | null

@@ -34,10 +34,11 @@ interface PaymentWithDetails extends Payment {
   client?: Client
   sale?: {
     land_piece_ids?: string[]
-    payment_type?: 'Full' | 'Installment'
+    payment_type?: 'Full' | 'Installment' | 'PromiseOfSale'
     total_selling_price?: number
     created_by?: string
     created_by_user?: { id: string; name: string; email?: string }
+    promise_initial_payment?: number
   }
   land_pieces?: Array<LandPiece & { land_batch?: LandBatch }>
   recorded_by_user?: { id: string; name: string; email?: string }
@@ -97,7 +98,7 @@ interface CompanyFeeByLand {
 }
 
 type DateFilter = 'today' | 'week' | 'month' | 'all' | 'custom'
-type PaymentTypeFilter = 'Installment' | 'SmallAdvance' | 'Full' | 'BigAdvance' | null
+type PaymentTypeFilter = 'Installment' | 'SmallAdvance' | 'Full' | 'BigAdvance' | 'InitialPayment' | null
 
 export function Financial() {
   const { hasPermission } = useAuth()
@@ -260,11 +261,21 @@ export function Financial() {
     const bigAdvancePaymentsList = paymentsWithPieces.filter(p => p.payment_type === 'BigAdvance')
     const smallAdvancePaymentsList = paymentsWithPieces.filter(p => p.payment_type === 'SmallAdvance')
     const fullPaymentsList = paymentsWithPieces.filter(p => p.payment_type === 'Full')
+    const initialPaymentsList = paymentsWithPieces.filter(p => p.payment_type === 'InitialPayment')
     
     // Calculate totals from payments
     const installmentPaymentsTotal = installmentPaymentsList.reduce((sum, p) => sum + p.amount_paid, 0)
     const bigAdvanceTotal = bigAdvancePaymentsList.reduce((sum, p) => sum + p.amount_paid, 0)
     const fullPaymentsTotal = fullPaymentsList.reduce((sum, p) => sum + p.amount_paid, 0)
+    const initialPaymentsTotal = initialPaymentsList.reduce((sum, p) => sum + p.amount_paid, 0)
+    
+    // Calculate initial payments from sales (promise_initial_payment for PromiseOfSale)
+    const initialPaymentFromSales = filteredSales
+      .filter(s => s.status !== 'Cancelled' && (s as any).payment_type === 'PromiseOfSale')
+      .reduce((sum, s) => sum + ((s as any).promise_initial_payment || 0), 0)
+    
+    // Use payments if available, otherwise use sales data
+    const totalInitialPayments = initialPaymentsTotal > 0 ? initialPaymentsTotal : initialPaymentFromSales
     
     // Calculate small advance (reservation) from sales table
     const smallAdvanceFromPayments = smallAdvancePaymentsList.reduce((sum, p) => sum + p.amount_paid, 0)
@@ -319,6 +330,7 @@ export function Financial() {
     const groupedBigAdvancePayments = groupPayments(bigAdvancePaymentsList)
     const groupedSmallAdvancePayments = groupPayments(smallAdvancePaymentsList)
     const groupedFullPayments = groupPayments(fullPaymentsList)
+    const groupedInitialPayments = groupPayments(initialPaymentsList)
 
     // Group company fees by client and date
     const groupCompanyFees = (): GroupedCompanyFee[] => {
@@ -410,16 +422,19 @@ export function Financial() {
       bigAdvancePaymentsList,
       smallAdvancePaymentsList,
       fullPaymentsList,
+      initialPaymentsList,
       // Grouped payments
       groupedInstallmentPayments,
       groupedBigAdvancePayments,
       groupedSmallAdvancePayments,
       groupedFullPayments,
+      groupedInitialPayments,
       // Payment totals
       installmentPaymentsTotal,
       bigAdvanceTotal,
       smallAdvanceTotal,
       fullPaymentsTotal,
+      initialPaymentsTotal: totalInitialPayments,
       companyFeesTotal,
       // Grouped company fees
       groupedCompanyFees,
@@ -554,6 +569,8 @@ export function Financial() {
       filteredPayments = filteredData.fullPaymentsList
     } else if (paymentType === 'BigAdvance') {
       filteredPayments = filteredData.bigAdvancePaymentsList
+    } else if (paymentType === 'InitialPayment') {
+      filteredPayments = filteredData.initialPaymentsList
     } else {
       filteredPayments = filteredData.payments
     }
@@ -798,6 +815,7 @@ export function Financial() {
     'SmallAdvance': 'العربون (مبلغ الحجز)',
     'Full': 'الدفع الكامل',
     'BigAdvance': 'الدفعة الأولى',
+    'InitialPayment': 'وعد بالبيع',
   }
   
   const getPaymentTypeLabel = (type: PaymentTypeFilter): string => {
@@ -1165,6 +1183,66 @@ export function Financial() {
                     <TableCell colSpan={6} className="p-0"></TableCell>
                   </TableRow>
                   
+                  {/* وعد بالبيع (المبلغ المستلم) */}
+                  {(() => {
+                    const data = getPaymentsByLand('InitialPayment')
+                    const totalAmount = filteredData.initialPaymentsTotal
+                    const totalPieces = data.reduce((sum, g) => sum + g.pieces.length, 0)
+                    const totalPayments = data.reduce((sum, g) => sum + g.paymentCount, 0)
+                    
+                    if (totalAmount === 0) {
+                      return (
+                        <TableRow className="bg-pink-50/50">
+                          <TableCell className="font-bold text-pink-700">وعد بالبيع</TableCell>
+                          <TableCell className="text-muted-foreground">-</TableCell>
+                          <TableCell className="text-center">0</TableCell>
+                          <TableCell className="text-center">0</TableCell>
+                          <TableCell className="text-right font-bold text-pink-600">{formatCurrency(0)}</TableCell>
+                          <TableCell className="text-center">-</TableCell>
+                        </TableRow>
+                      )
+                    }
+                    return [
+                      ...data.map((group, idx) => (
+                      <TableRow key={`initial-${idx}`} className="bg-pink-50/50 hover:bg-pink-100/50">
+                        <TableCell className="font-bold text-pink-700">{idx === 0 ? 'وعد بالبيع' : ''}</TableCell>
+                        <TableCell>
+                          <div className="font-medium">{group.landBatchName}</div>
+                          {group.location && <div className="text-xs text-muted-foreground">{group.location}</div>}
+                        </TableCell>
+                        <TableCell className="text-center">{group.pieces.length}</TableCell>
+                        <TableCell className="text-center">{group.paymentCount}</TableCell>
+                        <TableCell className="text-right font-bold text-pink-600">{formatCurrency(group.totalAmount)}</TableCell>
+                        <TableCell className="text-center">
+                          <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            onClick={() => openPaymentDetailsDialog('InitialPayment' as PaymentTypeFilter)}
+                            className="text-pink-600 hover:text-pink-800"
+                          >
+                            <ChevronDown className="h-4 w-4" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                      )),
+                      data.length > 1 && (
+                        <TableRow key="initial-summary" className="bg-pink-100/50 font-bold">
+                          <TableCell className="text-pink-800">إجمالي وعد بالبيع</TableCell>
+                          <TableCell>-</TableCell>
+                          <TableCell className="text-center">{totalPieces}</TableCell>
+                          <TableCell className="text-center">{totalPayments}</TableCell>
+                          <TableCell className="text-right text-pink-800">{formatCurrency(totalAmount)}</TableCell>
+                          <TableCell>-</TableCell>
+                        </TableRow>
+                      )
+                    ]
+                  })()}
+                  
+                  {/* Separator */}
+                  <TableRow className="h-2 bg-transparent">
+                    <TableCell colSpan={6} className="p-0"></TableCell>
+                  </TableRow>
+                  
                   {/* العمولة */}
                   {(() => {
                     const data = filteredData.companyFeesByLand
@@ -1213,6 +1291,7 @@ export function Financial() {
                         filteredData.smallAdvanceTotal + 
                         filteredData.fullPaymentsTotal + 
                         filteredData.bigAdvanceTotal + 
+                        filteredData.initialPaymentsTotal + 
                         filteredData.companyFeesTotal
                       )}
                     </TableCell>

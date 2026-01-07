@@ -299,6 +299,11 @@ export function SaleConfirmation() {
             return false // Exclude from list
           }
           
+          // If this is a PromiseOfSale and has been completed
+          if (sale.payment_type === 'PromiseOfSale' && sale.promise_completed) {
+            return false // Exclude completed promises
+          }
+          
           return true // Include in list
         })
         
@@ -465,7 +470,7 @@ export function SaleConfirmation() {
     let companyFeePercentage = 0
     if (sale.payment_type === 'Installment' && offer) {
       companyFeePercentage = offer.company_fee_percentage || 0
-    } else if (sale.payment_type === 'Full') {
+    } else if (sale.payment_type === 'Full' || sale.payment_type === 'PromiseOfSale') {
       const batch = (piece as any).land_batch
       companyFeePercentage = batch?.company_fee_percentage_full || sale.company_fee_percentage || 0
     } else {
@@ -549,7 +554,7 @@ export function SaleConfirmation() {
     // Use actual piece price instead of dividing total by count
     // This ensures correct calculation when pieces have different prices
     let pricePerPiece = 0
-    if (sale.payment_type === 'Full') {
+    if (sale.payment_type === 'Full' || sale.payment_type === 'PromiseOfSale') {
       pricePerPiece = piece.selling_price_full || 0
     } else {
       // For installment, use offer price if available, otherwise piece price
@@ -569,8 +574,8 @@ export function SaleConfirmation() {
     
     // Use company fee based on payment type
     let feePercentage = 0
-    if (sale.payment_type === 'Full') {
-      // For Full payment, use company_fee_percentage_full from batch
+    if (sale.payment_type === 'Full' || sale.payment_type === 'PromiseOfSale') {
+      // For Full payment or PromiseOfSale, use company_fee_percentage_full from batch
       const batch = (piece as any).land_batch
       feePercentage = batch?.company_fee_percentage_full || sale.company_fee_percentage || parseFloat(companyFeePercentage) || 0
     } else {
@@ -759,7 +764,12 @@ export function SaleConfirmation() {
       
       // For full payment, check against remaining amount (not total)
       if (confirmationType === 'full') {
-      const remainingAmount = totalPayablePerPiece - reservationPerPiece
+        let remainingAmount = totalPayablePerPiece - reservationPerPiece
+        if (selectedSale.payment_type === 'PromiseOfSale') {
+          const pieceCount = selectedSale.land_piece_ids.length
+          const initialPaymentPerPiece = (selectedSale.promise_initial_payment || 0) / pieceCount
+          remainingAmount = totalPayablePerPiece - reservationPerPiece - initialPaymentPerPiece
+        }
         if (received < remainingAmount) {
         setError(`المبلغ المستلم (${formatCurrency(received)}) أقل من المبلغ المتبقي (${formatCurrency(remainingAmount)})`)
         setConfirming(false)
@@ -790,6 +800,9 @@ export function SaleConfirmation() {
         }
 
         if (confirmationType === 'full') {
+          if (selectedSale.payment_type === 'PromiseOfSale') {
+            updates.promise_completed = true
+          }
           updates.status = 'Completed'
           updates.big_advance_amount = 0
         } else if (confirmationType === 'bigAdvance') {
@@ -994,6 +1007,9 @@ export function SaleConfirmation() {
         }
 
         if (confirmationType === 'full') {
+          if (selectedSale.payment_type === 'PromiseOfSale') {
+            newSaleData.promise_completed = true
+          }
           newSaleData.status = 'Completed'
           newSaleData.big_advance_amount = 0
         } else if (confirmationType === 'bigAdvance') {
@@ -1179,7 +1195,9 @@ export function SaleConfirmation() {
       // Show success message
       showNotification(
         confirmationType === 'full' 
-          ? 'تم تأكيد البيع بنجاح (دفع كامل)' 
+          ? (selectedSale.payment_type === 'PromiseOfSale' 
+              ? 'تم استكمال وعد البيع بنجاح' 
+              : 'تم تأكيد البيع بنجاح (دفع كامل)')
           : 'تم تأكيد الدفعة الكبيرة بنجاح',
         'success'
       )
@@ -1313,7 +1331,7 @@ export function SaleConfirmation() {
                       {client?.phone && <span className="text-xs text-muted-foreground">({client.phone})</span>}
                     </div>
                     <div className="flex items-center gap-2 flex-wrap">
-                      {sale.deadline_date && sale.status !== 'Completed' && (() => {
+                      {sale.deadline_date && sale.status !== 'Completed' && sale.payment_type !== 'PromiseOfSale' && (() => {
                         const deadline = new Date(sale.deadline_date)
                         const now = new Date()
                         deadline.setHours(23, 59, 59, 999) // End of deadline day
@@ -1341,7 +1359,9 @@ export function SaleConfirmation() {
                             countdownText = '⚠ الموعد النهائي اليوم'
                           }
                         } else {
-                          countdownText = `⏰ متبقي: ${daysUntil} ${daysUntil === 1 ? 'يوم' : 'أيام'} و ${hoursUntil} ${hoursUntil === 1 ? 'ساعة' : 'ساعات'}`
+                          const hoursText = hoursUntil > 0 ? ` و ${hoursUntil} ${hoursUntil === 1 ? 'ساعة' : 'ساعات'}` : ''
+                          const minutesText = minutesUntil > 0 ? ` و ${minutesUntil} ${minutesUntil === 1 ? 'دقيقة' : 'دقائق'}` : ''
+                          countdownText = `⏰ متبقي: ${daysUntil} ${daysUntil === 1 ? 'يوم' : 'أيام'}${hoursText}${minutesText}`
                         }
                         
                           return (
@@ -1357,7 +1377,10 @@ export function SaleConfirmation() {
                         {sale.status === 'Pending' ? 'محجوز' : 'قيد الدفع'}
                       </Badge>
                       <Badge variant="outline" className="text-xs">
-                        {sale.payment_type === 'Full' ? 'بالحاضر' : sale.payment_type === 'Installment' ? 'بالتقسيط' : sale.payment_type || '-'}
+                        {sale.payment_type === 'Full' ? 'بالحاضر' : 
+                         sale.payment_type === 'Installment' ? 'بالتقسيط' : 
+                         sale.payment_type === 'PromiseOfSale' ? 'وعد بالبيع' : 
+                         sale.payment_type || '-'}
                       </Badge>
                       {sale.payment_type === 'Installment' && sale.big_advance_amount && sale.big_advance_amount > 0 && (
                         <Badge 
@@ -1367,6 +1390,56 @@ export function SaleConfirmation() {
                           دفعة كبيرة: {formatCurrency(sale._totalBigAdvancePaid || 0)} / {formatCurrency(sale.big_advance_amount)}
                         </Badge>
                       )}
+                      {sale.payment_type === 'PromiseOfSale' && sale.deadline_date && (() => {
+                        const completionDate = new Date(sale.deadline_date)
+                        const now = new Date()
+                        completionDate.setHours(23, 59, 59, 999)
+                        
+                        const diffMs = completionDate.getTime() - now.getTime()
+                        const daysUntil = Math.floor(diffMs / (1000 * 60 * 60 * 24))
+                        const hoursUntil = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60))
+                        const minutesUntil = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60))
+                        
+                        const isOverdue = diffMs < 0
+                        const isToday = daysUntil === 0 && hoursUntil >= 0
+                        const isClose = daysUntil > 0 && daysUntil <= 3
+                        
+                        let countdownText = ''
+                        if (isOverdue) {
+                          const overdueDays = Math.abs(daysUntil)
+                          countdownText = `⚠ تجاوز الموعد بـ ${overdueDays} ${overdueDays === 1 ? 'يوم' : 'أيام'}`
+                        } else if (isToday) {
+                          if (hoursUntil > 0) {
+                            countdownText = `⏰ متبقي: ${hoursUntil} ${hoursUntil === 1 ? 'ساعة' : 'ساعات'} و ${minutesUntil} ${minutesUntil === 1 ? 'دقيقة' : 'دقائق'}`
+                          } else if (minutesUntil > 0) {
+                            countdownText = `⏰ متبقي: ${minutesUntil} ${minutesUntil === 1 ? 'دقيقة' : 'دقائق'}`
+                          } else {
+                            countdownText = '⚠ الموعد النهائي اليوم'
+                          }
+                        } else {
+                          const hoursText = hoursUntil > 0 ? ` و ${hoursUntil} ${hoursUntil === 1 ? 'ساعة' : 'ساعات'}` : ''
+                          const minutesText = minutesUntil > 0 ? ` و ${minutesUntil} ${minutesUntil === 1 ? 'دقيقة' : 'دقائق'}` : ''
+                          countdownText = `⏰ متبقي: ${daysUntil} ${daysUntil === 1 ? 'يوم' : 'أيام'}${hoursText}${minutesText}`
+                        }
+                        
+                        const totalPrice = sale.total_selling_price + (sale.company_fee_amount || 0)
+                        const initialPayment = sale.promise_initial_payment || 0
+                        const remainingAmount = totalPrice - initialPayment - (sale._totalPaid || 0) + (sale.small_advance_amount || 0)
+                        
+                        return (
+                          <>
+                            <Badge 
+                              variant={isOverdue ? "destructive" : isToday || isClose ? "warning" : "default"} 
+                              className="text-xs font-medium"
+                            >
+                              {countdownText}
+                            </Badge>
+                            <Badge variant="secondary" className="text-xs">
+                              متبقي: {formatCurrency(Math.max(0, remainingAmount))}
+                            </Badge>
+                          </>
+                        )
+                      })()}
                       {sale.rendezvous && sale.rendezvous.length > 0 && (() => {
                         const latestRendezvous = sale.rendezvous[0]
                         return (
@@ -1478,6 +1551,21 @@ export function SaleConfirmation() {
                                     تأكيد بالتقسيط
                                   </Button>
                                 )}
+                                {sale.payment_type === 'PromiseOfSale' && (
+                                  <Button
+                                    onClick={() => {
+                                      setSelectedSale(sale)
+                                      setSelectedPiece(piece)
+                                      setPendingConfirmationType('full')
+                                      openConfirmDialog(sale, piece, 'full')
+                                    }}
+                                    className="bg-purple-600 hover:bg-purple-700 text-xs h-8 flex-1"
+                                    size="sm"
+                                  >
+                                    <CheckCircle className="ml-1 h-3 w-3" />
+                                    استكمال الدفع
+                                  </Button>
+                                )}
                               </div>
                             </div>
                           </CardContent>
@@ -1498,6 +1586,12 @@ export function SaleConfirmation() {
                           <TableHead className="text-right text-xs">العربون</TableHead>
                           {sale.payment_type === 'Installment' && (
                             <TableHead className="text-right text-xs">التسبقة</TableHead>
+                          )}
+                          {sale.payment_type === 'PromiseOfSale' && (
+                            <TableHead className="text-right text-xs">المستلم</TableHead>
+                          )}
+                          {sale.payment_type === 'PromiseOfSale' && (
+                            <TableHead className="text-right text-xs">المتبقي</TableHead>
                           )}
                           <TableHead className="text-xs">إجراء</TableHead>
                         </TableRow>
@@ -1521,6 +1615,22 @@ export function SaleConfirmation() {
                               {sale.payment_type === 'Installment' && (
                                 <TableCell className="text-right py-2 text-xs text-purple-600">{formatCurrency(advancePerPiece)}</TableCell>
                               )}
+                              {sale.payment_type === 'PromiseOfSale' && (() => {
+                                const initialPayment = (sale.promise_initial_payment || 0) / sale.land_piece_ids.length
+                                return (
+                                  <TableCell className="text-right py-2 text-xs text-green-600">{formatCurrency(initialPayment)}</TableCell>
+                                )
+                              })()}
+                              {sale.payment_type === 'PromiseOfSale' && (() => {
+                                const pieceCount = sale.land_piece_ids.length
+                                const totalPricePerPiece = totalPayablePerPiece
+                                const initialPaymentPerPiece = (sale.promise_initial_payment || 0) / pieceCount
+                                const reservationAmount = reservationPerPiece
+                                const remaining = totalPricePerPiece - initialPaymentPerPiece - reservationAmount
+                                return (
+                                  <TableCell className="text-right py-2 text-xs font-bold text-orange-600">{formatCurrency(Math.max(0, remaining))}</TableCell>
+                                )
+                              })()}
                               <TableCell className="py-2">
                                 <div className="flex flex-wrap gap-1">
                                   <Button
@@ -1573,6 +1683,21 @@ export function SaleConfirmation() {
                                       </Button>
                                     </>
                                   )}
+                                  {sale.payment_type === 'PromiseOfSale' && (
+                                    <Button
+                                      onClick={() => {
+                                        setSelectedSale(sale)
+                                        setSelectedPiece(piece)
+                                        setPendingConfirmationType('full')
+                                        openConfirmDialog(sale, piece, 'full')
+                                      }}
+                                      className="bg-purple-600 hover:bg-purple-700 text-xs px-2 h-7"
+                                      size="sm"
+                                    >
+                                      <CheckCircle className="ml-1 h-3 w-3" />
+                                      استكمال الدفع
+                                    </Button>
+                                  )}
                                 </div>
                               </TableCell>
                             </TableRow>
@@ -1593,7 +1718,7 @@ export function SaleConfirmation() {
         <DialogContent className="w-[95vw] sm:w-full max-w-2xl max-h-[95vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
-              {confirmationType === 'full' && 'تأكيد بالحاضر'}
+              {confirmationType === 'full' && (selectedSale?.payment_type === 'PromiseOfSale' ? 'استكمال وعد البيع' : 'تأكيد بالحاضر')}
               {confirmationType === 'bigAdvance' && (selectedSale?.payment_type === 'Full' ? 'تأكيد بالحاضر' : 'تأكيد بالتقسيط')}
               {selectedPiece && ` - #${selectedPiece.piece_number}`}
             </DialogTitle>
@@ -1611,11 +1736,22 @@ export function SaleConfirmation() {
                 ? (totalPayablePerPiece * calculatedOffer.advance_amount) / 100
                 : calculatedOffer.advance_amount
             } else if (confirmationType === 'full') {
+              if (selectedSale.payment_type === 'PromiseOfSale') {
+                // For PromiseOfSale, calculate remaining after initial payment
+                const pieceCount = selectedSale.land_piece_ids.length
+                const initialPaymentPerPiece = (selectedSale.promise_initial_payment || 0) / pieceCount
+                advanceAmount = totalPayablePerPiece - reservationPerPiece - initialPaymentPerPiece
+              } else {
               advanceAmount = totalPayablePerPiece - reservationPerPiece
+              }
             }
             
             // Calculate remaining amount after advance
-            const remainingAfterAdvance = totalPayablePerPiece - reservationPerPiece - advanceAmount
+            let remainingAfterAdvance = totalPayablePerPiece - reservationPerPiece - advanceAmount
+            if (confirmationType === 'full' && selectedSale.payment_type === 'PromiseOfSale') {
+              // For PromiseOfSale, remaining is already calculated in advanceAmount
+              remainingAfterAdvance = advanceAmount
+            }
             
             // Calculate number of months and monthly payment from offer
             let calculatedMonths = 0
@@ -1704,10 +1840,14 @@ export function SaleConfirmation() {
                     
                     <div className="flex justify-between items-center py-2 border-t-2 border-orange-300 mt-2 bg-orange-50 rounded px-2">
                       <span className="text-base sm:text-lg font-bold text-gray-900">
-                        {confirmationType === 'full' ? 'المبلغ المتبقي:' : 'المبلغ المتبقي بعد التسبقة:'}
+                        {confirmationType === 'full' 
+                          ? (selectedSale.payment_type === 'PromiseOfSale' ? 'المبلغ المتبقي (بعد الدفعة الأولية):' : 'المبلغ المتبقي:')
+                          : 'المبلغ المتبقي بعد التسبقة:'}
                       </span>
                       <span className="text-base sm:text-lg font-bold text-orange-600">
-                        {formatCurrency(confirmationType === 'full' ? totalPayablePerPiece - reservationPerPiece : remainingAfterAdvance)}
+                        {formatCurrency(confirmationType === 'full' 
+                          ? (selectedSale.payment_type === 'PromiseOfSale' ? remainingAfterAdvance : totalPayablePerPiece - reservationPerPiece)
+                          : remainingAfterAdvance)}
                       </span>
                     </div>
               </div>
