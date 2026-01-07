@@ -202,13 +202,46 @@ export function Download() {
                 اضغط على الزر أعلاه لتحميل ملف APK للتطبيق على جهاز Android الخاص بك
               </p>
               
+              {/* Android App Links */}
+              <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto max-w-md">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    // Try to open Android app via intent
+                    window.location.href = androidIntentUrl
+                    // Fallback to Play Store after delay
+                    setTimeout(() => {
+                      window.open(androidPlayStoreUrl, '_blank')
+                    }, 2000)
+                  }}
+                  className="flex-1 sm:flex-none"
+                >
+                  <Smartphone className="h-4 w-4 ml-1" />
+                  فتح التطبيق
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => window.open(androidPlayStoreUrl, '_blank')}
+                  className="flex-1 sm:flex-none"
+                >
+                  متجر Google Play
+                </Button>
+              </div>
+
               {/* Info Alert */}
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 max-w-md">
                 <div className="flex items-start gap-2">
                   <AlertCircle className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
-                  <p className="text-xs text-blue-800">
-                    <strong>ملاحظة:</strong> إذا لم يعمل التحميل، تأكد من أن ملف APK موجود في Supabase Storage (bucket: app-downloads) أو في مجلد public باسم app.apk
-                  </p>
+                  <div className="text-xs text-blue-800 space-y-1">
+                    <p><strong>ملاحظة:</strong> إذا لم يعمل التحميل، تأكد من:</p>
+                    <ul className="list-disc list-inside mr-2 space-y-0.5">
+                      <li>ملف APK موجود في Supabase Storage (bucket: app-downloads)</li>
+                      <li>أو في مجلد public باسم app.apk</li>
+                      <li>المتصفح يسمح بتحميل الملفات</li>
+                    </ul>
+                  </div>
                 </div>
               </div>
             </div>
