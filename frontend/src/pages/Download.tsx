@@ -1,13 +1,20 @@
+import { useState } from 'react'
 import { useLanguage } from '@/contexts/LanguageContext'
+import { supabase } from '@/lib/supabase'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Download as DownloadIcon, Smartphone, CheckCircle2 } from 'lucide-react'
+import { Download as DownloadIcon, Smartphone, CheckCircle2, Loader2, AlertCircle } from 'lucide-react'
+import { showNotification } from '@/components/ui/notification'
 
 export function Download() {
   const { t } = useLanguage()
+  const [downloading, setDownloading] = useState(false)
 
-  // TODO: Replace with actual APK download URL
-  const apkDownloadUrl = 'https://your-domain.com/downloads/app.apk'
+  // APK file path in Supabase Storage or public URL
+  // Option 1: From Supabase Storage (bucket: 'app-downloads', file: 'app.apk')
+  // Option 2: Direct URL from public folder or CDN
+  const apkStoragePath = 'app-downloads/app.apk'
+  const apkDirectUrl = '/app.apk' // If APK is in public folder
   const appVersion = '1.0.0'
   const lastUpdated = new Date().toLocaleDateString('ar-TN', {
     year: 'numeric',
@@ -15,9 +22,92 @@ export function Download() {
     day: 'numeric'
   })
 
-  const handleDownload = () => {
-    // Open download link
-    window.open(apkDownloadUrl, '_blank')
+  const handleDownload = async () => {
+    setDownloading(true)
+    
+    try {
+      // Try method 1: Download from Supabase Storage
+      try {
+        const { data, error } = await supabase.storage
+          .from('app-downloads')
+          .download('app.apk')
+
+        if (!error && data) {
+          // Create blob URL and trigger download
+          const url = window.URL.createObjectURL(data)
+          const link = document.createElement('a')
+          link.href = url
+          link.download = 'LandDev.apk'
+          document.body.appendChild(link)
+          link.click()
+          document.body.removeChild(link)
+          window.URL.revokeObjectURL(url)
+          
+          showNotification('تم بدء التحميل بنجاح', 'success')
+          setDownloading(false)
+          return
+        }
+      } catch (storageError) {
+        console.log('Supabase Storage not available, trying direct URL...')
+      }
+
+      // Try method 2: Direct download from public folder or URL
+      try {
+        const response = await fetch(apkDirectUrl)
+        if (response.ok) {
+          const blob = await response.blob()
+          const url = window.URL.createObjectURL(blob)
+          const link = document.createElement('a')
+          link.href = url
+          link.download = 'LandDev.apk'
+          document.body.appendChild(link)
+          link.click()
+          document.body.removeChild(link)
+          window.URL.revokeObjectURL(url)
+          
+          showNotification('تم بدء التحميل بنجاح', 'success')
+          setDownloading(false)
+          return
+        }
+      } catch (fetchError) {
+        console.log('Direct URL not available')
+      }
+
+      // Try method 3: Get public URL from Supabase Storage
+      try {
+        const { data: urlData } = supabase.storage
+          .from('app-downloads')
+          .getPublicUrl('app.apk')
+
+        if (urlData?.publicUrl) {
+          // Open in new tab for download
+          const link = document.createElement('a')
+          link.href = urlData.publicUrl
+          link.download = 'LandDev.apk'
+          link.target = '_blank'
+          document.body.appendChild(link)
+          link.click()
+          document.body.removeChild(link)
+          
+          showNotification('تم فتح رابط التحميل', 'success')
+          setDownloading(false)
+          return
+        }
+      } catch (urlError) {
+        console.log('Public URL not available')
+      }
+
+      // If all methods fail
+      throw new Error('لم يتم العثور على ملف APK. يرجى التواصل مع المسؤول.')
+    } catch (error: any) {
+      console.error('Download error:', error)
+      showNotification(
+        error.message || 'حدث خطأ أثناء التحميل. يرجى المحاولة مرة أخرى.',
+        'error'
+      )
+    } finally {
+      setDownloading(false)
+    }
   }
 
   return (
@@ -60,15 +150,35 @@ export function Download() {
             <div className="flex flex-col items-center gap-4">
               <Button
                 onClick={handleDownload}
+                disabled={downloading}
                 size="lg"
-                className="w-full sm:w-auto min-w-[200px] bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white shadow-lg"
+                className="w-full sm:w-auto min-w-[200px] bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <DownloadIcon className="h-5 w-5 ml-2" />
-                تحميل APK للأندرويد
+                {downloading ? (
+                  <>
+                    <Loader2 className="h-5 w-5 ml-2 animate-spin" />
+                    جاري التحميل...
+                  </>
+                ) : (
+                  <>
+                    <DownloadIcon className="h-5 w-5 ml-2" />
+                    تحميل APK للأندرويد
+                  </>
+                )}
               </Button>
               <p className="text-xs text-muted-foreground text-center max-w-md">
                 اضغط على الزر أعلاه لتحميل ملف APK للتطبيق على جهاز Android الخاص بك
               </p>
+              
+              {/* Info Alert */}
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 max-w-md">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
+                  <p className="text-xs text-blue-800">
+                    <strong>ملاحظة:</strong> إذا لم يعمل التحميل، تأكد من أن ملف APK موجود في Supabase Storage (bucket: app-downloads) أو في مجلد public باسم app.apk
+                  </p>
+                </div>
+              </div>
             </div>
 
             {/* Instructions */}
