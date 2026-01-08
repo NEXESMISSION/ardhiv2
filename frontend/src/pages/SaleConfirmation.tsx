@@ -2724,7 +2724,7 @@ export function SaleConfirmation() {
               <div className="bg-gray-50 p-3 rounded-lg">
                 <p className="text-sm font-medium">العميل: {editingSale.client?.name || 'غير معروف'}</p>
                 <p className="text-xs text-muted-foreground">
-                  القطعة: {editingPiece.land_batch?.name || 'دفعة'} - #{editingPiece.piece_number} ({editingPiece.surface_area} م²)
+                  القطعة: {(editingPiece as any).land_batch?.name || 'دفعة'} - #{editingPiece.piece_number} ({editingPiece.surface_area} م²)
                 </p>
                 <p className="text-xs text-muted-foreground">نوع الدفع: {
                   editingSale.payment_type === 'Full' ? 'بالحاضر' :
@@ -2857,7 +2857,7 @@ export function SaleConfirmation() {
             <div className="space-y-4">
               <div className="bg-gray-50 p-3 rounded-lg">
                 <p className="text-sm font-medium">
-                  القطعة: {editingPiece.land_batch?.name || 'دفعة'} - #{editingPiece.piece_number} ({editingPiece.surface_area} م²)
+                  القطعة: {(editingPiece as any).land_batch?.name || 'دفعة'} - #{editingPiece.piece_number} ({editingPiece.surface_area} م²)
                 </p>
                 <p className="text-xs text-muted-foreground">
                   سعر القطعة: {formatCurrency(parseFloat(editForm.total_selling_price) || 0)}
