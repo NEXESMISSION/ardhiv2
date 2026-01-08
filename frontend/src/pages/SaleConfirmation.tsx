@@ -73,6 +73,8 @@ export function SaleConfirmation() {
   const [confirmationType, setConfirmationType] = useState<'full' | 'bigAdvance'>('full')
   const [installmentStartDate, setInstallmentStartDate] = useState('')
   const [selectedOffer, setSelectedOffer] = useState<PaymentOffer | null>(null)
+  const [contractEditors, setContractEditors] = useState<Array<{ id: string; type: string; name: string; place: string }>>([])
+  const [selectedContractEditorId, setSelectedContractEditorId] = useState<string>('')
   
   // Client details dialog
   const [clientDetailsOpen, setClientDetailsOpen] = useState(false)
@@ -204,7 +206,40 @@ export function SaleConfirmation() {
       return
     }
     fetchSales()
+    fetchContractEditors()
   }, [canAccess])
+
+  const fetchContractEditors = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('contract_editors')
+        .select('id, type, name, place')
+        .order('type', { ascending: true })
+        .order('name', { ascending: true })
+
+      if (error) {
+        // If table doesn't exist (404), just set empty array and don't log error
+        if (error.code === 'PGRST116' || error.message?.includes('does not exist') || error.message?.includes('404')) {
+          console.warn('contract_editors table does not exist yet. Please run the SQL migration.')
+          setContractEditors([])
+        } else {
+          console.error('Error fetching contract editors:', error)
+          setContractEditors([])
+        }
+      } else {
+        setContractEditors(data || [])
+      }
+    } catch (error: any) {
+      // Handle CORS or other errors gracefully
+      if (error?.message?.includes('CORS') || error?.message?.includes('404') || error?.message?.includes('does not exist')) {
+        console.warn('contract_editors table does not exist yet. Please run the SQL migration.')
+        setContractEditors([])
+      } else {
+        console.error('Error fetching contract editors:', error)
+        setContractEditors([])
+      }
+    }
+  }
 
   const fetchSales = async () => {
     setLoading(true)
@@ -582,6 +617,7 @@ export function SaleConfirmation() {
     
     setPaymentMethod('cash')
     setConfirmationNotes('')
+    setSelectedContractEditorId(sale.contract_editor_id || '')
     setConfirmDialogOpen(true)
   }
 
@@ -874,6 +910,7 @@ export function SaleConfirmation() {
         const updates: any = {
           company_fee_percentage: feePercentage > 0 ? feePercentage : null,
           company_fee_amount: companyFeePerPiece > 0 ? parseFloat(companyFeePerPiece.toFixed(2)) : null,
+          contract_editor_id: selectedContractEditorId || null,
         }
 
         if (confirmationType === 'full') {
@@ -1129,6 +1166,7 @@ export function SaleConfirmation() {
           sale_date: selectedSale.sale_date,
           notes: `تأكيد قطعة من البيع #${selectedSale.id.slice(0, 8)}`,
           created_by: selectedSale.created_by || user?.id || null, // Keep original creator
+          contract_editor_id: selectedContractEditorId || null,
         }
 
         if (confirmationType === 'full') {
@@ -2182,6 +2220,23 @@ export function SaleConfirmation() {
                   <option value="cash">نقدي</option>
                   <option value="check">شيك</option>
                   <option value="transfer">تحويل بنكي</option>
+                </Select>
+              </div>
+
+              <div className="space-y-1.5 sm:space-y-2">
+                <Label htmlFor="contractEditor" className="text-xs sm:text-sm">محرر العقد</Label>
+                <Select
+                  id="contractEditor"
+                  value={selectedContractEditorId}
+                  onChange={e => setSelectedContractEditorId(e.target.value)}
+                  className="text-xs sm:text-sm"
+                >
+                  <option value="">-- اختر محرر العقد --</option>
+                  {contractEditors.map((editor) => (
+                    <option key={editor.id} value={editor.id}>
+                      {editor.type} - {editor.name} ({editor.place})
+                    </option>
+                  ))}
                 </Select>
               </div>
 

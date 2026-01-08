@@ -64,6 +64,7 @@ const ALL_PAGES = [
   { id: 'workers', name: 'العمال', icon: Briefcase, description: 'إدارة العمال' },
   { id: 'messages', name: 'الرسائل', icon: MessageSquare, description: 'الرسائل والمحادثات' },
   { id: 'users', name: 'المستخدمين', icon: User, description: 'إدارة المستخدمين' },
+  { id: 'contract-editors', name: 'محررين', icon: FileText, description: 'إدارة محررين العقود' },
   { id: 'security', name: 'الأمان', icon: Shield, description: 'سجلات الأمان' },
 ]
 

@@ -18,13 +18,17 @@ BEGIN
         RAISE EXCEPTION 'Only Owners can delete clients completely';
     END IF;
     
+    -- IMPORTANT: Delete ALL payments for this client FIRST (both by client_id and by sale_id)
+    -- This must be done before deleting sales to avoid foreign key constraint violations
+    DELETE FROM payments WHERE client_id = client_id_to_delete;
+    
     -- Get all sales for this client
     FOR sale_record IN 
         SELECT id, land_piece_ids 
         FROM sales 
         WHERE client_id = client_id_to_delete
     LOOP
-        -- Delete payments for this sale
+        -- Delete any remaining payments for this sale (in case there are orphaned payments)
         DELETE FROM payments WHERE sale_id = sale_record.id;
         
         -- Delete installments for this sale
@@ -49,8 +53,8 @@ BEGIN
     SET status = 'Available', reservation_client_id = NULL
     WHERE reservation_client_id = client_id_to_delete;
     
-    -- Delete any debts for this client
-    DELETE FROM debts WHERE client_id = client_id_to_delete;
+    -- Note: debts table does not have client_id - it tracks company debts, not client debts
+    -- So we don't need to delete from debts table
     
     -- Finally, delete the client
     DELETE FROM clients WHERE id = client_id_to_delete;

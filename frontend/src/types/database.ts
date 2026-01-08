@@ -149,6 +149,7 @@ export interface Sale {
   number_of_installments: number | null
   monthly_installment_amount: number | null
   selected_offer_id: string | null
+  contract_editor_id: string | null
   // Promise of Sale fields
   promise_initial_payment: number | null
   promise_completion_date: string | null

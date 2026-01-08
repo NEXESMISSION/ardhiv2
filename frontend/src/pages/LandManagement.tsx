@@ -656,7 +656,8 @@ export function LandManagement() {
         .from('sales')
         .select(`
           *,
-          client:clients(*)
+          client:clients(*),
+          contract_editor:contract_editors(*)
         `)
         .contains('land_piece_ids', [piece.id])
         .not('status', 'eq', 'Cancelled')
@@ -7253,6 +7254,14 @@ export function LandManagement() {
                     <div>
                       <span className="text-gray-500">عمولة الشركة:</span>
                       <p className="font-medium">{saleDetailsData.company_fee_percentage}% ({formatCurrency(saleDetailsData.company_fee_amount || 0)})</p>
+                    </div>
+                  )}
+                  {saleDetailsData.contract_editor && (
+                    <div className="col-span-2">
+                      <span className="text-gray-500">محرر العقد:</span>
+                      <p className="font-medium">
+                        {saleDetailsData.contract_editor.type} - {saleDetailsData.contract_editor.name} ({saleDetailsData.contract_editor.place})
+                      </p>
                     </div>
                   )}
                 </div>

@@ -42,7 +42,7 @@ interface PieceSale {
   surfaceArea: number
   clientId: string
   clientName: string
-  paymentType: 'Full' | 'Installment'
+  paymentType: 'Full' | 'Installment' | 'PromiseOfSale'
   price: number
   cost: number
   profit: number
@@ -170,7 +170,7 @@ export function SalesNew() {
       const [salesRes, clientsRes, piecesRes, installmentsRes, paymentsRes, usersRes] = await retryWithBackoff(
         async () => {
           return await Promise.all([
-        supabase.from('sales').select('*').order('sale_date', { ascending: false }),
+        supabase.from('sales').select('*, contract_editor:contract_editors(*)').order('sale_date', { ascending: false }),
         supabase.from('clients').select('*').order('name'),
         supabase.from('land_pieces').select('*, land_batch:land_batches(name)'),
         supabase.from('installments').select('*').order('due_date'),
@@ -239,6 +239,7 @@ export function SalesNew() {
         if (!piece) return
         
         const isInstallment = sale.payment_type === 'Installment'
+        const isPromiseOfSale = sale.payment_type === 'PromiseOfSale'
         const pricePerPiece = sale.total_selling_price / sale.land_piece_ids.length
         const costPerPiece = sale.total_purchase_cost / sale.land_piece_ids.length
         const pieceCount = sale.land_piece_ids.length
@@ -289,6 +290,15 @@ export function SalesNew() {
               status = 'AwaitingPayment' // قيد الدفع - confirmed but waiting for big advance
             }
           }
+        } else if (isPromiseOfSale) {
+          // Promise of Sale: check initial payment and completion
+          if (sale.status === 'Completed' || (sale as any).promise_completed) {
+            status = 'Completed' // مباع - promise completed
+          } else if (!isConfirmed) {
+            status = 'Pending' // محجوز - not confirmed yet
+          } else {
+            status = 'AwaitingPayment' // قيد الدفع - confirmed but waiting for completion payment
+          }
         } else {
           // Full payment sale
           if (sale.status === 'Completed') {
@@ -306,8 +316,8 @@ export function SalesNew() {
         if (status === 'Completed') {
           remainingPerPiece = 0 // مباع - fully paid, no remaining
         } else {
-          // For ALL sales (installment or full): Remaining = Total Payable - Total Paid
-          // Total Paid includes: العربون (SmallAdvance) + التسبقة (BigAdvance) + installments
+          // For ALL sales (installment, full, or promise of sale): Remaining = Total Payable - Total Paid
+          // Total Paid includes: العربون (SmallAdvance) + التسبقة (BigAdvance) + Full + Partial + InitialPayment + Field + installments
           // This ensures the correct calculation regardless of how installments were created
           remainingPerPiece = Math.max(0, totalPayablePerPiece - paidPerPiece)
         }
@@ -321,7 +331,7 @@ export function SalesNew() {
           surfaceArea: piece.surface_area,
           clientId: sale.client_id,
           clientName: client?.name || t('sales.unknown'),
-          paymentType: isInstallment ? 'Installment' : 'Full',
+          paymentType: isInstallment ? 'Installment' : isPromiseOfSale ? 'PromiseOfSale' : 'Full',
           price: pricePerPiece,
           cost: costPerPiece,
           profit: pricePerPiece - costPerPiece,
@@ -1838,20 +1848,92 @@ export function SalesNew() {
             // Calculate payments per piece (divide by number of pieces)
             const pieceCount = saleData?.land_piece_ids?.length || 1
             
-            const reservationPaid = salePayments
+            // Calculate total payments for the entire sale (not per piece)
+            const totalReservationPaid = salePayments
               .filter(p => p.payment_type === 'SmallAdvance')
-              .reduce((sum, p) => sum + (p.amount_paid || 0), 0) / pieceCount
+              .reduce((sum, p) => sum + (p.amount_paid || 0), 0)
             
-            const bigAdvancePaid = salePayments
+            const totalBigAdvancePaid = salePayments
               .filter(p => p.payment_type === 'BigAdvance')
-              .reduce((sum, p) => sum + (p.amount_paid || 0), 0) / pieceCount
+              .reduce((sum, p) => sum + (p.amount_paid || 0), 0)
             
-            // Calculate installment paid from installments table, not payments
-            const installmentPaid = saleInstallments
-              .reduce((sum, inst) => sum + (inst.amount_paid || 0), 0) / pieceCount
+            // Calculate full payment (Full payment type)
+            const totalFullPaymentPaid = salePayments
+              .filter(p => p.payment_type === 'Full')
+              .reduce((sum, p) => sum + (p.amount_paid || 0), 0)
             
-            // Total paid = reservation + big advance + installments (exclude Refund and Installment payment type from payments as installments are tracked separately)
-            const totalPaid = reservationPaid + bigAdvancePaid + installmentPaid
+            // Calculate partial payments (Partial payment type)
+            const totalPartialPaymentPaid = salePayments
+              .filter(p => p.payment_type === 'Partial')
+              .reduce((sum, p) => sum + (p.amount_paid || 0), 0)
+            
+            // Calculate initial payment for Promise of Sale (InitialPayment type) from payments table
+            const totalInitialPaymentPaidFromPayments = salePayments
+              .filter(p => p.payment_type === 'InitialPayment')
+              .reduce((sum, p) => sum + (p.amount_paid || 0), 0)
+            
+            // Also check if there's promise_initial_payment in the sale (for PromiseOfSale type)
+            // Use payments if available, otherwise use sale's promise_initial_payment
+            const totalInitialPaymentPaid = totalInitialPaymentPaidFromPayments > 0 
+              ? totalInitialPaymentPaidFromPayments 
+              : (saleData?.payment_type === 'PromiseOfSale' ? (saleData?.promise_initial_payment || 0) : 0)
+            
+            // Calculate field payments (Field payment type)
+            const totalFieldPaymentPaid = salePayments
+              .filter(p => p.payment_type === 'Field')
+              .reduce((sum, p) => sum + (p.amount_paid || 0), 0)
+            
+            // Calculate installment payments from payments table (Installment payment type)
+            // Note: Regular installments are tracked in installments table, but some may be recorded as Installment type in payments
+            const totalInstallmentPaymentPaid = salePayments
+              .filter(p => p.payment_type === 'Installment')
+              .reduce((sum, p) => sum + (p.amount_paid || 0), 0)
+            
+            // Calculate installment paid from installments table (this is the main source for installment payments)
+            const totalInstallmentPaid = saleInstallments
+              .reduce((sum, inst) => sum + (inst.amount_paid || 0), 0)
+            
+            // Total paid for the entire sale (exclude Refund)
+            // Include all payment types: SmallAdvance, BigAdvance, Full, Partial, InitialPayment, Field, Installment (from payments), and installments (from installments table)
+            const totalPaidForSale = totalReservationPaid + 
+                                    totalBigAdvancePaid + 
+                                    totalFullPaymentPaid + 
+                                    totalPartialPaymentPaid + 
+                                    totalInitialPaymentPaid + 
+                                    totalFieldPaymentPaid + 
+                                    totalInstallmentPaymentPaid + 
+                                    totalInstallmentPaid
+            
+            // Per-piece amounts (for display purposes)
+            const reservationPaid = totalReservationPaid / pieceCount
+            const bigAdvancePaid = totalBigAdvancePaid / pieceCount
+            const installmentPaid = totalInstallmentPaid / pieceCount
+            
+            // Total paid per piece
+            const totalPaid = totalPaidForSale / pieceCount
+            
+            // Debug logging
+            console.log('[SaleDetails] Payment calculations:', {
+              saleId: selectedSaleForDetails.saleId,
+              paymentType: saleData?.payment_type,
+              pieceCount,
+              totalReservationPaid,
+              totalBigAdvancePaid,
+              totalFullPaymentPaid,
+              totalPartialPaymentPaid,
+              totalInitialPaymentPaid,
+              totalFieldPaymentPaid,
+              totalInstallmentPaymentPaid,
+              totalInstallmentPaid,
+              totalPaidForSale,
+              reservationPaid,
+              bigAdvancePaid,
+              installmentPaid,
+              totalPaid,
+              salePaymentsCount: salePayments.length,
+              saleInstallmentsCount: saleInstallments.length,
+              allPaymentTypes: salePayments.map(p => ({ type: p.payment_type, amount: p.amount_paid }))
+            })
             
             return (
               <div className="space-y-6">
@@ -1951,8 +2033,14 @@ export function SalesNew() {
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div>
                           <p className="text-sm text-muted-foreground">نوع الدفع</p>
-                          <Badge variant={selectedSaleForDetails.paymentType === 'Full' ? 'success' : 'secondary'}>
-                            {selectedSaleForDetails.paymentType === 'Full' ? 'بالحاضر' : 'بالتقسيط'}
+                          <Badge variant={
+                            selectedSaleForDetails.paymentType === 'Full' ? 'success' : 
+                            selectedSaleForDetails.paymentType === 'PromiseOfSale' ? 'warning' : 
+                            'secondary'
+                          }>
+                            {selectedSaleForDetails.paymentType === 'Full' ? 'بالحاضر' : 
+                             selectedSaleForDetails.paymentType === 'PromiseOfSale' ? 'وعد بالبيع' : 
+                             'بالتقسيط'}
                           </Badge>
                         </div>
                         <div>
@@ -1987,6 +2075,14 @@ export function SalesNew() {
                         <div className="mt-3 p-3 bg-blue-50 rounded-lg border border-blue-200">
                           <p className="text-sm text-muted-foreground">آخر أجل لإتمام الإجراءات</p>
                           <p className="font-medium text-blue-700">{formatDate(selectedSaleForDetails.deadlineDate)}</p>
+                        </div>
+                      )}
+                      {(saleData as any)?.contract_editor && (
+                        <div className="mt-3 p-3 bg-purple-50 rounded-lg border border-purple-200">
+                          <p className="text-sm text-muted-foreground">محرر العقد</p>
+                          <p className="font-medium text-purple-700">
+                            {(saleData as any).contract_editor.type} - {(saleData as any).contract_editor.name} ({(saleData as any).contract_editor.place})
+                          </p>
                         </div>
                       )}
                     </div>
@@ -2031,6 +2127,28 @@ export function SalesNew() {
                               <p className="text-sm text-muted-foreground">الأقساط المدفوعة</p>
                               <p className="font-medium text-green-600">{formatCurrency(installmentPaid)}</p>
                             </div>
+                          </>
+                        )}
+                        {selectedSaleForDetails.paymentType === 'PromiseOfSale' && (
+                          <>
+                            {saleData?.promise_initial_payment && saleData.promise_initial_payment > 0 && (
+                              <div>
+                                <p className="text-sm text-muted-foreground">المبلغ المستلم (وعد بالبيع)</p>
+                                <p className="font-medium text-purple-600">{formatCurrency((saleData.promise_initial_payment || 0) / pieceCount)}</p>
+                              </div>
+                            )}
+                            {saleData?.promise_completion_date && (
+                              <div>
+                                <p className="text-sm text-muted-foreground">تاريخ الاستكمال المحدد</p>
+                                <p className="font-medium">{formatDate(saleData.promise_completion_date)}</p>
+                              </div>
+                            )}
+                            {saleData?.promise_completed && (
+                              <div>
+                                <p className="text-sm text-muted-foreground">حالة الاستكمال</p>
+                                <p className="font-medium text-green-600">مكتمل</p>
+                              </div>
+                            )}
                           </>
                         )}
                         <div>

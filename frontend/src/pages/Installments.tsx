@@ -228,6 +228,7 @@ export function Installments() {
     totalPaid: number
     totalUnpaid: number
     landPieces: string
+    contractEditor?: { type: string; name: string; place: string } | null
   } | null>(null)
   
   // Debounced search
@@ -539,6 +540,7 @@ export function Installments() {
           sale:sales (
             *,
             client:clients (*),
+            contract_editor:contract_editors (*),
             land_piece_ids,
             is_confirmed,
             big_advance_confirmed
@@ -992,6 +994,9 @@ export function Installments() {
         }
       }
       
+      // Force refresh of deals table by incrementing refreshKey
+      setRefreshKey(prev => prev + 1)
+      
       // NOW close the dialog after refresh completes
       setPaymentDialogOpen(false)
       setPaymentAmount('')
@@ -1014,6 +1019,7 @@ export function Installments() {
               sale:sales (
                 *,
                 client:clients (*),
+                contract_editor:contract_editors (*),
                 land_piece_ids
               )
             `)
@@ -1065,7 +1071,8 @@ export function Installments() {
               totalDue,
               totalPaid,
               totalUnpaid,
-              landPieces: pieceNumbers
+              landPieces: pieceNumbers,
+              contractEditor: firstInst.sale?.contract_editor || selectedSaleForDetails?.contractEditor || null
             })
           } else {
             console.warn('[recordPayment] No fresh installments data found for sale:', paidSaleId)
@@ -1326,6 +1333,7 @@ export function Installments() {
       isOverdue: boolean
       overdueAmount: number
       installments: InstallmentWithRelations[]
+      contractEditor?: { type: string; name: string; place: string } | null
     }> = []
     
     clientGroups.forEach(group => {
@@ -1341,10 +1349,18 @@ export function Installments() {
           if (saleInstallments.length === 0) return
         }
         
-        const unpaidInstallments = saleInstallments.filter(i => getRemainingAmount(i) > 0.01)
+        const unpaidInstallments = saleInstallments.filter(i => {
+          const remaining = getRemainingAmount(i)
+          return remaining > 0.01 && i.status !== 'Paid'
+        })
         const nextInst = unpaidInstallments[0]
         
-        if (!nextInst) return // Skip fully paid deals
+        // Skip fully paid deals - check if all installments are paid
+        const allPaid = saleInstallments.every(i => {
+          const remaining = getRemainingAmount(i)
+          return remaining <= 0.01 || i.status === 'Paid'
+        })
+        if (allPaid) return // Skip fully paid deals
         
         const totalUnpaid = unpaidInstallments.reduce((sum, inst) => sum + getRemainingAmount(inst), 0)
         const daysUntilDue = nextInst ? getDaysUntilDue(nextInst) : 999
@@ -1362,6 +1378,9 @@ export function Installments() {
         const pieceNumbers = landPieces.map((p: any) => p?.piece_number).filter(Boolean).join('، ')
         
         const deadlineDate = nextInst.sale?.deadline_date || null
+        
+        // Get contract editor from first installment's sale
+        const contractEditor = sale.installments[0]?.sale?.contract_editor || null
         
         deals.push({
           saleId: sale.saleId,
@@ -1381,7 +1400,8 @@ export function Installments() {
           daysUntilDue,
           isOverdue,
           overdueAmount,
-          installments: saleInstallments
+          installments: saleInstallments,
+          contractEditor // Add contract editor to deal
         })
       })
     })
@@ -1477,6 +1497,9 @@ export function Installments() {
   }, [clientGroups, debouncedSearchTerm, filterOverdue, filterDueThisMonth, filterMinRemaining, filterProgress, filterStatus, refreshKey, getRemainingAmount])
   
   const openSaleDetails = (deal: typeof dealsTableData[0]) => {
+    // Get contract editor from deal or first installment's sale
+    const contractEditor = deal.contractEditor || deal.installments[0]?.sale?.contract_editor || null
+    
     setSelectedSaleForDetails({
       saleId: deal.saleId,
       clientName: deal.clientName,
@@ -1487,7 +1510,8 @@ export function Installments() {
       totalDue: deal.totalDue,
       totalPaid: deal.totalPaid,
       totalUnpaid: deal.totalUnpaid,
-      landPieces: deal.landPieces
+      landPieces: deal.landPieces,
+      contractEditor
     })
     setDetailsDrawerOpen(true)
   }
@@ -3036,6 +3060,7 @@ export function Installments() {
                           sale:sales (
                             *,
                             client:clients (*),
+                            contract_editor:contract_editors (*),
                             land_piece_ids
                           )
                         `)
@@ -3076,7 +3101,8 @@ export function Installments() {
                           totalDue,
                           totalPaid,
                           totalUnpaid,
-                          landPieces: pieceNumbers
+                          landPieces: pieceNumbers,
+                          contractEditor: firstInst.sale?.contract_editor || null
                         })
                       }
                     } catch (err) {
@@ -3125,6 +3151,14 @@ export function Installments() {
                     <p className="font-semibold text-sm sm:text-base text-red-600">{formatCurrency(selectedSaleForDetails.totalUnpaid)}</p>
                   </div>
                   {selectedSaleForDetails.deadlineDate && <DeadlineCountdown deadlineDate={selectedSaleForDetails.deadlineDate} />}
+                  {selectedSaleForDetails.contractEditor && (
+                    <div>
+                      <p className="text-xs sm:text-sm text-muted-foreground mb-1">محرر العقد</p>
+                      <p className="font-semibold text-sm sm:text-base">
+                        {selectedSaleForDetails.contractEditor.type} - {selectedSaleForDetails.contractEditor.name} ({selectedSaleForDetails.contractEditor.place})
+                      </p>
+                    </div>
+                  )}
                 </div>
                 <div className="mt-3 sm:mt-4 pt-3 sm:pt-4 border-t">
                   <div className="flex items-center justify-between text-xs sm:text-sm">
@@ -3157,7 +3191,7 @@ export function Installments() {
                       if (selectedSaleForDetails) {
                         const { data: freshData } = await supabase
                           .from('installments')
-                          .select(`*, sale:sales (*, client:clients (*), land_piece_ids)`)
+                          .select(`*, sale:sales (*, client:clients (*), contract_editor:contract_editors (*), land_piece_ids)`)
                           .eq('sale_id', selectedSaleForDetails.saleId)
                           .order('installment_number', { ascending: true })
                         
@@ -3175,7 +3209,8 @@ export function Installments() {
                             installments: freshInstallments,
                             totalDue,
                             totalPaid,
-                            totalUnpaid
+                            totalUnpaid,
+                            contractEditor: freshInstallments[0]?.sale?.contract_editor || selectedSaleForDetails.contractEditor || null
                           })
                         }
                       }

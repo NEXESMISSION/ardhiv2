@@ -24,6 +24,7 @@ import {
   Briefcase,
   Phone,
   Download as DownloadIcon,
+  FileText,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Select } from '@/components/ui/select'
@@ -49,6 +50,7 @@ const getNavItems = (t: (key: string) => string) => [
   { to: '/workers', icon: Briefcase, label: t('nav.workers'), permission: 'view_workers', pageId: 'workers' },
   { to: '/messages', icon: MessageSquare, label: t('nav.messages'), permission: 'view_messages', pageId: 'messages' },
   { to: '/users', icon: Settings, label: t('nav.users'), permission: 'manage_users', pageId: 'users' },
+  { to: '/contract-editors', icon: FileText, label: 'محررين', permission: 'edit_clients', pageId: 'contract-editors' },
   { to: '/security', icon: Shield, label: t('nav.security'), permission: 'view_audit_logs', pageId: 'security' },
 ]
 

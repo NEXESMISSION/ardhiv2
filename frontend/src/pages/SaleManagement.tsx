@@ -89,12 +89,13 @@ export function SaleManagement() {
     try {
       setLoading(true)
       
-      // Fetch sales with client
+      // Fetch sales with client and contract editor
       const { data: salesData, error: salesError } = await supabase
         .from('sales')
         .select(`
           *,
-          client:clients(*)
+          client:clients(*),
+          contract_editor:contract_editors(*)
         `)
         .order('created_at', { ascending: false })
 
@@ -593,6 +594,14 @@ export function SaleManagement() {
                         {formatCurrency(selectedSale.payments.reduce((sum, p) => sum + (p.amount_paid || 0), 0))}
                       </p>
                     </div>
+                    {(selectedSale as any).contract_editor && (
+                      <div className="col-span-2">
+                        <Label className="text-muted-foreground">محرر العقد</Label>
+                        <p className="font-medium">
+                          {(selectedSale as any).contract_editor.type} - {(selectedSale as any).contract_editor.name} ({(selectedSale as any).contract_editor.place})
+                        </p>
+                      </div>
+                    )}
                   </div>
                 </CardContent>
               </Card>

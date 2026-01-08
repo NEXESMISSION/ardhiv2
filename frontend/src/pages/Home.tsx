@@ -17,7 +17,8 @@ import {
   Calendar,
   Phone,
   Download,
-  Briefcase
+  Briefcase,
+  FileText
 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useLanguage } from '@/contexts/LanguageContext'
@@ -158,6 +159,14 @@ export function Home() {
       route: '/users',
       permission: 'manage_users',
       pageId: 'users',
+    },
+    {
+      title: 'محررين',
+      icon: FileText,
+      color: 'bg-indigo-500',
+      route: '/contract-editors',
+      permission: 'edit_clients',
+      pageId: 'contract-editors',
     },
     {
       title: t('nav.security'),

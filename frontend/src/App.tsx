@@ -23,6 +23,7 @@ import { Calendar } from '@/pages/Calendar'
 import { PhoneCalls } from '@/pages/PhoneCalls'
 import { Download } from '@/pages/Download'
 import { AccountDisabled } from '@/pages/AccountDisabled'
+import { ContractEditors } from '@/pages/ContractEditors'
 import { LoadingProgress } from '@/components/ui/loading-progress'
 import { NotificationContainer } from '@/components/ui/notification'
 
@@ -238,6 +239,14 @@ function AppRoutes() {
           element={
             <PermissionProtectedRoute permission="manage_users" pageId="users">
               <UserPermissions />
+            </PermissionProtectedRoute>
+          } 
+        />
+        <Route 
+          path="contract-editors" 
+          element={
+            <PermissionProtectedRoute permission="edit_clients" pageId="contract-editors">
+              <ContractEditors />
             </PermissionProtectedRoute>
           } 
         />

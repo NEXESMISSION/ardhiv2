@@ -377,21 +377,21 @@ export function Clients() {
       const { data: result, error: functionError } = await supabase.rpc('delete_client_completely', {
         client_id_to_delete: clientToDelete
       })
-      
+        
       if (functionError) {
         console.error('Error calling delete_client_completely function:', functionError)
         
         // Check if it's a permission error
         if (functionError.message?.includes('Only Owners')) {
           throw new Error('فقط المالك يمكنه حذف العملاء بالكامل')
-        }
+          }
         
         throw new Error(`خطأ في حذف العميل: ${functionError.message || functionError.code || 'خطأ غير معروف'}`)
-      }
-      
+        }
+        
       if (result === true) {
         console.log('Client and all related data deleted successfully')
-      } else {
+        } else {
         console.warn('Delete function returned:', result, '- assuming deletion succeeded')
       }
       

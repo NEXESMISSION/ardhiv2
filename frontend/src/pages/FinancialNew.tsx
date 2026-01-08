@@ -139,7 +139,7 @@ export function Financial() {
           .order('sale_date', { ascending: false }),
         supabase
           .from('payments')
-          .select('*, client:clients(*), sale:sales(land_piece_ids, payment_type, total_selling_price, created_by, created_by_user:users!sales_created_by_fkey(id, name, email)), recorded_by_user:users!payments_recorded_by_fkey(id, name, email)')
+          .select('*, client:clients(*), sale:sales(land_piece_ids, payment_type, total_selling_price, created_by, created_by_user:users!sales_created_by_fkey(id, name, email), promise_initial_payment, promise_completion_date, promise_completed), recorded_by_user:users!payments_recorded_by_fkey(id, name, email)')
           .order('payment_date', { ascending: false }),
         supabase
           .from('land_pieces')
@@ -274,21 +274,39 @@ export function Financial() {
     const bigAdvancePaymentsList = paymentsWithPieces.filter(p => p.payment_type === 'BigAdvance')
     const smallAdvancePaymentsList = paymentsWithPieces.filter(p => p.payment_type === 'SmallAdvance')
     const fullPaymentsList = paymentsWithPieces.filter(p => p.payment_type === 'Full')
+    const partialPaymentsList = paymentsWithPieces.filter(p => p.payment_type === 'Partial')
     const initialPaymentsList = paymentsWithPieces.filter(p => p.payment_type === 'InitialPayment')
+    
+    // Get PromiseOfSale payments - these are payments where the sale has payment_type='PromiseOfSale'
+    // PromiseOfSale payments are stored as 'Partial' (initial payment) or 'Full' (completion) in payments table
+    const promiseOfSalePaymentsList = paymentsWithPieces.filter(p => {
+      const salePaymentType = p.sale?.payment_type
+      return salePaymentType === 'PromiseOfSale'
+    })
     
     // Calculate totals from payments
     const installmentPaymentsTotal = installmentPaymentsList.reduce((sum, p) => sum + p.amount_paid, 0)
     const bigAdvanceTotal = bigAdvancePaymentsList.reduce((sum, p) => sum + p.amount_paid, 0)
     const fullPaymentsTotal = fullPaymentsList.reduce((sum, p) => sum + p.amount_paid, 0)
+    const partialPaymentsTotal = partialPaymentsList.reduce((sum, p) => sum + p.amount_paid, 0)
     const initialPaymentsTotal = initialPaymentsList.reduce((sum, p) => sum + p.amount_paid, 0)
     
-    // Calculate initial payments from sales (promise_initial_payment for PromiseOfSale)
-    const initialPaymentFromSales = filteredSales
-      .filter(s => s.status !== 'Cancelled' && (s as any).payment_type === 'PromiseOfSale')
-      .reduce((sum, s) => sum + ((s as any).promise_initial_payment || 0), 0)
+    // Calculate PromiseOfSale total from payment records
+    const promiseOfSaleTotalFromPayments = promiseOfSalePaymentsList.reduce((sum, p) => sum + p.amount_paid, 0)
     
-    // Use payments if available, otherwise use sales data
-    const totalInitialPayments = initialPaymentsTotal > 0 ? initialPaymentsTotal : initialPaymentFromSales
+    // Also check sales table for promise_initial_payment if no payment records exist
+    // This handles cases where PromiseOfSale was created but payment wasn't recorded yet
+    const promiseOfSaleFromSales = filteredSales
+      .filter(s => s.status !== 'Cancelled' && (s as any).payment_type === 'PromiseOfSale')
+      .reduce((sum, s) => {
+        const promiseInitialPayment = (s as any).promise_initial_payment || 0
+        // Only add if there's no payment record for this sale in the filtered payments
+        const hasPaymentRecord = promiseOfSalePaymentsList.some(p => p.sale_id === s.id)
+        return sum + (hasPaymentRecord ? 0 : promiseInitialPayment)
+      }, 0)
+    
+    // Total PromiseOfSale payments (from payment records + sales table if no payment records)
+    const totalPromiseOfSalePayments = promiseOfSaleTotalFromPayments + promiseOfSaleFromSales
     
     // Calculate small advance (reservation) from sales table
     const smallAdvanceFromPayments = smallAdvancePaymentsList.reduce((sum, p) => sum + p.amount_paid, 0)
@@ -298,7 +316,15 @@ export function Financial() {
     
     const smallAdvanceTotal = smallAdvanceFromPayments > 0 ? smallAdvanceFromPayments : smallAdvanceFromSales
     
-    const cashReceived = filteredPayments.reduce((sum, p) => sum + p.amount_paid, 0)
+    // Calculate cash received - only actual cash payments (exclude Refund, exclude company fees)
+    // Include: Installment, SmallAdvance, BigAdvance, Full, Partial, InitialPayment, Field
+    // This should match the sum of all payment types in the breakdown
+    const cashReceived = 
+      installmentPaymentsTotal + 
+      smallAdvanceTotal + 
+      fullPaymentsTotal + 
+      bigAdvanceTotal + 
+      totalPromiseOfSalePayments
 
     // Calculate company fees from sales
     // NOTE: Commission is ONLY counted for CONFIRMED (Completed) sales
@@ -345,6 +371,7 @@ export function Financial() {
     const groupedBigAdvancePayments = groupPayments(bigAdvancePaymentsList)
     const groupedSmallAdvancePayments = groupPayments(smallAdvancePaymentsList)
     const groupedFullPayments = groupPayments(fullPaymentsList)
+    const groupedPromiseOfSalePayments = groupPayments(promiseOfSalePaymentsList)
     const groupedInitialPayments = groupPayments(initialPaymentsList)
 
     // Group company fees by client and date
@@ -439,19 +466,22 @@ export function Financial() {
       bigAdvancePaymentsList,
       smallAdvancePaymentsList,
       fullPaymentsList,
+      promiseOfSalePaymentsList,
       initialPaymentsList,
       // Grouped payments
       groupedInstallmentPayments,
       groupedBigAdvancePayments,
       groupedSmallAdvancePayments,
       groupedFullPayments,
+      groupedPromiseOfSalePayments,
       groupedInitialPayments,
       // Payment totals
       installmentPaymentsTotal,
       bigAdvanceTotal,
       smallAdvanceTotal,
       fullPaymentsTotal,
-      initialPaymentsTotal: totalInitialPayments,
+      promiseOfSalePaymentsTotal: totalPromiseOfSalePayments,
+      initialPaymentsTotal,
       companyFeesTotal,
       // Grouped company fees
       groupedCompanyFees,
@@ -577,6 +607,148 @@ export function Financial() {
       return getSmallAdvanceByLand()
     }
     
+    // Special handling for PromiseOfSale (InitialPayment) - get from both payment records and sales table
+    if (paymentType === 'InitialPayment') {
+      // Get payments from payment records
+      const paymentsFromRecords = filteredData.promiseOfSalePaymentsList
+      
+      // Get PromiseOfSale sales that don't have payment records yet
+      const promiseOfSaleSales = filteredData.sales
+        .filter(s => s.status !== 'Cancelled' && (s as any).payment_type === 'PromiseOfSale')
+        .filter(s => {
+          const hasPaymentRecord = paymentsFromRecords.some(p => p.sale_id === s.id)
+          return !hasPaymentRecord && ((s as any).promise_initial_payment || 0) > 0
+        })
+      
+      // Create virtual payment entries from sales table
+      const virtualPayments: PaymentWithDetails[] = promiseOfSaleSales.map(sale => {
+        const pieceIds = sale.land_piece_ids || []
+        const pieces = landPieces.filter(p => pieceIds.includes(p.id))
+        return {
+          id: `virtual-${sale.id}`,
+          client_id: sale.client_id,
+          sale_id: sale.id,
+          amount_paid: (sale as any).promise_initial_payment || 0,
+          payment_type: 'Partial' as any,
+          payment_date: sale.sale_date,
+          notes: null,
+          recorded_by: sale.created_by || null,
+          created_at: sale.created_at,
+          updated_at: sale.updated_at,
+          client: sale.client,
+          sale: {
+            land_piece_ids: pieceIds,
+            payment_type: 'PromiseOfSale',
+            total_selling_price: sale.total_selling_price,
+            created_by: sale.created_by,
+            created_by_user: (sale as any).created_by_user,
+            promise_initial_payment: (sale as any).promise_initial_payment,
+          },
+          land_pieces: pieces,
+        } as PaymentWithDetails
+      })
+      
+      // Combine payment records and virtual payments
+      const allPromisePayments = [...paymentsFromRecords, ...virtualPayments]
+      
+      // Attach land pieces to payments
+      const paymentsWithPieces = allPromisePayments.map(payment => {
+        const pieceIds = payment.sale?.land_piece_ids || []
+        const pieces = landPieces.filter(p => pieceIds.includes(p.id))
+        return {
+          ...payment,
+          land_pieces: pieces.length > 0 ? pieces : payment.land_pieces || [],
+        }
+      })
+      
+      // Continue with grouping logic below
+      const landGroups = new Map<string, PaymentByLand>()
+      
+      paymentsWithPieces.forEach(payment => {
+        const pieces = payment.land_pieces || []
+        
+        if (pieces.length === 0) {
+          const key = 'غير محدد'
+          if (!landGroups.has(key)) {
+            landGroups.set(key, {
+              landBatchName: 'غير محدد',
+              location: null,
+              totalAmount: 0,
+              percentage: 0,
+              paymentCount: 0,
+              pieces: [],
+              payments: [],
+            })
+          }
+          const group = landGroups.get(key)!
+          group.totalAmount += payment.amount_paid
+          group.paymentCount += 1
+          group.payments.push(payment)
+        } else {
+          pieces.forEach(piece => {
+            const batchName = piece.land_batch?.name || 'غير محدد'
+            const location = piece.land_batch?.location || null
+            const batchKey = `${batchName}-${location || 'no-location'}`
+            
+            if (!landGroups.has(batchKey)) {
+              landGroups.set(batchKey, {
+                landBatchName: batchName,
+                location,
+                totalAmount: 0,
+                percentage: 0,
+                paymentCount: 0,
+                pieces: [],
+                payments: [],
+              })
+            }
+            const group = landGroups.get(batchKey)!
+            
+            let pieceGroup = group.pieces.find(p => p.pieceId === piece.id)
+            if (!pieceGroup) {
+              pieceGroup = {
+                pieceId: piece.id,
+                pieceNumber: piece.piece_number,
+                landBatchName: batchName,
+                location,
+                totalAmount: 0,
+                installmentCount: 0,
+                payments: [],
+                recordedByUsers: new Set(),
+                soldByUsers: new Set(),
+              }
+              group.pieces.push(pieceGroup)
+            }
+            
+            const amountPerPiece = payment.amount_paid / pieces.length
+            pieceGroup.totalAmount += amountPerPiece
+            if (!pieceGroup.payments.find(p => p.id === payment.id)) {
+              pieceGroup.payments.push(payment)
+            }
+            
+            if ((payment as any).recorded_by_user?.name) {
+              pieceGroup.recordedByUsers.add((payment as any).recorded_by_user.name)
+            }
+            if ((payment.sale as any)?.created_by_user?.name) {
+              pieceGroup.soldByUsers.add((payment.sale as any).created_by_user.name)
+            }
+            
+            if (!group.payments.find(p => p.id === payment.id)) {
+              group.totalAmount += payment.amount_paid
+              group.paymentCount += 1
+              group.payments.push(payment)
+            }
+          })
+        }
+      })
+      
+      const totalAmount = Array.from(landGroups.values()).reduce((sum, g) => sum + g.totalAmount, 0)
+      
+      return Array.from(landGroups.values()).map(group => ({
+        ...group,
+        percentage: totalAmount > 0 ? (group.totalAmount / totalAmount) * 100 : 0,
+      })).sort((a, b) => b.totalAmount - a.totalAmount)
+    }
+    
     // Get the appropriate payment list from filteredData based on type
     let filteredPayments: PaymentWithDetails[] = []
     
@@ -586,8 +758,6 @@ export function Financial() {
       filteredPayments = filteredData.fullPaymentsList
     } else if (paymentType === 'BigAdvance') {
       filteredPayments = filteredData.bigAdvancePaymentsList
-    } else if (paymentType === 'InitialPayment') {
-      filteredPayments = filteredData.initialPaymentsList
     } else {
       filteredPayments = filteredData.payments
     }
@@ -917,10 +1087,14 @@ export function Financial() {
           return dueDate >= monthStart && dueDate <= monthEnd
         })
         
-        // This month expected amount
+        // This month expected amount - calculate ALL installments due this month
+        // This is the total amount we should receive this month from all installments
+        // Calculate the full amount due (amount_due + stacked_amount) for each installment
         const thisMonthExpected = thisMonthInstallments.reduce((sum, inst) => {
-          const remaining = (inst.amount_due + inst.stacked_amount) - inst.amount_paid
-          return sum + Math.max(0, remaining)
+          // The full amount due is what we should receive this month
+          // This is the original installment amount (amount_due + stacked_amount)
+          const fullAmountDue = (inst.amount_due || 0) + (inst.stacked_amount || 0)
+          return sum + fullAmountDue
         }, 0)
         
         // Total remaining installments
@@ -1018,20 +1192,6 @@ export function Financial() {
           </div>
         )
       })()}
-
-      {/* Cash Received Summary - Single Card (العمولة is in the table below) */}
-        <Card className="bg-purple-50 border-purple-200">
-          <CardContent className="pt-4">
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex-1">
-                <p className="text-sm font-medium text-purple-700 mb-1">المستلم نقداً</p>
-                <p className="text-xl sm:text-2xl font-bold text-purple-800">{formatCurrency(filteredData.cashReceived)}</p>
-              </div>
-              <TrendingUp className="h-6 w-6 sm:h-8 sm:w-8 text-purple-500 flex-shrink-0" />
-            </div>
-            <p className="text-xs text-purple-600">{filteredData.payments.length} عملية دفع</p>
-          </CardContent>
-        </Card>
 
       {/* Payments & Commission - 5 Categories */}
       <div className="space-y-4">
@@ -1296,15 +1456,15 @@ export function Financial() {
                   {/* وعد بالبيع (المبلغ المستلم) */}
                   {(() => {
                     const data = getPaymentsByLand('InitialPayment')
-                    const totalAmount = filteredData.initialPaymentsTotal
+                    const totalAmount = filteredData.promiseOfSalePaymentsTotal
                     const totalPieces = data.reduce((sum, g) => sum + g.pieces.length, 0)
                     const totalPayments = data.reduce((sum, g) => sum + g.paymentCount, 0)
                     
                     if (totalAmount === 0) {
                       return (
                         <TableRow className="bg-pink-50/50">
-                          <TableCell className="font-bold text-pink-700">وعد بالبيع</TableCell>
-                          <TableCell className="text-muted-foreground">-</TableCell>
+                          <TableCell className="font-bold text-pink-700 text-right">وعد بالبيع</TableCell>
+                          <TableCell className="text-muted-foreground text-right">-</TableCell>
                           <TableCell className="text-center">0</TableCell>
                           <TableCell className="text-center">0</TableCell>
                           <TableCell className="text-right font-bold text-pink-600">{formatCurrency(0)}</TableCell>
@@ -1314,9 +1474,9 @@ export function Financial() {
                     }
                     return [
                       ...data.map((group, idx) => (
-                      <TableRow key={`initial-${idx}`} className="bg-pink-50/50 hover:bg-pink-100/50">
-                        <TableCell className="font-bold text-pink-700">{idx === 0 ? 'وعد بالبيع' : ''}</TableCell>
-                        <TableCell>
+                      <TableRow key={`promise-${idx}`} className="bg-pink-50/50 hover:bg-pink-100/50">
+                        <TableCell className="font-bold text-pink-700 text-right">{idx === 0 ? 'وعد بالبيع' : ''}</TableCell>
+                        <TableCell className="text-right">
                           <div className="font-medium">{group.landBatchName}</div>
                           {group.location && <div className="text-xs text-muted-foreground">{group.location}</div>}
                         </TableCell>
@@ -1336,13 +1496,13 @@ export function Financial() {
                       </TableRow>
                       )),
                       data.length > 1 && (
-                        <TableRow key="initial-summary" className="bg-pink-100/50 font-bold">
-                          <TableCell className="text-pink-800">إجمالي وعد بالبيع</TableCell>
-                          <TableCell>-</TableCell>
+                        <TableRow key="promise-summary" className="bg-pink-100/50 font-bold">
+                          <TableCell className="text-pink-800 text-right">إجمالي وعد بالبيع</TableCell>
+                          <TableCell className="text-right">-</TableCell>
                           <TableCell className="text-center">{totalPieces}</TableCell>
                           <TableCell className="text-center">{totalPayments}</TableCell>
                           <TableCell className="text-right text-pink-800">{formatCurrency(totalAmount)}</TableCell>
-                          <TableCell>-</TableCell>
+                          <TableCell className="text-center">-</TableCell>
                         </TableRow>
                       )
                     ]
@@ -1394,14 +1554,14 @@ export function Financial() {
                   
                   {/* Total Row */}
                   <TableRow className="bg-gray-100 font-bold border-t-2">
-                    <TableCell colSpan={4} className="font-bold text-lg">الإجمالي</TableCell>
+                    <TableCell colSpan={4} className="font-bold text-lg text-right">الإجمالي</TableCell>
                     <TableCell className="text-right font-bold text-lg text-green-700">
                       {formatCurrency(
                         filteredData.installmentPaymentsTotal + 
                         filteredData.smallAdvanceTotal + 
                         filteredData.fullPaymentsTotal + 
                         filteredData.bigAdvanceTotal + 
-                        filteredData.initialPaymentsTotal + 
+                        filteredData.promiseOfSalePaymentsTotal + 
                         filteredData.companyFeesTotal
                       )}
                     </TableCell>
@@ -1515,6 +1675,31 @@ export function Financial() {
             </CardContent>
           </Card>
 
+          {/* وعد بالبيع */}
+          <Card 
+            className="border-pink-200 cursor-pointer hover:shadow-md transition-shadow"
+            onClick={() => openPaymentDetailsDialog('InitialPayment')}
+          >
+            <CardContent className="p-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="font-bold text-sm text-pink-700">وعد بالبيع</h3>
+                  {(() => {
+                    const data = getPaymentsByLand('InitialPayment')
+                    if (data.length > 0) {
+                      return <p className="text-xs text-pink-600">{data[0].landBatchName} {data[0].location && `- ${data[0].location}`}</p>
+                    }
+                    return null
+                  })()}
+              </div>
+                        <div className="flex items-center gap-2">
+                  <span className="text-lg font-bold text-pink-600">{formatCurrency(filteredData.promiseOfSalePaymentsTotal)}</span>
+                  <ChevronDown className="h-4 w-4 text-pink-600" />
+                        </div>
+              </div>
+            </CardContent>
+          </Card>
+
           {/* العمولة */}
           <Card 
             className="border-indigo-200 cursor-pointer hover:shadow-md transition-shadow"
@@ -1600,6 +1785,13 @@ export function Financial() {
                       border: 'border-purple-200',
                       text: 'text-purple-600',
                       textMuted: 'text-purple-700'
+                    }
+                  case 'InitialPayment':
+                    return {
+                      bg: 'from-pink-50 to-rose-50',
+                      border: 'border-pink-200',
+                      text: 'text-pink-600',
+                      textMuted: 'text-pink-700'
                     }
                   default:
                     return {
