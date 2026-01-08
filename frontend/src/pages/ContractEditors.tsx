@@ -365,9 +365,9 @@ export function ContractEditors() {
         onConfirm={handleDelete}
         title="تأكيد الحذف"
         description={`هل أنت متأكد من حذف المحرر "${editorToDelete?.name}"؟ لا يمكن التراجع عن هذا الإجراء.`}
-        confirmText="نعم، حذف"
+        confirmText={deleting ? 'جاري الحذف...' : 'نعم، حذف'}
         cancelText="إلغاء"
-        loading={deleting}
+        disabled={deleting}
       />
     </div>
   )

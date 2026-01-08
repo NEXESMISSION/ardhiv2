@@ -30,8 +30,21 @@ import { formatCurrency, formatDate } from '@/lib/utils'
 import { User, ChevronDown, ChevronUp, RefreshCw, AlertTriangle, X } from 'lucide-react'
 import type { Installment, Sale, Client, InstallmentStatus } from '@/types/database'
 
+interface ContractEditor {
+  id: string
+  type: string
+  name: string
+  place: string
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
 interface InstallmentWithRelations extends Installment {
-  sale?: Sale & { client?: Client }
+  sale?: Sale & { 
+    client?: Client
+    contract_editor?: ContractEditor | null
+  }
 }
 
 interface ClientInstallmentGroup {
