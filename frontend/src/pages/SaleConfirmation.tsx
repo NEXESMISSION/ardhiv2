@@ -18,7 +18,7 @@ import {
 } from '@/components/ui/dialog'
 import { formatCurrency, formatDate, formatDateTime } from '@/lib/utils'
 import { retryWithBackoff, isRetryableError } from '@/lib/retry'
-import { CheckCircle, XCircle, Clock, DollarSign, AlertTriangle, Calendar } from 'lucide-react'
+import { CheckCircle, XCircle, Clock, DollarSign, AlertTriangle, Calendar, Edit, Save } from 'lucide-react'
 import { showNotification } from '@/components/ui/notification'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import {
@@ -49,7 +49,7 @@ interface SaleWithDetails extends Sale {
 }
 
 export function SaleConfirmation() {
-  const { hasPermission, user } = useAuth()
+  const { hasPermission, user, profile } = useAuth()
   const { t } = useLanguage()
   const [sales, setSales] = useState<SaleWithDetails[]>([])
   const [loading, setLoading] = useState(true)
@@ -87,6 +87,32 @@ export function SaleConfirmation() {
   const [rendezvousTime, setRendezvousTime] = useState('')
   const [rendezvousNotes, setRendezvousNotes] = useState('')
   const [selectedSaleForRendezvous, setSelectedSaleForRendezvous] = useState<SaleWithDetails | null>(null)
+  
+  // Edit sale dialog (Owner only)
+  const [editDialogOpen, setEditDialogOpen] = useState(false)
+  const [editingSale, setEditingSale] = useState<SaleWithDetails | null>(null)
+  const [editingPiece, setEditingPiece] = useState<LandPiece | null>(null)
+  const [savingEdit, setSavingEdit] = useState(false)
+  const [editForm, setEditForm] = useState({
+    total_selling_price: '',
+    company_fee_percentage: '',
+    selected_offer_id: '',
+    notes: '',
+  })
+  const [availableOffersForEdit, setAvailableOffersForEdit] = useState<PaymentOffer[]>([])
+  
+  // Create new offer dialog
+  const [createOfferDialogOpen, setCreateOfferDialogOpen] = useState(false)
+  const [creatingOffer, setCreatingOffer] = useState(false)
+  const [newOfferForm, setNewOfferForm] = useState({
+    offer_name: '',
+    company_fee_percentage: '2',
+    advance_amount: '',
+    advance_is_percentage: false,
+    monthly_payment: '',
+    notes: '',
+    is_default: false,
+  })
 
   // Check permissions - anyone with edit_sales or sale_confirm permission
   const canAccess = hasPermission('edit_sales') || hasPermission('sale_confirm')
@@ -135,6 +161,198 @@ export function SaleConfirmation() {
     setRendezvousTime('09:00')
     setRendezvousNotes('')
     setRendezvousDialogOpen(true)
+  }
+
+  // Open edit dialog for sale (Owner only)
+  const openEditDialog = async (sale: SaleWithDetails, piece: LandPiece) => {
+    if (profile?.role !== 'Owner') {
+      showNotification('ليس لديك صلاحية لتعديل المبيعات', 'error')
+      return
+    }
+
+    setEditingSale(sale)
+    setEditingPiece(piece)
+    
+    // Calculate per-piece price
+    const pieceCount = sale.land_piece_ids.length
+    const pricePerPiece = sale.total_selling_price / pieceCount
+    
+    // Initialize form with current sale values
+    setEditForm({
+      total_selling_price: pricePerPiece.toFixed(2),
+      company_fee_percentage: (sale.company_fee_percentage || 0).toString(),
+      selected_offer_id: sale.selected_offer_id || '',
+      notes: sale.notes || '',
+    })
+    
+    // Load available payment offers for this piece
+    try {
+      const offers: PaymentOffer[] = []
+      
+      // Get piece-specific offers
+      const { data: pieceOffers } = await supabase
+        .from('payment_offers')
+        .select('*')
+        .eq('land_piece_id', piece.id)
+        .order('is_default', { ascending: false })
+        .order('created_at', { ascending: true })
+      
+      if (pieceOffers) {
+        offers.push(...(pieceOffers as PaymentOffer[]))
+      }
+      
+      // Get batch offers
+      if (piece.land_batch_id) {
+        const { data: batchOffers } = await supabase
+          .from('payment_offers')
+          .select('*')
+          .eq('land_batch_id', piece.land_batch_id)
+          .is('land_piece_id', null)
+          .order('is_default', { ascending: false })
+          .order('created_at', { ascending: true })
+        
+        if (batchOffers) {
+          offers.push(...(batchOffers as PaymentOffer[]))
+        }
+      }
+      
+      setAvailableOffersForEdit(offers)
+    } catch (error) {
+      console.error('Error loading offers:', error)
+      setAvailableOffersForEdit([])
+    }
+    
+    setEditDialogOpen(true)
+  }
+
+  // Save edited sale
+  const saveEditSale = async () => {
+    if (!editingSale || !editingPiece || savingEdit) return
+    
+    // Server-side permission validation
+    try {
+      const { validatePermissionServerSide } = await import('@/lib/permissionValidation')
+      const hasPermission = await validatePermissionServerSide('edit_sales')
+      if (!hasPermission) {
+        showNotification('ليس لديك صلاحية لتعديل المبيعات', 'error')
+        return
+      }
+    } catch (error) {
+      console.error('Error validating permission:', error)
+      showNotification('خطأ في التحقق من الصلاحيات', 'error')
+      return
+    }
+    
+    setSavingEdit(true)
+    
+    try {
+      const pieceCount = editingSale.land_piece_ids.length
+      const newPricePerPiece = parseFloat(editForm.total_selling_price) || 0
+      const newCompanyFeePercentage = parseFloat(editForm.company_fee_percentage) || 0
+      
+      if (newPricePerPiece <= 0) {
+        showNotification('السعر يجب أن يكون أكبر من الصفر', 'error')
+        setSavingEdit(false)
+        return
+      }
+      
+      // Calculate new totals for the sale
+      // If single piece sale, update directly
+      // If multi-piece sale, recalculate totals
+      let updates: any = {
+        company_fee_percentage: newCompanyFeePercentage > 0 ? newCompanyFeePercentage : null,
+        selected_offer_id: editForm.selected_offer_id || null,
+        notes: editForm.notes || null,
+      }
+      
+      if (pieceCount === 1) {
+        // Single piece - update price directly
+        const pieceCost = editingPiece.purchase_cost || 0
+        const newTotalPrice = newPricePerPiece
+        const newCompanyFee = (newTotalPrice * newCompanyFeePercentage) / 100
+        const newProfit = newTotalPrice - pieceCost
+        
+        updates.total_selling_price = newTotalPrice
+        updates.company_fee_amount = newCompanyFee > 0 ? newCompanyFee : null
+        updates.profit_margin = newProfit
+        
+        // Update piece price if needed
+        if (editingSale.payment_type === 'Full' || editingSale.payment_type === 'PromiseOfSale') {
+          await supabase
+            .from('land_pieces')
+            .update({ selling_price_full: newPricePerPiece })
+            .eq('id', editingPiece.id)
+        } else {
+          await supabase
+            .from('land_pieces')
+            .update({ selling_price_installment: newPricePerPiece })
+            .eq('id', editingPiece.id)
+        }
+      } else {
+        // Multi-piece sale - need to recalculate totals
+        // Get all pieces for this sale
+        const { data: allPieces } = await supabase
+          .from('land_pieces')
+          .select('id, purchase_cost, selling_price_full, selling_price_installment')
+          .in('id', editingSale.land_piece_ids)
+        
+        if (allPieces) {
+          let totalPrice = 0
+          let totalCost = 0
+          
+          allPieces.forEach((p: any) => {
+            const piecePrice = editingSale.payment_type === 'Full' || editingSale.payment_type === 'PromiseOfSale'
+              ? (p.id === editingPiece.id ? newPricePerPiece : (p.selling_price_full || 0))
+              : (p.id === editingPiece.id ? newPricePerPiece : (p.selling_price_installment || p.selling_price_full || 0))
+            
+            totalPrice += piecePrice
+            totalCost += p.purchase_cost || 0
+          })
+          
+          const totalCompanyFee = (totalPrice * newCompanyFeePercentage) / 100
+          const totalProfit = totalPrice - totalCost
+          
+          updates.total_selling_price = totalPrice
+          updates.total_purchase_cost = totalCost
+          updates.company_fee_amount = totalCompanyFee > 0 ? totalCompanyFee : null
+          updates.profit_margin = totalProfit
+          
+          // Update the edited piece price
+          if (editingSale.payment_type === 'Full' || editingSale.payment_type === 'PromiseOfSale') {
+            await supabase
+              .from('land_pieces')
+              .update({ selling_price_full: newPricePerPiece })
+              .eq('id', editingPiece.id)
+          } else {
+            await supabase
+              .from('land_pieces')
+              .update({ selling_price_installment: newPricePerPiece })
+              .eq('id', editingPiece.id)
+          }
+        }
+      }
+      
+      // Update the sale
+      const { error: updateError } = await supabase
+        .from('sales')
+        .update(updates)
+        .eq('id', editingSale.id)
+      
+      if (updateError) throw updateError
+      
+      showNotification('تم تحديث بيانات البيع بنجاح', 'success')
+      setEditDialogOpen(false)
+      setEditingSale(null)
+      setEditingPiece(null)
+      
+      // Refresh sales list
+      fetchSales()
+    } catch (error: any) {
+      console.error('Error saving sale edit:', error)
+      showNotification(error?.message || 'حدث خطأ أثناء حفظ التعديلات', 'error')
+    } finally {
+      setSavingEdit(false)
+    }
   }
 
   const handleCreateRendezvous = async () => {
@@ -1752,6 +1970,17 @@ export function SaleConfirmation() {
                               </div>
                               
                               <div className="flex flex-wrap gap-2 pt-2 border-t">
+                                {profile?.role === 'Owner' && (
+                                  <Button
+                                    onClick={() => openEditDialog(sale, piece)}
+                                    variant="outline"
+                                    size="sm"
+                                    className="text-xs h-8 flex-1 border-blue-300 text-blue-700 hover:bg-blue-50"
+                                  >
+                                    <Edit className="ml-1 h-3 w-3" />
+                                    تعديل
+                                  </Button>
+                                )}
                                 <Button
                                   onClick={() => openRendezvousDialog(sale)}
                                   variant="outline"
@@ -1882,6 +2111,17 @@ export function SaleConfirmation() {
                               })()}
                               <TableCell className="py-2">
                                 <div className="flex flex-wrap gap-1">
+                                  {profile?.role === 'Owner' && (
+                                    <Button
+                                      onClick={() => openEditDialog(sale, piece)}
+                                      variant="outline"
+                                      size="sm"
+                                      className="text-xs px-2 h-7 border-blue-300 text-blue-700 hover:bg-blue-50"
+                                    >
+                                      <Edit className="ml-1 h-3 w-3" />
+                                      تعديل
+                                    </Button>
+                                  )}
                                   <Button
                                     onClick={() => openRendezvousDialog(sale)}
                                     variant="outline"
@@ -2470,6 +2710,400 @@ export function SaleConfirmation() {
               حفظ الموعد
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Sale Dialog (Owner only) */}
+      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+        <DialogContent className="w-[95vw] sm:w-full max-w-2xl max-h-[95vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>تعديل بيانات البيع</DialogTitle>
+          </DialogHeader>
+          {editingSale && editingPiece && (
+            <div className="space-y-4">
+              <div className="bg-gray-50 p-3 rounded-lg">
+                <p className="text-sm font-medium">العميل: {editingSale.client?.name || 'غير معروف'}</p>
+                <p className="text-xs text-muted-foreground">
+                  القطعة: {editingPiece.land_batch?.name || 'دفعة'} - #{editingPiece.piece_number} ({editingPiece.surface_area} م²)
+                </p>
+                <p className="text-xs text-muted-foreground">نوع الدفع: {
+                  editingSale.payment_type === 'Full' ? 'بالحاضر' :
+                  editingSale.payment_type === 'Installment' ? 'بالتقسيط' :
+                  'وعد البيع'
+                }</p>
+              </div>
+
+              <div className="space-y-3">
+                <div className="space-y-2">
+                  <Label htmlFor="edit-price">سعر القطعة (DT) *</Label>
+                  <Input
+                    id="edit-price"
+                    type="number"
+                    value={editForm.total_selling_price}
+                    onChange={(e) => setEditForm({ ...editForm, total_selling_price: e.target.value })}
+                    placeholder="السعر"
+                    min="0"
+                    step="0.01"
+                    required
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    السعر الحالي: {formatCurrency(editingSale.total_selling_price / editingSale.land_piece_ids.length)}
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="edit-company-fee">نسبة عمولة الشركة (%)</Label>
+                  <Input
+                    id="edit-company-fee"
+                    type="number"
+                    value={editForm.company_fee_percentage}
+                    onChange={(e) => setEditForm({ ...editForm, company_fee_percentage: e.target.value })}
+                    placeholder="نسبة العمولة"
+                    min="0"
+                    max="100"
+                    step="0.01"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    النسبة الحالية: {editingSale.company_fee_percentage || 0}%
+                  </p>
+                </div>
+
+                {editingSale.payment_type === 'Installment' && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <Label htmlFor="edit-offer">عرض الدفع</Label>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setCreateOfferDialogOpen(true)}
+                        className="text-xs h-7"
+                      >
+                        <Edit className="ml-1 h-3 w-3" />
+                        إنشاء عرض جديد
+                      </Button>
+                    </div>
+                    {availableOffersForEdit.length > 0 ? (
+                      <>
+                        <Select
+                          id="edit-offer"
+                          value={editForm.selected_offer_id}
+                          onChange={(e) => setEditForm({ ...editForm, selected_offer_id: e.target.value })}
+                        >
+                          <option value="">-- لا يوجد عرض محدد --</option>
+                          {availableOffersForEdit.map((offer) => (
+                            <option key={offer.id} value={offer.id}>
+                              {offer.offer_name || `عرض ${offer.id.slice(0, 8)}`} - 
+                              عمولة: {offer.company_fee_percentage}% - 
+                              تسبقة: {offer.advance_is_percentage ? `${offer.advance_amount}%` : formatCurrency(offer.advance_amount)} - 
+                              شهري: {formatCurrency(offer.monthly_payment)}
+                            </option>
+                          ))}
+                        </Select>
+                        <p className="text-xs text-muted-foreground">
+                          العرض المحدد حالياً: {editingSale.selected_offer_id ? 'نعم' : 'لا'}
+                        </p>
+                      </>
+                    ) : (
+                      <div className="text-sm text-muted-foreground p-2 bg-gray-50 rounded">
+                        لا توجد عروض متاحة. اضغط على "إنشاء عرض جديد" لإنشاء عرض لهذه القطعة.
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  <Label htmlFor="edit-notes">ملاحظات</Label>
+                  <Textarea
+                    id="edit-notes"
+                    value={editForm.notes}
+                    onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
+                    placeholder="ملاحظات إضافية..."
+                    rows={3}
+                  />
+                </div>
+              </div>
+
+              <DialogFooter className="gap-2">
+                <Button variant="outline" onClick={() => setEditDialogOpen(false)} disabled={savingEdit}>
+                  إلغاء
+                </Button>
+                <Button onClick={saveEditSale} disabled={savingEdit} className="bg-blue-600 hover:bg-blue-700">
+                  {savingEdit ? (
+                    <>
+                      <Clock className="ml-2 h-4 w-4 animate-spin" />
+                      جاري الحفظ...
+                    </>
+                  ) : (
+                    <>
+                      <Save className="ml-2 h-4 w-4" />
+                      حفظ التعديلات
+                    </>
+                  )}
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Create New Offer Dialog */}
+      <Dialog open={createOfferDialogOpen} onOpenChange={setCreateOfferDialogOpen}>
+        <DialogContent className="w-[95vw] sm:w-full max-w-2xl max-h-[95vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>إنشاء عرض دفع جديد</DialogTitle>
+          </DialogHeader>
+          {editingPiece && (
+            <div className="space-y-4">
+              <div className="bg-gray-50 p-3 rounded-lg">
+                <p className="text-sm font-medium">
+                  القطعة: {editingPiece.land_batch?.name || 'دفعة'} - #{editingPiece.piece_number} ({editingPiece.surface_area} م²)
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  سعر القطعة: {formatCurrency(parseFloat(editForm.total_selling_price) || 0)}
+                </p>
+              </div>
+
+              <div className="space-y-3">
+                <div className="space-y-2">
+                  <Label htmlFor="offer-name">اسم العرض</Label>
+                  <Input
+                    id="offer-name"
+                    type="text"
+                    value={newOfferForm.offer_name}
+                    onChange={(e) => setNewOfferForm({ ...newOfferForm, offer_name: e.target.value })}
+                    placeholder="مثال: عرض 1000"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="offer-company-fee">عمولة الشركة (%) *</Label>
+                  <Input
+                    id="offer-company-fee"
+                    type="number"
+                    value={newOfferForm.company_fee_percentage}
+                    onChange={(e) => setNewOfferForm({ ...newOfferForm, company_fee_percentage: e.target.value })}
+                    placeholder="2.00"
+                    min="0"
+                    max="100"
+                    step="0.01"
+                    required
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="offer-advance">التسبقة *</Label>
+                  <Input
+                    id="offer-advance"
+                    type="number"
+                    value={newOfferForm.advance_amount}
+                    onChange={(e) => setNewOfferForm({ ...newOfferForm, advance_amount: e.target.value })}
+                    placeholder={newOfferForm.advance_is_percentage ? "10.00" : "1000.00"}
+                    min="0"
+                    step="0.01"
+                    required
+                  />
+                  <div className="flex items-center gap-2 mt-1">
+                    <input
+                      type="checkbox"
+                      id="advance-is-percentage"
+                      checked={newOfferForm.advance_is_percentage}
+                      onChange={(e) => setNewOfferForm({ ...newOfferForm, advance_is_percentage: e.target.checked })}
+                      className="h-4 w-4"
+                    />
+                    <Label htmlFor="advance-is-percentage" className="text-xs font-normal cursor-pointer">
+                      التسبقة كنسبة مئوية من السعر
+                    </Label>
+                  </div>
+                  {newOfferForm.advance_amount && (
+                    <p className="text-xs text-muted-foreground">
+                      {newOfferForm.advance_is_percentage
+                        ? `التسبقة: ${newOfferForm.advance_amount}% من السعر = ${formatCurrency((parseFloat(editForm.total_selling_price) || 0) * parseFloat(newOfferForm.advance_amount) / 100)}`
+                        : `التسبقة: ${formatCurrency(parseFloat(newOfferForm.advance_amount) || 0)}`}
+                    </p>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="offer-monthly">المبلغ الشهري (DT) *</Label>
+                  <Input
+                    id="offer-monthly"
+                    type="number"
+                    value={newOfferForm.monthly_payment}
+                    onChange={(e) => setNewOfferForm({ ...newOfferForm, monthly_payment: e.target.value })}
+                    placeholder="70.00"
+                    min="0"
+                    step="0.01"
+                    required
+                  />
+                  {newOfferForm.monthly_payment && newOfferForm.advance_amount && (
+                    <p className="text-xs text-muted-foreground">
+                      {(() => {
+                        const price = parseFloat(editForm.total_selling_price) || 0
+                        const advance = newOfferForm.advance_is_percentage
+                          ? (price * parseFloat(newOfferForm.advance_amount)) / 100
+                          : parseFloat(newOfferForm.advance_amount) || 0
+                        const reservation = editingSale ? (editingSale.small_advance_amount || 0) / editingSale.land_piece_ids.length : 0
+                        const remaining = price - reservation - advance
+                        const monthly = parseFloat(newOfferForm.monthly_payment) || 0
+                        const months = monthly > 0 ? Math.ceil(remaining / monthly) : 0
+                        return `عدد الأشهر: ${months} شهر (المتبقي: ${formatCurrency(remaining)})`
+                      })()}
+                    </p>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="offer-notes">ملاحظات</Label>
+                  <Textarea
+                    id="offer-notes"
+                    value={newOfferForm.notes}
+                    onChange={(e) => setNewOfferForm({ ...newOfferForm, notes: e.target.value })}
+                    placeholder="ملاحظات إضافية..."
+                    rows={3}
+                  />
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="offer-is-default"
+                    checked={newOfferForm.is_default}
+                    onChange={(e) => setNewOfferForm({ ...newOfferForm, is_default: e.target.checked })}
+                    className="h-4 w-4"
+                  />
+                  <Label htmlFor="offer-is-default" className="text-sm font-normal cursor-pointer">
+                    تعيين كعرض افتراضي لهذه القطعة
+                  </Label>
+                </div>
+              </div>
+
+              <DialogFooter className="gap-2">
+                <Button variant="outline" onClick={() => setCreateOfferDialogOpen(false)} disabled={creatingOffer}>
+                  إلغاء
+                </Button>
+                <Button
+                  onClick={async () => {
+                    if (!editingPiece || creatingOffer) return
+
+                    // Validate form
+                    if (!newOfferForm.company_fee_percentage || parseFloat(newOfferForm.company_fee_percentage) < 0) {
+                      showNotification('يرجى إدخال نسبة عمولة صحيحة', 'error')
+                      return
+                    }
+                    if (!newOfferForm.advance_amount || parseFloat(newOfferForm.advance_amount) <= 0) {
+                      showNotification('يرجى إدخال مبلغ التسبقة', 'error')
+                      return
+                    }
+                    if (!newOfferForm.monthly_payment || parseFloat(newOfferForm.monthly_payment) <= 0) {
+                      showNotification('يرجى إدخال المبلغ الشهري', 'error')
+                      return
+                    }
+
+                    setCreatingOffer(true)
+                    try {
+                      // Calculate price per m² for installment
+                      const pricePerPiece = parseFloat(editForm.total_selling_price) || 0
+                      const pricePerM2 = editingPiece.surface_area > 0 ? pricePerPiece / editingPiece.surface_area : null
+
+                      const offerData: any = {
+                        land_piece_id: editingPiece.id,
+                        land_batch_id: null, // Piece-specific offer
+                        price_per_m2_installment: pricePerM2,
+                        company_fee_percentage: parseFloat(newOfferForm.company_fee_percentage),
+                        advance_amount: parseFloat(newOfferForm.advance_amount),
+                        advance_is_percentage: newOfferForm.advance_is_percentage,
+                        monthly_payment: parseFloat(newOfferForm.monthly_payment),
+                        offer_name: newOfferForm.offer_name || null,
+                        notes: newOfferForm.notes || null,
+                        is_default: newOfferForm.is_default,
+                        created_by: user?.id || null,
+                      }
+
+                      const { data: newOffer, error: createError } = await supabase
+                        .from('payment_offers')
+                        .insert([offerData])
+                        .select()
+                        .single()
+
+                      if (createError) throw createError
+
+                      showNotification('تم إنشاء العرض بنجاح', 'success')
+
+                      // Reload offers
+                      const offers: PaymentOffer[] = []
+                      
+                      // Get piece-specific offers
+                      const { data: pieceOffers } = await supabase
+                        .from('payment_offers')
+                        .select('*')
+                        .eq('land_piece_id', editingPiece.id)
+                        .order('is_default', { ascending: false })
+                        .order('created_at', { ascending: true })
+                      
+                      if (pieceOffers) {
+                        offers.push(...(pieceOffers as PaymentOffer[]))
+                      }
+                      
+                      // Get batch offers
+                      if (editingPiece.land_batch_id) {
+                        const { data: batchOffers } = await supabase
+                          .from('payment_offers')
+                          .select('*')
+                          .eq('land_batch_id', editingPiece.land_batch_id)
+                          .is('land_piece_id', null)
+                          .order('is_default', { ascending: false })
+                          .order('created_at', { ascending: true })
+                        
+                        if (batchOffers) {
+                          offers.push(...(batchOffers as PaymentOffer[]))
+                        }
+                      }
+                      
+                      setAvailableOffersForEdit(offers)
+
+                      // Auto-select the new offer
+                      if (newOffer) {
+                        setEditForm({ ...editForm, selected_offer_id: newOffer.id })
+                      }
+
+                      // Reset form
+                      setNewOfferForm({
+                        offer_name: '',
+                        company_fee_percentage: '2',
+                        advance_amount: '',
+                        advance_is_percentage: false,
+                        monthly_payment: '',
+                        notes: '',
+                        is_default: false,
+                      })
+
+                      setCreateOfferDialogOpen(false)
+                    } catch (error: any) {
+                      console.error('Error creating offer:', error)
+                      showNotification(error?.message || 'حدث خطأ أثناء إنشاء العرض', 'error')
+                    } finally {
+                      setCreatingOffer(false)
+                    }
+                  }}
+                  disabled={creatingOffer}
+                  className="bg-blue-600 hover:bg-blue-700"
+                >
+                  {creatingOffer ? (
+                    <>
+                      <Clock className="ml-2 h-4 w-4 animate-spin" />
+                      جاري الإنشاء...
+                    </>
+                  ) : (
+                    <>
+                      <Save className="ml-2 h-4 w-4" />
+                      إنشاء العرض
+                    </>
+                  )}
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>
