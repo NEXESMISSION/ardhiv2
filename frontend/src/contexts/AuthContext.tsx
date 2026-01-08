@@ -243,7 +243,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           // This is critical for page access control
           const { data, error } = await supabase
             .from('users')
-            .select('id, name, email, role, status, created_at, updated_at, allowed_pages, page_order, sidebar_order')
+            .select('id, name, email, role, status, created_at, updated_at, allowed_pages, page_order, sidebar_order, allowed_batches, allowed_pieces')
             .eq('id', userId)
             .limit(1)
       
@@ -949,6 +949,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refreshProfile = async () => {
     if (user?.id) {
+      // Clear cache to force fresh fetch
+      profileCacheRef.current = null
       fetchingRef.current = false  // Reset to allow re-fetch
       await fetchProfile(user.id)
     }

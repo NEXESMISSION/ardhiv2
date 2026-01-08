@@ -31,7 +31,7 @@ import { showNotification } from '@/components/ui/notification'
 import { debounce } from '@/lib/throttle'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { validatePermissionServerSide } from '@/lib/permissionValidation'
-import { Plus, Edit, Trash2, Map, ChevronDown, ChevronRight, Calculator, X, DollarSign, AlertTriangle, ShoppingCart, Upload, Image as ImageIcon, Settings, RotateCcw, CheckCircle, XCircle, Eye, User } from 'lucide-react'
+import { Plus, Edit, Trash2, Map, ChevronDown, ChevronRight, Calculator, X, DollarSign, AlertTriangle, ShoppingCart, Upload, Image as ImageIcon, Settings, RotateCcw, CheckCircle, XCircle, Eye, User, Shield } from 'lucide-react'
 import type { LandBatch, LandPiece, LandStatus, Client, PaymentOffer } from '@/types/database'
 
 interface LandBatchWithPieces extends LandBatch {
@@ -215,7 +215,7 @@ function ImageZoomViewer({ src, alt, onError }: { src: string; alt: string; onEr
 }
 
 export function LandManagement() {
-  const { hasPermission, user } = useAuth()
+  const { hasPermission, user, profile } = useAuth()
   const { t } = useLanguage()
   const navigate = useNavigate()
   const [batches, setBatches] = useState<LandBatchWithPieces[]>([])
@@ -769,6 +769,19 @@ export function LandManagement() {
   useEffect(() => {
     fetchBatches()
   }, [])
+  
+  // Refetch batches when profile changes (e.g., after allowed_batches or allowed_pieces update)
+  useEffect(() => {
+    if (profile && !loading) {
+      const allowedBatches = (profile as any)?.allowed_batches
+      const allowedPieces = (profile as any)?.allowed_pieces
+      // Only refetch if allowed_batches or allowed_pieces actually changed (not on initial load)
+      if (allowedBatches !== undefined || allowedPieces !== undefined) {
+        fetchBatches()
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile?.id, JSON.stringify((profile as any)?.allowed_batches), JSON.stringify((profile as any)?.allowed_pieces)])
 
   const fetchBatches = async () => {
     setLoading(true)
@@ -850,7 +863,7 @@ export function LandManagement() {
       }
       
       // Attach offers to batches and pieces, and update status for fully sold pieces
-      const batchesWithOffers = batchesData.map(batch => {
+      let batchesWithOffers = batchesData.map(batch => {
         const batchOffers = (batch.payment_offers || []) as PaymentOffer[]
         const pieces = (batch.land_pieces || []).map((piece: any) => {
           const pieceOffers = (piecesData || []).find((p: any) => p.id === piece.id)?.payment_offers || []
@@ -877,6 +890,40 @@ export function LandManagement() {
           total_surface: (batch.total_surface && batch.total_surface > 0) ? batch.total_surface : calculatedTotalSurface
         }
       }) as LandBatchWithPieces[]
+      
+      // Filter batches based on user's allowed_batches (if not Owner)
+      // Owners see all batches, Workers see only batches in their allowed_batches
+      // SECURITY: If allowed_batches is null or empty array, Worker sees all batches (backwards compatible)
+      // If allowed_batches has values, Worker sees ONLY those batches
+      if (profile && profile.role !== 'Owner') {
+        const allowedBatches = (profile as any).allowed_batches as string[] | null | undefined
+        const allowedPieces = (profile as any).allowed_pieces as string[] | null | undefined
+        
+        // First, filter batches if allowed_batches is set
+        if (allowedBatches && Array.isArray(allowedBatches) && allowedBatches.length > 0) {
+          // SECURITY: Filter to only show allowed batches - strict filtering
+          const allowedBatchSet = new Set(allowedBatches)
+          batchesWithOffers = batchesWithOffers.filter(batch => allowedBatchSet.has(batch.id))
+          console.log(`[LandManagement] Filtered batches: showing ${batchesWithOffers.length} of ${batchesData.length} batches for Worker`)
+        } else {
+          console.log(`[LandManagement] No batch restrictions: Worker sees all ${batchesData.length} batches`)
+        }
+        
+        // Then, filter pieces within batches if allowed_pieces is set
+        // SECURITY: If allowed_pieces is set, user can ONLY see those specific pieces
+        if (allowedPieces && Array.isArray(allowedPieces) && allowedPieces.length > 0) {
+          const allowedPieceSet = new Set(allowedPieces)
+          batchesWithOffers = batchesWithOffers.map(batch => ({
+            ...batch,
+            land_pieces: batch.land_pieces.filter(piece => allowedPieceSet.has(piece.id))
+          }))
+          console.log(`[LandManagement] Filtered pieces: Worker can only see ${allowedPieces.length} specific pieces`)
+        } else {
+          console.log(`[LandManagement] No piece restrictions: Worker sees all pieces in allowed batches`)
+        }
+      } else if (profile && profile.role === 'Owner') {
+        console.log(`[LandManagement] Owner access: showing all ${batchesData.length} batches`)
+      }
       
       setBatches(batchesWithOffers)
       
@@ -4393,6 +4440,39 @@ export function LandManagement() {
 
       {/* Content */}
       <div>
+      {/* Filtered batches/pieces indicator */}
+      {profile && profile.role !== 'Owner' && (() => {
+        const allowedBatches = (profile as any).allowed_batches as string[] | null | undefined
+        const allowedPieces = (profile as any).allowed_pieces as string[] | null | undefined
+        const hasBatchRestriction = allowedBatches && Array.isArray(allowedBatches) && allowedBatches.length > 0
+        const hasPieceRestriction = allowedPieces && Array.isArray(allowedPieces) && allowedPieces.length > 0
+        
+        if (hasBatchRestriction || hasPieceRestriction) {
+          const totalPieces = batches.reduce((sum, batch) => sum + batch.land_pieces.length, 0)
+          return (
+            <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+              <p className="text-xs sm:text-sm text-blue-800 flex items-center gap-2">
+                <Shield className="h-4 w-4 flex-shrink-0" />
+                <span className="flex-1">
+                  {hasBatchRestriction && (
+                    <span>
+                      أنت ترى فقط {batches.length} من {allowedBatches.length} دفعة محددة لك.
+                      {batches.length < allowedBatches.length && ' بعض الدفعات المحددة غير متاحة حالياً أو تم حذفها.'}
+                    </span>
+                  )}
+                  {hasPieceRestriction && (
+                    <span className={hasBatchRestriction ? ' block mt-1' : ''}>
+                      الوصول مقيد إلى {allowedPieces.length} قطعة محددة فقط. إجمالي القطع المرئية: {totalPieces}.
+                    </span>
+                  )}
+                </span>
+              </p>
+            </div>
+          )
+        }
+        return null
+      })()}
+      
       {/* Batches - Compact Design */}
       {filteredBatches.map((batch) => {
         const availableCount = batch.land_pieces.filter(p => p.status === 'Available').length
@@ -4972,7 +5052,16 @@ export function LandManagement() {
 
       {filteredBatches.length === 0 && (
         <div className="text-center text-muted-foreground py-8 text-sm">
-          لا توجد أراضي
+          {(() => {
+            // Check if batches are filtered by allowed_batches
+            if (profile && profile.role !== 'Owner') {
+              const allowedBatches = (profile as any).allowed_batches as string[] | null | undefined
+              if (allowedBatches && Array.isArray(allowedBatches) && allowedBatches.length > 0 && batches.length === 0) {
+                return 'لا توجد أراضي متاحة لك. يرجى التواصل مع المدير للحصول على صلاحية الوصول للأراضي.'
+              }
+            }
+            return 'لا توجد أراضي'
+          })()}
         </div>
       )}
       </div>

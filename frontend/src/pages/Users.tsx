@@ -24,7 +24,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog'
-import { Plus, Edit, Trash2, User, Shield, Activity, TrendingUp, CheckCircle2, ShoppingCart, Map as MapIcon, Users as UsersIcon, Calendar, FileText, CreditCard, Home, Building, Wallet, DollarSign, Lock, Eye, EyeOff, AlertCircle, Briefcase, MessageSquare, XCircle, ArrowUp, ArrowDown, Phone, Download, Settings } from 'lucide-react'
+import { Plus, Edit, Trash2, User, Shield, Activity, TrendingUp, CheckCircle2, ShoppingCart, Map as MapIcon, Users as UsersIcon, Calendar, FileText, CreditCard, Home, Building, Wallet, DollarSign, Lock, Eye, EyeOff, AlertCircle, Briefcase, MessageSquare, XCircle, ArrowUp, ArrowDown, Phone, Download, Settings, Search, Filter, ChevronDown, ChevronRight, CheckSquare, Square } from 'lucide-react'
 import type { User as UserType, UserRole, Sale, WorkerProfile } from '@/types/database'
 import { sanitizeText, sanitizeEmail } from '@/lib/sanitize'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
@@ -112,6 +112,7 @@ export function Users() {
     allowedPages: [] as string[],
     sidebarOrder: [] as string[],
     allowedBatches: [] as string[], // Specific land batches user can access
+    allowedPieces: [] as string[], // Specific land pieces user can access (overrides batch filtering)
     // Worker profile fields - always enabled for Worker role
     worker_type: '',
     region: '',
@@ -121,11 +122,19 @@ export function Users() {
   const [skillInput, setSkillInput] = useState('')
   const [workerProfiles, setWorkerProfiles] = useState<Map<string, WorkerProfile>>(new Map())
   const [allLandBatches, setAllLandBatches] = useState<any[]>([])
+  const [allLandPieces, setAllLandPieces] = useState<any[]>([])
+  
+  // Pieces selection filters and state
+  const [piecesSearchTerm, setPiecesSearchTerm] = useState('')
+  const [piecesBatchFilter, setPiecesBatchFilter] = useState<string>('all')
+  const [piecesStatusFilter, setPiecesStatusFilter] = useState<'all' | 'Available' | 'Reserved' | 'Sold'>('all')
+  const [expandedPieceBatches, setExpandedPieceBatches] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     if (!hasPermission('manage_users')) return
     fetchUsers()
     fetchAllLandBatches()
+    fetchAllLandPieces()
   }, [hasPermission])
 
   const fetchAllLandBatches = async () => {
@@ -136,9 +145,91 @@ export function Users() {
         .order('name', { ascending: true })
       
       if (error) throw error
-      setAllLandBatches(data || [])
+      
+      // Remove duplicates by ID (robust deduplication)
+      const uniqueBatches = new Map<string, any>()
+      ;(data || []).forEach((batch: any) => {
+        if (batch.id && !uniqueBatches.has(batch.id)) {
+          uniqueBatches.set(batch.id, batch)
+        }
+      })
+      
+      // Convert map to array and sort by name
+      const batchesArray = Array.from(uniqueBatches.values()).sort((a, b) => {
+        const nameA = (a.name || '').toLowerCase()
+        const nameB = (b.name || '').toLowerCase()
+        return nameA.localeCompare(nameB)
+      })
+      
+      setAllLandBatches(batchesArray)
     } catch (err) {
       console.error('Error fetching land batches:', err)
+    }
+  }
+
+  const fetchAllLandPieces = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('land_pieces')
+        .select('id, piece_number, surface_area, land_batch_id, status, land_batches(name)')
+        .order('piece_number', { ascending: true })
+      
+      if (error) throw error
+      setAllLandPieces(data || [])
+      // Auto-expand batches that have selected pieces
+      if (data && form.allowedPieces.length > 0) {
+        const batchesWithSelectedPieces = new Set<string>()
+        data.forEach((piece: any) => {
+          if (form.allowedPieces.includes(piece.id)) {
+            batchesWithSelectedPieces.add(piece.land_batch_id)
+          }
+        })
+        setExpandedPieceBatches(batchesWithSelectedPieces)
+      }
+    } catch (err) {
+      console.error('Error fetching land pieces:', err)
+    }
+  }
+  
+  // Toggle batch expansion for pieces
+  const togglePieceBatch = (batchId: string) => {
+    const newExpanded = new Set(expandedPieceBatches)
+    if (newExpanded.has(batchId)) {
+      newExpanded.delete(batchId)
+    } else {
+      newExpanded.add(batchId)
+    }
+    setExpandedPieceBatches(newExpanded)
+  }
+  
+  // Expand all piece batches
+  const expandAllPieceBatches = () => {
+    const piecesToShow = form.allowedBatches.length > 0
+      ? allLandPieces.filter(p => form.allowedBatches.includes(p.land_batch_id))
+      : allLandPieces
+    const batchIds = new Set(piecesToShow.map(p => p.land_batch_id))
+    setExpandedPieceBatches(batchIds)
+  }
+  
+  // Collapse all piece batches
+  const collapseAllPieceBatches = () => {
+    setExpandedPieceBatches(new Set())
+  }
+  
+  // Select all pieces in a batch
+  const selectBatchPieces = (batchId: string) => {
+    const batchPieces = allLandPieces.filter(p => p.land_batch_id === batchId)
+    const current = form.allowedPieces || []
+    const batchPieceIds = batchPieces.map(p => p.id)
+    const allSelected = batchPieceIds.every(id => current.includes(id))
+    
+    if (allSelected) {
+      // Deselect all pieces in this batch
+      setForm({ ...form, allowedPieces: current.filter(id => !batchPieceIds.includes(id)) })
+    } else {
+      // Select all pieces in this batch
+      const newPieces = [...new Set([...current, ...batchPieceIds])]
+      setForm({ ...form, allowedPieces: newPieces })
     }
   }
 
@@ -146,7 +237,7 @@ export function Users() {
     try {
       const { data, error } = await supabase
         .from('users')
-        .select('id, name, email, role, created_at, updated_at, allowed_pages, sidebar_order, page_order, allowed_batches')
+        .select('id, name, email, role, created_at, updated_at, allowed_pages, sidebar_order, page_order, allowed_batches, allowed_pieces')
         .order('name', { ascending: true })
 
       if (error) {
@@ -384,6 +475,7 @@ export function Users() {
         allowedPages: pageOrder,
         sidebarOrder: (user as any).sidebar_order || [],
         allowedBatches: (user as any).allowed_batches || [],
+        allowedPieces: (user as any).allowed_pieces || [],
         worker_type: workerProfile?.worker_type || '',
         region: workerProfile?.region || '',
         skills: workerProfile?.skills || [],
@@ -401,6 +493,7 @@ export function Users() {
         sidebarOrder: [],
         allowedPages: defaultPages,
         allowedBatches: [], // Empty means access to all batches
+        allowedPieces: [], // Empty means access to all pieces (within allowed batches)
         worker_type: '',
         region: '',
         skills: [],
@@ -503,6 +596,9 @@ export function Users() {
           // Empty array means no restriction (access to all batches)
           // Non-empty array means restricted to specific batches
           allowed_batches: form.role === 'Owner' ? null : (form.allowedBatches.length > 0 ? form.allowedBatches : null),
+          // Empty array means access to all pieces (within allowed batches)
+          // Non-empty array means restricted to ONLY these specific pieces
+          allowed_pieces: form.role === 'Owner' ? null : (form.allowedPieces.length > 0 ? form.allowedPieces : null),
         }
         
         console.log('Updating user with data:', updateData)
@@ -1555,55 +1651,403 @@ export function Users() {
                   </div>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  اختر الأراضي التي يمكن للمستخدم الوصول إليها. إذا لم تختر أي أرض، سيتمكن من الوصول لجميع الأراضي.
+                  اختر الأراضي (الدفعات) التي يمكن للمستخدم الوصول إليها ومشاهدتها. إذا لم تختر أي أرض، سيتمكن من الوصول لجميع الأراضي. إذا اخترت أراضي محددة، سيتمكن فقط من رؤية الأراضي المحددة.
                 </p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto p-3 bg-gray-50 rounded-lg border border-gray-200">
-                  {allLandBatches.map((batch) => {
-                    const isSelected = form.allowedBatches?.includes(batch.id) || false
-                    return (
-                      <div
-                        key={batch.id}
-                        onClick={() => {
-                          if (saving) return
-                          const current = form.allowedBatches || []
-                          if (isSelected) {
-                            setForm({ ...form, allowedBatches: current.filter(id => id !== batch.id) })
-                          } else {
-                            setForm({ ...form, allowedBatches: [...current, batch.id] })
-                          }
-                        }}
-                        className={`
-                          flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-all
-                          ${isSelected 
-                            ? 'bg-green-100 border-green-500 ring-1 ring-green-500' 
-                            : 'bg-white border-gray-200 hover:border-green-300'
-                          }
-                          ${saving ? 'opacity-50 cursor-not-allowed' : ''}
-                        `}
-                      >
-                        <div className={`
-                          w-4 h-4 rounded flex items-center justify-center text-xs font-bold
-                          ${isSelected ? 'bg-green-500 text-white' : 'bg-gray-200 text-gray-400'}
-                        `}>
-                          {isSelected ? '✓' : ''}
+                  {(() => {
+                    // Robust deduplication before rendering (defense in depth)
+                    const seenIds = new Set<string>()
+                    const uniqueBatches = allLandBatches.filter(batch => {
+                      if (!batch || !batch.id) return false
+                      if (seenIds.has(batch.id)) {
+                        console.warn(`[Users] Duplicate batch detected and removed: ${batch.id} - ${batch.name}`)
+                        return false
+                      }
+                      seenIds.add(batch.id)
+                      return true
+                    })
+                    
+                    return uniqueBatches.map((batch) => {
+                      const isSelected = form.allowedBatches?.includes(batch.id) || false
+                      return (
+                        <div
+                          key={batch.id}
+                          onClick={() => {
+                            if (saving) return
+                            const current = form.allowedBatches || []
+                            if (isSelected) {
+                              setForm({ ...form, allowedBatches: current.filter(id => id !== batch.id) })
+                            } else {
+                              setForm({ ...form, allowedBatches: [...current, batch.id] })
+                            }
+                          }}
+                          className={`
+                            flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-all
+                            ${isSelected 
+                              ? 'bg-green-100 border-green-500 ring-1 ring-green-500' 
+                              : 'bg-white border-gray-200 hover:border-green-300'
+                            }
+                            ${saving ? 'opacity-50 cursor-not-allowed' : ''}
+                          `}
+                        >
+                          <div className={`
+                            w-4 h-4 rounded flex items-center justify-center text-xs font-bold
+                            ${isSelected ? 'bg-green-500 text-white' : 'bg-gray-200 text-gray-400'}
+                          `}>
+                            {isSelected ? '✓' : ''}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-medium truncate">{batch.name}</p>
+                            {batch.location && (
+                              <p className="text-xs text-muted-foreground truncate">{batch.location}</p>
+                            )}
+                          </div>
                         </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs font-medium truncate">{batch.name}</p>
-                          {batch.location && (
-                            <p className="text-xs text-muted-foreground truncate">{batch.location}</p>
-                          )}
-                        </div>
-                      </div>
-                    )
-                  })}
+                      )
+                    })
+                  })()}
                   {allLandBatches.length === 0 && (
                     <p className="text-xs text-gray-500 col-span-2 text-center py-4">لا توجد أراضي</p>
                   )}
                 </div>
                 <p className="text-xs text-muted-foreground text-center">
-                  {form.allowedBatches?.length || 0} من {allLandBatches.length} أرض محددة
-                  {(form.allowedBatches?.length || 0) === 0 && ' (الوصول لجميع الأراضي)'}
+                  {form.allowedBatches?.length || 0} من {allLandBatches.length} دفعة محددة
+                  {(form.allowedBatches?.length || 0) === 0 && ' (الوصول لجميع الدفعات)'}
                 </p>
+                
+                {/* Land Pieces Permissions Section */}
+                <div className="space-y-2 sm:space-y-3 border-t pt-3 sm:pt-4 mt-3 sm:mt-4">
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+                    <Label className="text-sm sm:text-base font-semibold flex items-center gap-2">
+                      <MapIcon className="h-3 w-3 sm:h-4 sm:w-4" />
+                      القطع المتاحة (اختياري)
+                    </Label>
+                    <div className="flex gap-2 w-full sm:w-auto flex-wrap">
+                      <Button 
+                        type="button" 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => {
+                          const piecesToShow = form.allowedBatches.length > 0
+                            ? allLandPieces.filter(p => form.allowedBatches.includes(p.land_batch_id))
+                            : allLandPieces
+                          setForm({ ...form, allowedPieces: piecesToShow.map(p => p.id) })
+                          expandAllPieceBatches()
+                        }}
+                        disabled={saving}
+                        className="flex-1 sm:flex-none text-xs"
+                      >
+                        <CheckSquare className="h-3 w-3 mr-1" />
+                        تحديد الكل
+                      </Button>
+                      <Button 
+                        type="button" 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => {
+                          setForm({ ...form, allowedPieces: [] })
+                          collapseAllPieceBatches()
+                        }}
+                        disabled={saving}
+                        className="flex-1 sm:flex-none text-xs"
+                      >
+                        <Square className="h-3 w-3 mr-1" />
+                        إلغاء الكل
+                      </Button>
+                      <Button 
+                        type="button" 
+                        variant="outline" 
+                        size="sm"
+                        onClick={expandAllPieceBatches}
+                        disabled={saving}
+                        className="flex-1 sm:flex-none text-xs"
+                      >
+                        <ChevronDown className="h-3 w-3 mr-1" />
+                        فتح الكل
+                      </Button>
+                      <Button 
+                        type="button" 
+                        variant="outline" 
+                        size="sm"
+                        onClick={collapseAllPieceBatches}
+                        disabled={saving}
+                        className="flex-1 sm:flex-none text-xs"
+                      >
+                        <ChevronRight className="h-3 w-3 mr-1" />
+                        إغلاق الكل
+                      </Button>
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    اختر القطع المحددة التي يمكن للمستخدم الوصول إليها. إذا لم تختر أي قطع، سيتمكن من رؤية جميع القطع في الدفعات المحددة أعلاه.
+                  </p>
+                  
+                  {/* Filters */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <div className="space-y-1">
+                      <Label className="text-xs">بحث</Label>
+                      <div className="relative">
+                        <Search className="absolute right-2 top-1/2 transform -translate-y-1/2 h-3 w-3 text-gray-400" />
+                        <Input
+                          type="text"
+                          placeholder="رقم القطعة..."
+                          value={piecesSearchTerm}
+                          onChange={(e) => setPiecesSearchTerm(e.target.value)}
+                          className="text-xs pr-8"
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">تصفية حسب الدفعة</Label>
+                      <Select
+                        value={piecesBatchFilter}
+                        onChange={(e) => setPiecesBatchFilter(e.target.value)}
+                        className="text-xs"
+                      >
+                        <option value="all">جميع الدفعات</option>
+                        {(() => {
+                          // Deduplicate batches for dropdown
+                          const seenIds = new Set<string>()
+                          return allLandBatches
+                            .filter(batch => {
+                              if (!batch || !batch.id || seenIds.has(batch.id)) return false
+                              seenIds.add(batch.id)
+                              return form.allowedBatches.length === 0 || form.allowedBatches.includes(batch.id)
+                            })
+                            .map(batch => (
+                              <option key={batch.id} value={batch.id}>{batch.name}</option>
+                            ))
+                        })()}
+                      </Select>
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">تصفية حسب الحالة</Label>
+                      <Select
+                        value={piecesStatusFilter}
+                        onChange={(e) => setPiecesStatusFilter(e.target.value as any)}
+                        className="text-xs"
+                      >
+                        <option value="all">جميع الحالات</option>
+                        <option value="Available">متاح</option>
+                        <option value="Reserved">محجوز</option>
+                        <option value="Sold">مباع</option>
+                      </Select>
+                    </div>
+                  </div>
+                  
+                  {/* Grouped Pieces by Batch */}
+                  <div className="max-h-96 overflow-y-auto p-3 bg-gray-50 rounded-lg border border-gray-200 space-y-2">
+                    {(() => {
+                      // Filter pieces based on selected batches
+                      let filteredPieces = form.allowedBatches.length > 0
+                        ? allLandPieces.filter(p => form.allowedBatches.includes(p.land_batch_id))
+                        : allLandPieces
+                      
+                      // Apply batch filter
+                      if (piecesBatchFilter !== 'all') {
+                        filteredPieces = filteredPieces.filter(p => p.land_batch_id === piecesBatchFilter)
+                      }
+                      
+                      // Apply status filter
+                      if (piecesStatusFilter !== 'all') {
+                        filteredPieces = filteredPieces.filter(p => p.status === piecesStatusFilter)
+                      }
+                      
+                      // Apply search filter
+                      if (piecesSearchTerm) {
+                        const search = piecesSearchTerm.toLowerCase()
+                        filteredPieces = filteredPieces.filter(p => 
+                          p.piece_number?.toLowerCase().includes(search) ||
+                          (p as any).land_batches?.name?.toLowerCase().includes(search)
+                        )
+                      }
+                      
+                      // Group by batch (with robust deduplication)
+                      const groupedByBatch = new Map<string, any[]>()
+                      const seenPieceIds = new Set<string>()
+                      
+                      filteredPieces.forEach(piece => {
+                        // Skip duplicate pieces
+                        if (!piece || !piece.id) return
+                        if (seenPieceIds.has(piece.id)) {
+                          console.warn(`[Users] Duplicate piece detected and removed: ${piece.id} - #${piece.piece_number}`)
+                          return
+                        }
+                        seenPieceIds.add(piece.id)
+                        
+                        const batchId = piece.land_batch_id || 'unknown'
+                        if (!groupedByBatch.has(batchId)) {
+                          groupedByBatch.set(batchId, [])
+                        }
+                        groupedByBatch.get(batchId)!.push(piece)
+                      })
+                      
+                      // Create deduplicated batch map for lookup
+                      const batchMap = new Map<string, any>()
+                      const seenBatchIds = new Set<string>()
+                      allLandBatches.forEach(batch => {
+                        if (batch && batch.id && !seenBatchIds.has(batch.id)) {
+                          batchMap.set(batch.id, batch)
+                          seenBatchIds.add(batch.id)
+                        }
+                      })
+                      
+                      // Sort batches by name (using deduplicated batch map)
+                      const sortedBatches = Array.from(groupedByBatch.entries()).sort((a, b) => {
+                        const batchA = batchMap.get(a[0])
+                        const batchB = batchMap.get(b[0])
+                        const nameA = batchA?.name || ''
+                        const nameB = batchB?.name || ''
+                        return nameA.localeCompare(nameB)
+                      })
+                      
+                      if (sortedBatches.length === 0) {
+                        return (
+                          <p className="text-xs text-gray-500 text-center py-4">
+                            لا توجد قطع تطابق الفلاتر المحددة
+                          </p>
+                        )
+                      }
+                      
+                      return sortedBatches.map(([batchId, pieces]) => {
+                        // Use deduplicated batch map
+                        const batch = batchMap.get(batchId)
+                        const batchName = batch?.name || 'غير معروف'
+                        const isExpanded = expandedPieceBatches.has(batchId)
+                        const batchSelectedPieces = pieces.filter(p => form.allowedPieces?.includes(p.id))
+                        const allBatchSelected = pieces.length > 0 && batchSelectedPieces.length === pieces.length
+                        const someBatchSelected = batchSelectedPieces.length > 0 && batchSelectedPieces.length < pieces.length
+                        
+                        return (
+                          <div key={batchId} className="border border-gray-200 rounded-lg bg-white">
+                            {/* Batch Header */}
+                            <div 
+                              className="flex items-center justify-between p-2 cursor-pointer hover:bg-gray-50 transition-colors"
+                              onClick={() => togglePieceBatch(batchId)}
+                            >
+                              <div className="flex items-center gap-2 flex-1 min-w-0">
+                                {isExpanded ? (
+                                  <ChevronDown className="h-4 w-4 text-gray-500 flex-shrink-0" />
+                                ) : (
+                                  <ChevronRight className="h-4 w-4 text-gray-500 flex-shrink-0" />
+                                )}
+                                <span className="text-xs font-semibold truncate">{batchName}</span>
+                                <Badge variant="outline" className="text-xs">
+                                  {pieces.length} قطعة
+                                </Badge>
+                                {allBatchSelected && (
+                                  <Badge variant="default" className="text-xs bg-green-500">
+                                    محدد الكل
+                                  </Badge>
+                                )}
+                                {someBatchSelected && (
+                                  <Badge variant="outline" className="text-xs border-green-500 text-green-700">
+                                    {batchSelectedPieces.length} محدد
+                                  </Badge>
+                                )}
+                              </div>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  selectBatchPieces(batchId)
+                                }}
+                                className="text-xs h-6 px-2"
+                              >
+                                {allBatchSelected ? (
+                                  <>
+                                    <Square className="h-3 w-3 mr-1" />
+                                    إلغاء
+                                  </>
+                                ) : (
+                                  <>
+                                    <CheckSquare className="h-3 w-3 mr-1" />
+                                    تحديد الكل
+                                  </>
+                                )}
+                              </Button>
+                            </div>
+                            
+                            {/* Batch Pieces */}
+                            {isExpanded && (
+                              <div className="border-t border-gray-200 p-2 space-y-1">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1">
+                                  {pieces.map((piece) => {
+                                    const isSelected = form.allowedPieces?.includes(piece.id) || false
+                                    const statusColors: Record<string, string> = {
+                                      'Available': 'text-green-600',
+                                      'Reserved': 'text-yellow-600',
+                                      'Sold': 'text-blue-600'
+                                    }
+                                    const statusLabels: Record<string, string> = {
+                                      'Available': 'متاح',
+                                      'Reserved': 'محجوز',
+                                      'Sold': 'مباع'
+                                    }
+                                    
+                                    return (
+                                      <div
+                                        key={piece.id}
+                                        onClick={() => {
+                                          if (saving) return
+                                          const current = form.allowedPieces || []
+                                          if (isSelected) {
+                                            setForm({ ...form, allowedPieces: current.filter(id => id !== piece.id) })
+                                          } else {
+                                            setForm({ ...form, allowedPieces: [...current, piece.id] })
+                                          }
+                                        }}
+                                        className={`
+                                          flex items-center gap-2 p-1.5 rounded border cursor-pointer transition-all text-xs
+                                          ${isSelected 
+                                            ? 'bg-blue-100 border-blue-500 ring-1 ring-blue-500' 
+                                            : 'bg-white border-gray-200 hover:border-blue-300'
+                                          }
+                                          ${saving ? 'opacity-50 cursor-not-allowed' : ''}
+                                        `}
+                                      >
+                                        <div className={`
+                                          w-3 h-3 rounded flex items-center justify-center text-[10px] font-bold flex-shrink-0
+                                          ${isSelected ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-400'}
+                                        `}>
+                                          {isSelected ? '✓' : ''}
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                          <p className="font-medium truncate">
+                                            #{piece.piece_number}
+                                          </p>
+                                          <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                                            <span>{piece.surface_area} م²</span>
+                                            {piece.status && (
+                                              <span className={statusColors[piece.status] || ''}>
+                                                {statusLabels[piece.status] || piece.status}
+                                              </span>
+                                            )}
+                                          </div>
+                                        </div>
+                                      </div>
+                                    )
+                                  })}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })
+                    })()}
+                  </div>
+                  <p className="text-xs text-muted-foreground text-center">
+                    {form.allowedPieces?.length || 0} من {(() => {
+                      const piecesToShow = form.allowedBatches.length > 0
+                        ? allLandPieces.filter(p => form.allowedBatches.includes(p.land_batch_id))
+                        : allLandPieces
+                      return piecesToShow.length
+                    })()} قطعة محددة
+                    {(form.allowedPieces?.length || 0) === 0 && ' (الوصول لجميع القطع في الدفعات المحددة)'}
+                  </p>
+                </div>
               </div>
             )}
           </div>
