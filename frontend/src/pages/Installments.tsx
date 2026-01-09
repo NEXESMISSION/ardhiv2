@@ -1160,7 +1160,25 @@ export function Installments() {
 
   // Filter installments - also check if overdue based on due date
   // For 'Paid' status: only show installments that still have remaining amount (partially paid)
+  // Filter out installments for reset sales (sales that have been reset back to confirmation page)
+  // Reset sales have: status = 'Pending', big_advance_amount = 0, company_fee_amount = null
   const filteredInstallments = installments.filter((inst) => {
+    const sale = inst.sale as any
+    if (!sale) return false
+    
+    // Exclude installments for cancelled sales
+    if (sale.status === 'Cancelled') return false
+    
+    // Exclude installments for reset sales (sales that have been reset back to confirmation page)
+    // These are sales that were confirmed but then reset, so they shouldn't show installments
+    if (sale.status === 'Pending' && 
+        sale.big_advance_amount === 0 && 
+        !sale.company_fee_amount) {
+      return false // Exclude installments for reset sales
+    }
+    
+    return true
+  }).filter((inst) => {
     if (filterStatus === 'all') return true
     if (filterStatus === 'Late') {
       // Check if actually overdue: due date passed AND not fully paid

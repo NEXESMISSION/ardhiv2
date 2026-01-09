@@ -699,6 +699,117 @@ export function SaleManagement() {
               )}
             </div>
           )}
+          <DialogFooter>
+            {selectedSale && (() => {
+              const hasBigAdvance = (selectedSale.big_advance_amount || 0) > 0
+              const hasCompanyFee = (selectedSale.company_fee_amount || 0) > 0
+              const canReset = hasBigAdvance || hasCompanyFee
+              
+              return (
+                <>
+                  {canReset && (
+                    <Button
+                      variant="outline"
+                      onClick={async () => {
+                        if (!confirm('هل أنت متأكد من إرجاع هذا البيع إلى صفحة التأكيد؟ سيتم حذف دفعات التسبقة والعمولة، ولكن سيتم الاحتفاظ بالعربون.')) {
+                          return
+                        }
+                        
+                        setActionLoading(true)
+                        try {
+                          const saleId = selectedSale.id
+                          
+                          // 1. Delete ALL payment records EXCEPT SmallAdvance (reservation)
+                          // Delete each payment type explicitly to ensure all are removed
+                          const paymentTypesToDelete = ['BigAdvance', 'Full', 'Partial', 'InitialPayment', 'Installment', 'Field']
+                          
+                          for (const paymentType of paymentTypesToDelete) {
+                            const { error: deleteError } = await supabase
+                              .from('payments')
+                              .delete()
+                              .eq('sale_id', saleId)
+                              .eq('payment_type', paymentType)
+                            
+                            if (deleteError) {
+                              console.warn(`Error deleting ${paymentType} payments:`, deleteError)
+                              // Continue with other types even if one fails
+                            }
+                          }
+                          
+                          // Verify no BigAdvance or Full payments remain
+                          const { data: remainingPayments, error: checkError } = await supabase
+                            .from('payments')
+                            .select('id, payment_type')
+                            .eq('sale_id', saleId)
+                            .in('payment_type', ['BigAdvance', 'Full', 'Partial', 'InitialPayment', 'Installment', 'Field'])
+                          
+                          if (checkError) {
+                            console.warn('Error checking remaining payments:', checkError)
+                          } else if (remainingPayments && remainingPayments.length > 0) {
+                            // Force delete any remaining non-SmallAdvance payments
+                            const { error: forceDeleteError } = await supabase
+                              .from('payments')
+                              .delete()
+                              .in('id', remainingPayments.map(p => p.id))
+                            
+                            if (forceDeleteError) {
+                              console.warn('Error force deleting remaining payments:', forceDeleteError)
+                            }
+                          }
+                          
+                          // 2. Delete all installments (since sale is going back to confirmation, installments shouldn't exist yet)
+                          const { error: installmentError } = await supabase
+                            .from('installments')
+                            .delete()
+                            .eq('sale_id', saleId)
+                          
+                          if (installmentError) throw installmentError
+                          
+                          // 3. Reset sale fields - clean all confirmation traces
+                          const { error: saleError } = await supabase
+                            .from('sales')
+                            .update({
+                              big_advance_amount: 0,
+                              company_fee_amount: null,
+                              company_fee_percentage: null,
+                              status: 'Pending',
+                              promise_completed: false,
+                              promise_initial_payment: null,
+                              number_of_installments: null,
+                              monthly_payment_amount: null,
+                              installment_start_date: null
+                            })
+                            .eq('id', saleId)
+                          
+                          if (saleError) throw saleError
+                          
+                          // 4. Wait a bit for database to commit
+                          await new Promise(resolve => setTimeout(resolve, 300))
+                          
+                          // 5. Refresh data
+                          await fetchSales()
+                          setDetailsDialogOpen(false)
+                          showNotification('تم إرجاع البيع إلى صفحة التأكيد بنجاح - تم حذف جميع البيانات المرتبطة', 'success')
+                        } catch (error: any) {
+                          console.error('Error resetting sale:', error)
+                          showNotification('حدث خطأ أثناء إرجاع البيع: ' + (error.message || 'خطأ غير معروف'), 'error')
+                        } finally {
+                          setActionLoading(false)
+                        }
+                      }}
+                      disabled={actionLoading}
+                      className="text-orange-600 border-orange-600 hover:bg-orange-50"
+                    >
+                      {actionLoading ? 'جاري الإرجاع...' : 'إرجاع إلى صفحة التأكيد'}
+                    </Button>
+                  )}
+                  <Button variant="outline" onClick={() => setDetailsDialogOpen(false)}>
+                    إغلاق
+                  </Button>
+                </>
+              )
+            })()}
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

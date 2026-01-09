@@ -98,6 +98,7 @@ export function SaleConfirmation() {
     company_fee_percentage: '',
     company_fee_amount: '',
     commission_input_method: 'percentage' as 'percentage' | 'amount',
+    small_advance_amount: '',
     selected_offer_id: '',
     notes: '',
   })
@@ -181,11 +182,13 @@ export function SaleConfirmation() {
     
     // Initialize form with current sale values
     const currentCommissionAmount = sale.company_fee_amount ? (sale.company_fee_amount / pieceCount).toFixed(2) : ''
+    const currentReservationPerPiece = sale.small_advance_amount ? (sale.small_advance_amount / pieceCount).toFixed(2) : ''
     setEditForm({
       total_selling_price: pricePerPiece.toFixed(2),
       company_fee_percentage: (sale.company_fee_percentage || 0).toString(),
       company_fee_amount: currentCommissionAmount,
       commission_input_method: 'percentage',
+      small_advance_amount: currentReservationPerPiece,
       selected_offer_id: sale.selected_offer_id || '',
       notes: sale.notes || '',
     })
@@ -275,11 +278,16 @@ export function SaleConfirmation() {
         newCompanyFee = (newPricePerPiece * newCompanyFeePercentage) / 100
       }
       
+      // Calculate reservation amount
+      const newReservationPerPiece = parseFloat(editForm.small_advance_amount) || 0
+      const newTotalReservation = newReservationPerPiece * pieceCount
+      
       // Calculate new totals for the sale
       // If single piece sale, update directly
       // If multi-piece sale, recalculate totals
       let updates: any = {
         company_fee_percentage: newCompanyFeePercentage > 0 ? newCompanyFeePercentage : null,
+        small_advance_amount: newTotalReservation > 0 ? parseFloat(newTotalReservation.toFixed(2)) : 0,
         selected_offer_id: editForm.selected_offer_id || null,
         notes: editForm.notes || null,
       }
@@ -1687,7 +1695,7 @@ export function SaleConfirmation() {
                   ? 'تم استكمال الوعد بالبيع بنجاح' 
                   : 'تم تأكيد الوعد بالبيع بنجاح - يمكنك الآن استكمال الدفع المتبقي')
               : 'تم تأكيد البيع بنجاح (دفع كامل)')
-          : 'تم تأكيد الدفعة الكبيرة بنجاح',
+          : 'تم تأكيد التسبقة بنجاح',
         'success'
       )
       
@@ -2499,7 +2507,7 @@ export function SaleConfirmation() {
                       className="text-xs sm:text-sm"
                     />
                     <p className="text-xs text-muted-foreground">
-                      سيتم إنشاء جدول الأقساط تلقائياً بعد تأكيد الدفعة الكبيرة
+                      سيتم إنشاء جدول الأقساط تلقائياً بعد تأكيد التسبقة
                     </p>
                   </div>
                 </div>
@@ -2955,6 +2963,22 @@ export function SaleConfirmation() {
                       </p>
                     </>
                   )}
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="edit-reservation">العربون (DT)</Label>
+                  <Input
+                    id="edit-reservation"
+                    type="number"
+                    value={editForm.small_advance_amount}
+                    onChange={(e) => setEditForm({ ...editForm, small_advance_amount: e.target.value })}
+                    placeholder="مبلغ العربون"
+                    min="0"
+                    step="0.01"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    العربون الحالي: {formatCurrency((editingSale.small_advance_amount || 0) / editingSale.land_piece_ids.length)}
+                  </p>
                 </div>
 
                 {editingSale.payment_type === 'Installment' && (

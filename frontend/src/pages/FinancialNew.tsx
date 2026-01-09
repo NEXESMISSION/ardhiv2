@@ -22,7 +22,7 @@ import {
 } from '@/components/ui/dialog'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { retryWithBackoff, isRetryableError } from '@/lib/retry'
-import { DollarSign, CreditCard, TrendingUp, X, ChevronDown, ChevronUp, Calendar, AlertTriangle, CheckCircle } from 'lucide-react'
+import { DollarSign, CreditCard, TrendingUp, X, ChevronDown, ChevronUp, Calendar, AlertTriangle, CheckCircle, RefreshCw } from 'lucide-react'
 import type { Sale, Client, Payment, LandPiece, LandBatch } from '@/types/database'
 
 interface SaleWithClient extends Sale {
@@ -256,12 +256,28 @@ export function Financial() {
       .filter(p => isDateInRange(p.payment_date, startDate, endDate))
       .filter(p => p.payment_type !== 'Refund')
     
-    // Attach land pieces to payments and exclude payments for cancelled sales
+    // Attach land pieces to payments and exclude payments for cancelled sales and reset sales
     const paymentsWithPieces = filteredPayments
       .filter(payment => {
         // Exclude payments for cancelled sales
         const sale = sales.find(s => s.id === payment.sale_id)
-        return sale && sale.status !== 'Cancelled'
+        if (!sale || sale.status === 'Cancelled') return false
+        
+        // Always preserve payments for Completed sales - they should always be included
+        if (sale.status === 'Completed') return true
+        
+        // Exclude payments for sales that have been reset (big_advance_amount = 0 and company_fee_amount is null)
+        // This ensures reset sales don't show their old payments
+        // Check for ALL payment types except SmallAdvance (which should remain for reset sales)
+        // IMPORTANT: Only exclude Pending sales that were reset, NOT completed sales
+        if (payment.payment_type !== 'SmallAdvance' &&
+            sale.big_advance_amount === 0 && 
+            !sale.company_fee_amount && 
+            sale.status === 'Pending') {
+          return false // Exclude all non-SmallAdvance payments for reset sales
+        }
+        
+        return true
       })
       .map(payment => {
         const pieceIds = payment.sale?.land_piece_ids || []
@@ -299,8 +315,21 @@ export function Financial() {
     
     // Also check sales table for promise_initial_payment if no payment records exist
     // This handles cases where PromiseOfSale was created but payment wasn't recorded yet
+    // Exclude reset sales
     const promiseOfSaleFromSales = filteredSales
-      .filter(s => s.status !== 'Cancelled' && (s as any).payment_type === 'PromiseOfSale')
+      .filter(s => {
+        if (s.status === 'Cancelled') return false
+        if ((s as any).payment_type !== 'PromiseOfSale') return false
+        
+        // Exclude reset sales
+        if (s.status === 'Pending' && 
+            s.big_advance_amount === 0 && 
+            !s.company_fee_amount) {
+          return false
+        }
+        
+        return true
+      })
       .reduce((sum, s) => {
         const promiseInitialPayment = (s as any).promise_initial_payment || 0
         // Only add if there's no payment record for this sale in the filtered payments
@@ -314,7 +343,22 @@ export function Financial() {
     // Calculate small advance (reservation) from sales table
     const smallAdvanceFromPayments = smallAdvancePaymentsList.reduce((sum, p) => sum + p.amount_paid, 0)
     const smallAdvanceFromSales = filteredSales
-      .filter(s => s.status !== 'Cancelled')
+      .filter(s => {
+        // Always preserve Completed sales
+        if (s.status === 'Completed') return true
+        
+        if (s.status === 'Cancelled') return false
+        if (!s.small_advance_amount || s.small_advance_amount <= 0) return false
+        
+        // Exclude reset sales (only Pending sales that were reset)
+        if (s.status === 'Pending' && 
+            s.big_advance_amount === 0 && 
+            !s.company_fee_amount) {
+          return false
+        }
+        
+        return true
+      })
       .reduce((sum, s) => sum + (s.small_advance_amount || 0), 0)
     
     const smallAdvanceTotal = smallAdvanceFromPayments > 0 ? smallAdvanceFromPayments : smallAdvanceFromSales
@@ -332,12 +376,26 @@ export function Financial() {
     // Calculate company fees from sales
     // NOTE: Commission is counted for CONFIRMED sales (either Completed status OR has been confirmed)
     // Commission is collected at confirmation time, not at reservation
+    // IMPORTANT: Always preserve Completed sales - they should always be included
+    // Exclude reset sales (status = 'Pending', big_advance_amount = 0, company_fee_amount = null)
     const companyFeesTotal = filteredSales
       .filter(s => {
+        // Always include Completed sales - preserve their commission stats
+        if (s.status === 'Completed') return true
+        
+        if (s.status === 'Cancelled') return false
+        
+        // Exclude reset sales - these are sales that were reset back to confirmation page
+        // This only applies to Pending sales that were reset, NOT completed sales
+        if (s.status === 'Pending' && 
+            s.big_advance_amount === 0 && 
+            !s.company_fee_amount) {
+          return false // Exclude reset sales
+        }
+        
         // Include if:
-        // 1. Status is Completed, OR
-        // 2. Has company_fee_amount > 0 (means it was confirmed and commission was set)
-        return (s.status === 'Completed' || (s.company_fee_amount && s.company_fee_amount > 0)) && s.status !== 'Cancelled'
+        // Has company_fee_amount > 0 (means it was confirmed and commission was set)
+        return (s.company_fee_amount && s.company_fee_amount > 0)
       })
       .reduce((sum, s) => sum + (s.company_fee_amount || 0), 0)
 
@@ -384,9 +442,26 @@ export function Financial() {
 
     // Group company fees by client and date
     // NOTE: Commission is counted for CONFIRMED sales (either Completed status OR has been confirmed)
+    // IMPORTANT: Always preserve Completed sales - they should always be included
+    // Exclude reset sales
     const groupCompanyFees = (): GroupedCompanyFee[] => {
       const companyFeeSales = filteredSales
-        .filter(s => s.company_fee_amount && s.company_fee_amount > 0 && s.status !== 'Cancelled')
+        .filter(s => {
+          // Always include Completed sales - preserve their commission stats
+          if (s.status === 'Completed' && s.company_fee_amount && s.company_fee_amount > 0) return true
+          
+          if (s.status === 'Cancelled') return false
+          if (!s.company_fee_amount || s.company_fee_amount <= 0) return false
+          
+          // Exclude reset sales (only Pending sales that were reset)
+          if (s.status === 'Pending' && 
+              s.big_advance_amount === 0 && 
+              !s.company_fee_amount) {
+            return false
+          }
+          
+          return true
+        })
       
       const groups = new Map<string, GroupedCompanyFee>()
       
@@ -427,9 +502,26 @@ export function Financial() {
 
     // Group company fees by land batch for table display
     // NOTE: Commission is counted for CONFIRMED sales (either Completed status OR has been confirmed)
+    // IMPORTANT: Always preserve Completed sales - they should always be included
+    // Exclude reset sales
     const groupCompanyFeesByLand = (): CompanyFeeByLand[] => {
       const companyFeeSales = filteredSales
-        .filter(s => s.company_fee_amount && s.company_fee_amount > 0 && s.status !== 'Cancelled')
+        .filter(s => {
+          // Always include Completed sales - preserve their commission stats
+          if (s.status === 'Completed' && s.company_fee_amount && s.company_fee_amount > 0) return true
+          
+          if (s.status === 'Cancelled') return false
+          if (!s.company_fee_amount || s.company_fee_amount <= 0) return false
+          
+          // Exclude reset sales (only Pending sales that were reset)
+          if (s.status === 'Pending' && 
+              s.big_advance_amount === 0 && 
+              !s.company_fee_amount) {
+            return false
+          }
+          
+          return true
+        })
       
       const landGroups = new Map<string, CompanyFeeByLand>()
       
@@ -500,8 +592,22 @@ export function Financial() {
   // Get small advance (reservation) from sales table grouped by land
   const getSmallAdvanceByLand = (): PaymentByLand[] => {
     // Get filtered sales with small_advance_amount
+    // Exclude reset sales (status = 'Pending', big_advance_amount = 0, company_fee_amount = null)
     const salesWithAdvance = filteredData.sales
-      .filter(s => s.status !== 'Cancelled' && s.small_advance_amount && s.small_advance_amount > 0)
+      .filter(s => {
+        if (s.status === 'Cancelled') return false
+        if (!s.small_advance_amount || s.small_advance_amount <= 0) return false
+        
+        // Exclude reset sales - these are sales that were reset back to confirmation page
+        // Reset sales have: status = 'Pending', big_advance_amount = 0, company_fee_amount = null
+        if (s.status === 'Pending' && 
+            s.big_advance_amount === 0 && 
+            !s.company_fee_amount) {
+          return false // Exclude reset sales
+        }
+        
+        return true
+      })
     
     // Group by land batch
     const landGroups = new Map<string, PaymentByLand>()
@@ -586,9 +692,42 @@ export function Financial() {
             
             pieceGroup.totalAmount += advancePerPiece
             
+            // Create virtual payment object with client information for display
+            const virtualPayment: PaymentWithDetails = {
+              id: `virtual-small-advance-${sale.id}-${piece.id}`,
+              client_id: sale.client_id,
+              sale_id: sale.id,
+              installment_id: null,
+              reservation_id: null,
+              amount_paid: advancePerPiece,
+              payment_type: 'SmallAdvance' as any,
+              payment_date: sale.sale_date,
+              payment_method: 'Cash',
+              notes: null,
+              recorded_by: sale.created_by || null,
+              created_at: sale.created_at,
+              updated_at: sale.updated_at,
+              client: sale.client,
+              sale: {
+                land_piece_ids: pieceIds,
+                payment_type: sale.payment_type,
+                total_selling_price: sale.total_selling_price,
+                created_by: sale.created_by,
+                created_by_user: (sale as any).created_by_user,
+              } as any,
+              recorded_by_user: (sale as any).created_by_user,
+            }
+            
+            if (!pieceGroup.payments.find(p => p.id === virtualPayment.id)) {
+              pieceGroup.payments.push(virtualPayment)
+            }
+            
             // Track users
             if ((sale as any).created_by_user?.name) {
               pieceGroup.soldByUsers.add((sale as any).created_by_user.name)
+            }
+            if ((sale as any).created_by_user?.name) {
+              pieceGroup.recordedByUsers.add((sale as any).created_by_user.name)
             }
           })
           
@@ -632,18 +771,23 @@ export function Financial() {
       const virtualPayments: PaymentWithDetails[] = promiseOfSaleSales.map(sale => {
         const pieceIds = sale.land_piece_ids || []
         const pieces = landPieces.filter(p => pieceIds.includes(p.id))
+        const client = sale.client || (sale as any).client
+        
         return {
           id: `virtual-${sale.id}`,
           client_id: sale.client_id,
           sale_id: sale.id,
+          installment_id: null,
+          reservation_id: null,
           amount_paid: (sale as any).promise_initial_payment || 0,
-          payment_type: 'Partial' as any,
+          payment_type: 'InitialPayment' as any,
           payment_date: sale.sale_date,
+          payment_method: 'Cash',
           notes: null,
           recorded_by: sale.created_by || null,
           created_at: sale.created_at,
           updated_at: sale.updated_at,
-          client: sale.client,
+          client: client,
           sale: {
             land_piece_ids: pieceIds,
             payment_type: 'PromiseOfSale',
@@ -651,7 +795,9 @@ export function Financial() {
             created_by: sale.created_by,
             created_by_user: (sale as any).created_by_user,
             promise_initial_payment: (sale as any).promise_initial_payment,
-          },
+            client: client,
+          } as any,
+          recorded_by_user: (sale as any).created_by_user,
           land_pieces: pieces,
         } as PaymentWithDetails
       })
@@ -659,12 +805,29 @@ export function Financial() {
       // Combine payment records and virtual payments
       const allPromisePayments = [...paymentsFromRecords, ...virtualPayments]
       
-      // Attach land pieces to payments
+      // Attach land pieces to payments and ensure client information
       const paymentsWithPieces = allPromisePayments.map(payment => {
         const pieceIds = payment.sale?.land_piece_ids || []
         const pieces = landPieces.filter(p => pieceIds.includes(p.id))
+        
+        // Ensure client information is present
+        let client = payment.client
+        if (!client && payment.sale) {
+          const sale = payment.sale as any
+          if (sale.client) {
+            client = sale.client
+          }
+        }
+        if (!client && payment.sale_id) {
+          const saleFromData = filteredData.sales.find(s => s.id === payment.sale_id)
+          if (saleFromData?.client) {
+            client = saleFromData.client
+          }
+        }
+        
         return {
           ...payment,
+          client: client || payment.client,
           land_pieces: pieces.length > 0 ? pieces : payment.land_pieces || [],
         }
       })
@@ -771,11 +934,29 @@ export function Financial() {
     }
     
     // Attach land pieces to payments (already filtered and excluding cancelled sales in filteredData)
+    // Also ensure client information is attached from sale if payment doesn't have it
     const paymentsWithPieces = filteredPayments.map(payment => {
       const pieceIds = payment.sale?.land_piece_ids || []
       const pieces = landPieces.filter(p => pieceIds.includes(p.id))
+      
+      // If payment doesn't have client info, try to get it from sale
+      let client = payment.client
+      if (!client && payment.sale) {
+        const sale = payment.sale as any
+        if (sale.client) {
+          client = sale.client
+        } else if (payment.sale_id) {
+          // Try to find client from sales array
+          const saleFromData = filteredData.sales.find(s => s.id === payment.sale_id)
+          if (saleFromData?.client) {
+            client = saleFromData.client
+          }
+        }
+      }
+      
       return {
         ...payment,
+        client: client || payment.client,
         land_pieces: pieces,
       }
     })
@@ -1031,6 +1212,19 @@ export function Financial() {
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4">
         <h1 className="text-xl sm:text-2xl md:text-3xl font-bold">المالية</h1>
         <div className="flex flex-wrap gap-2 w-full sm:w-auto">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={async () => {
+              setLoading(true)
+              await fetchData()
+            }}
+            disabled={loading}
+            className="flex-1 sm:flex-none"
+          >
+            <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+            تحديث
+          </Button>
           {(['today', 'week', 'month', 'all'] as DateFilter[]).map(filter => (
             <Button
               key={filter}
@@ -1090,7 +1284,30 @@ export function Financial() {
         const monthEnd = new Date(currentYear, currentMonth + 1, 0, 23, 59, 59)
         
         // Calculate this month's due installments
-        const thisMonthInstallments = installments.filter(inst => {
+        // Filter out installments for reset sales
+        // IMPORTANT: Preserve Completed sales - they should always be included
+        const validInstallments = installments.filter(inst => {
+          const sale = inst.sale as any
+          if (!sale) return false
+          
+          // Always include Completed sales - preserve their stats
+          if (sale.status === 'Completed') return true
+          
+          // Exclude installments for cancelled sales
+          if (sale.status === 'Cancelled') return false
+          
+          // Exclude installments for reset sales (status = 'Pending', big_advance_amount = 0, company_fee_amount = null)
+          // This only applies to Pending sales that were reset, NOT completed sales
+          if (sale.status === 'Pending' && 
+              sale.big_advance_amount === 0 && 
+              !sale.company_fee_amount) {
+            return false
+          }
+          
+          return true
+        })
+        
+        const thisMonthInstallments = validInstallments.filter(inst => {
           const dueDate = new Date(inst.due_date)
           return dueDate >= monthStart && dueDate <= monthEnd
         })
@@ -1105,8 +1322,8 @@ export function Financial() {
           return sum + fullAmountDue
         }, 0)
         
-        // Total remaining installments
-        const totalRemaining = installments.reduce((sum, inst) => {
+        // Total remaining installments (using filtered installments)
+        const totalRemaining = validInstallments.reduce((sum, inst) => {
           const remaining = (inst.amount_due + inst.stacked_amount) - inst.amount_paid
           return sum + Math.max(0, remaining)
         }, 0)
@@ -2547,20 +2764,43 @@ export function Financial() {
             const monthStart = new Date(currentYear, currentMonth, 1)
             const monthEnd = new Date(currentYear, currentMonth + 1, 0, 23, 59, 59)
             
+            // Filter out installments for reset sales
+            // IMPORTANT: Preserve Completed sales - they should always be included
+            const validInstallments = installments.filter(inst => {
+              const sale = inst.sale as any
+              if (!sale) return false
+              
+              // Always include Completed sales - preserve their stats
+              if (sale.status === 'Completed') return true
+              
+              // Exclude installments for cancelled sales
+              if (sale.status === 'Cancelled') return false
+              
+              // Exclude installments for reset sales (status = 'Pending', big_advance_amount = 0, company_fee_amount = null)
+              // This only applies to Pending sales that were reset, NOT completed sales
+              if (sale.status === 'Pending' && 
+                  sale.big_advance_amount === 0 && 
+                  !sale.company_fee_amount) {
+                return false
+              }
+              
+              return true
+            })
+            
             let displayInstallments: any[] = []
             
             if (selectedInstallmentView === 'thisMonth') {
-              displayInstallments = installments.filter(inst => {
+              displayInstallments = validInstallments.filter(inst => {
                 const dueDate = new Date(inst.due_date)
                 return dueDate >= monthStart && dueDate <= monthEnd
               })
             } else if (selectedInstallmentView === 'total') {
-              displayInstallments = installments.filter(inst => {
+              displayInstallments = validInstallments.filter(inst => {
                 const remaining = (inst.amount_due + inst.stacked_amount) - inst.amount_paid
                 return remaining > 0.01
               })
             } else if (selectedInstallmentView === 'unpaid') {
-              const thisMonthInsts = installments.filter(inst => {
+              const thisMonthInsts = validInstallments.filter(inst => {
                 const dueDate = new Date(inst.due_date)
                 return dueDate >= monthStart && dueDate <= monthEnd
               })
@@ -2569,7 +2809,7 @@ export function Financial() {
                 return remaining > 0.01
               })
             } else if (selectedInstallmentView === 'paid') {
-              const thisMonthInsts = installments.filter(inst => {
+              const thisMonthInsts = validInstallments.filter(inst => {
                 const dueDate = new Date(inst.due_date)
                 return dueDate >= monthStart && dueDate <= monthEnd
               })
@@ -2611,7 +2851,7 @@ export function Financial() {
               group.totalRemaining += Math.max(0, remaining)
             })
             
-            const paidThisMonth = installments.filter(inst => {
+            const paidThisMonth = validInstallments.filter(inst => {
               const dueDate = new Date(inst.due_date)
               return dueDate >= monthStart && dueDate <= monthEnd
             }).filter(inst => {
@@ -2834,52 +3074,108 @@ export function Financial() {
                 <CardContent>
                   <div className="space-y-3">
                     {selectedGroupForDetails.pieces.map((piece, idx) => {
+                      // Collect all unique clients from payments
                       const uniqueClients = new Set<string>()
-                      const paymentDates = new Set<string>()
+                      const clientDetails = new Map<string, { name: string; cin?: string }>()
+                      
                       piece.payments.forEach(p => {
-                        const clientName = (p.client as any)?.name
-                        if (clientName) uniqueClients.add(clientName)
-                        paymentDates.add(p.payment_date)
+                        const client = p.client as any
+                        if (client?.name) {
+                          uniqueClients.add(client.name)
+                          if (!clientDetails.has(client.name)) {
+                            clientDetails.set(client.name, {
+                              name: client.name,
+                              cin: client.cin
+                            })
+                          }
+                        }
+                      })
+                      
+                      // Also try to get client from sale if available
+                      piece.payments.forEach(p => {
+                        const sale = p.sale as any
+                        if (sale?.client) {
+                          const client = sale.client
+                          if (client.name && !uniqueClients.has(client.name)) {
+                            uniqueClients.add(client.name)
+                            if (!clientDetails.has(client.name)) {
+                              clientDetails.set(client.name, {
+                                name: client.name,
+                                cin: client.cin
+                              })
+                            }
+                          }
+                        }
                       })
                       
                       return (
-                        <div key={idx} className="border rounded-lg p-4 space-y-2">
+                        <div key={idx} className="border rounded-lg p-4 space-y-2 bg-gray-50/50">
                           <div className="flex items-center justify-between">
                             <div>
-                              <p className="font-semibold">#{piece.pieceNumber}</p>
+                              <p className="font-semibold text-lg">#{piece.pieceNumber}</p>
                               {piece.landBatchName && (
                                 <p className="text-sm text-muted-foreground">{piece.landBatchName}</p>
                               )}
+                              {piece.location && (
+                                <p className="text-xs text-muted-foreground">{piece.location}</p>
+                              )}
                             </div>
                             <div className="text-left">
-                              <p className="font-bold text-green-600">{formatCurrency(piece.totalAmount)}</p>
+                              <p className="font-bold text-green-600 text-lg">{formatCurrency(piece.totalAmount)}</p>
                               {piece.installmentCount > 0 && (
                                 <p className="text-xs text-muted-foreground">{piece.installmentCount} قسط</p>
                               )}
                             </div>
                           </div>
                           
+                          {/* Client Information */}
                           {uniqueClients.size > 0 && (
-                            <div className="text-sm">
-                              <span className="text-muted-foreground">العميل: </span>
-                              <span className="font-medium">{Array.from(uniqueClients).join(', ')}</span>
+                            <div className="text-sm bg-blue-50 p-2 rounded border border-blue-200">
+                              <span className="text-muted-foreground font-medium">العميل: </span>
+                              <span className="font-semibold text-blue-900">
+                                {Array.from(uniqueClients).map((name, i) => {
+                                  const details = clientDetails.get(name)
+                                  return (
+                                    <span key={i}>
+                                      {details?.name || name}
+                                      {details?.cin && <span className="text-xs text-muted-foreground mr-1"> ({details.cin})</span>}
+                                      {i < uniqueClients.size - 1 && ', '}
+                                    </span>
+                                  )
+                                })}
+                              </span>
                             </div>
                           )}
                           
                           {/* Individual Payments */}
-                          {piece.payments.length > 0 && (
+                          {piece.payments.length > 0 ? (
                             <div className="mt-2 pt-2 border-t space-y-1">
-                              <p className="text-xs font-semibold text-muted-foreground mb-1">المدفوعات:</p>
+                              <p className="text-xs font-semibold text-muted-foreground mb-2">المدفوعات:</p>
                               {piece.payments.map((payment, payIdx) => {
                                 const recordedBy = (payment as any).recorded_by_user?.name || '-'
                                 const soldBy = (payment.sale as any)?.created_by_user?.name || '-'
+                                const paymentMethod = payment.payment_method || '-'
+                                const notes = payment.notes || ''
+                                
                                 return (
-                                  <div key={payIdx} className="flex items-center justify-between text-xs bg-gray-50 p-2 rounded">
-                                    <div>
-                                      <span className="font-medium">{formatCurrency(payment.amount_paid)}</span>
-                                      <span className="text-muted-foreground mr-2"> - {formatDate(payment.payment_date)}</span>
+                                  <div key={payIdx} className="flex items-center justify-between text-xs bg-white p-2 rounded border border-gray-200 hover:bg-gray-50">
+                                    <div className="flex-1">
+                                      <div className="flex items-center gap-2">
+                                        <span className="font-semibold text-green-700">{formatCurrency(payment.amount_paid)}</span>
+                                        <span className="text-muted-foreground">-</span>
+                                        <span className="text-muted-foreground">{formatDate(payment.payment_date)}</span>
+                                        {paymentMethod !== '-' && (
+                                          <>
+                                            <span className="text-muted-foreground">-</span>
+                                            <span className="text-muted-foreground">{paymentMethod}</span>
+                                          </>
+                                        )}
+                                      </div>
+                                      {notes && (
+                                        <p className="text-xs text-muted-foreground mt-1 italic">{notes}</p>
+                                      )}
                                     </div>
-                                    <div className="text-left text-muted-foreground">
+                                    <div className="text-left text-muted-foreground text-xs">
                                       {recordedBy !== '-' && <span>سجل: {recordedBy}</span>}
                                       {soldBy !== '-' && recordedBy !== '-' && <span className="mx-1">•</span>}
                                       {soldBy !== '-' && <span>باع: {soldBy}</span>}
@@ -2887,6 +3183,10 @@ export function Financial() {
                                   </div>
                                 )
                               })}
+                            </div>
+                          ) : (
+                            <div className="mt-2 pt-2 border-t">
+                              <p className="text-xs text-muted-foreground italic">لا توجد مدفوعات مسجلة</p>
                             </div>
                           )}
                         </div>
