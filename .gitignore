@@ -27,3 +27,6 @@ npm-debug.log*
 
 # Test coverage
 coverage/
+
+# SQL files (security - contains database structure)
+*.sql
