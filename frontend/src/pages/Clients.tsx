@@ -249,6 +249,13 @@ export function Clients() {
     setErrorMessage(null)
     
     try {
+      // Validate name is not empty
+      if (!form.name.trim()) {
+        setErrorMessage('الاسم مطلوب')
+        setSaving(false)
+        return
+      }
+
       // Validate CIN is not empty
       if (!form.cin.trim()) {
         setErrorMessage('رقم CIN مطلوب')
@@ -581,10 +588,12 @@ export function Clients() {
           <h1 className="text-xl sm:text-2xl md:text-3xl font-bold">إدارة العملاء</h1>
           <p className="text-muted-foreground text-xs sm:text-sm md:text-base mt-1">إدارة عملائك ومعلوماتهم</p>
         </div>
-          <Button onClick={() => openDialog()} className="w-full sm:w-auto">
-            <Plus className="mr-2 h-4 w-4" />
-            إضافة عميل
-          </Button>
+          {hasPermission('edit_clients') && (
+            <Button onClick={() => openDialog()} className="w-full sm:w-auto">
+              <Plus className="mr-2 h-4 w-4" />
+              إضافة عميل
+            </Button>
+          )}
       </div>
 
       {/* Stats */}
@@ -894,7 +903,7 @@ export function Clients() {
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
               <div className="space-y-1.5 sm:space-y-2">
-                <Label htmlFor="phone" className="text-xs sm:text-sm">الهاتف</Label>
+                <Label htmlFor="phone" className="text-xs sm:text-sm">الهاتف *</Label>
                 <Input
                   id="phone"
                   value={form.phone}
