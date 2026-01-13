@@ -1292,8 +1292,9 @@ export function SaleConfirmation() {
         }
         
         // Set company fee percentage for display
-        if (batch?.company_fee_percentage_full) {
-          setCompanyFeePercentage(batch.company_fee_percentage_full.toString())
+        const batchForDisplay = (piece as any).land_batch
+        if (batchForDisplay?.company_fee_percentage_full) {
+          setCompanyFeePercentage(batchForDisplay.company_fee_percentage_full.toString())
         } else if (sale.company_fee_percentage) {
           setCompanyFeePercentage(sale.company_fee_percentage.toString())
         }
@@ -1345,8 +1346,9 @@ export function SaleConfirmation() {
         }
         
         // Set company fee percentage for display
-        if (batch?.company_fee_percentage_full) {
-          setCompanyFeePercentage(batch.company_fee_percentage_full.toString())
+        const batchForDisplay = (piece as any).land_batch
+        if (batchForDisplay?.company_fee_percentage_full) {
+          setCompanyFeePercentage(batchForDisplay.company_fee_percentage_full.toString())
         } else if (sale.company_fee_percentage) {
           setCompanyFeePercentage(sale.company_fee_percentage.toString())
         }
