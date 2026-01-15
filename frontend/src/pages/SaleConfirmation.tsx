@@ -65,6 +65,7 @@ export function SaleConfirmation() {
   // Search state
   const [searchTerm, setSearchTerm] = useState('')
   const [locationFilter, setLocationFilter] = useState<string>('all')
+  const [uniqueLocations, setUniqueLocations] = useState<string[]>([])
   
   // Confirmation form state
   const [companyFeePercentage, setCompanyFeePercentage] = useState('2')
@@ -752,22 +753,40 @@ export function SaleConfirmation() {
     }
   }
   
-  // Get unique locations from sales for filter dropdown
-  const uniqueLocations = useMemo(() => {
-    const locations = new Set<string>()
-    sales.forEach(sale => {
-      sale.land_pieces?.forEach((p: any) => {
-        if (p.land_batch?.location) {
-          locations.add(p.land_batch.location)
+  // Fetch unique locations from land_batches for filter dropdown
+  useEffect(() => {
+    const fetchLocations = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('land_batches')
+          .select('location')
+          .not('location', 'is', null)
+        
+        if (error) {
+          console.error('Error fetching locations:', error)
+          return
         }
-      })
-    })
-    return Array.from(locations).sort()
-  }, [sales])
+        
+        const locations = new Set<string>()
+        ;(data || []).forEach((batch: any) => {
+          if (batch.location) {
+            locations.add(batch.location)
+          }
+        })
+        
+        setUniqueLocations(Array.from(locations).sort())
+      } catch (err) {
+        console.error('Error fetching locations:', err)
+      }
+    }
+    
+    fetchLocations()
+  }, [])
 
   // Filter sales based on search and filters - MUST be before any early returns
+  // Maintain sort order: newest first (by created_at, then sale_date)
   const filteredSales = useMemo(() => {
-    return sales.filter(sale => {
+    const filtered = sales.filter(sale => {
       const client = sale.client
       const clientName = client?.name?.toLowerCase() || ''
       const clientPhone = client?.phone?.toLowerCase() || ''
@@ -796,6 +815,21 @@ export function SaleConfirmation() {
       }
       
       return true
+    })
+    
+    // Sort by newest first: created_at DESC, then sale_date DESC
+    return filtered.sort((a, b) => {
+      const dateA = a.created_at ? new Date(a.created_at).getTime() : 0
+      const dateB = b.created_at ? new Date(b.created_at).getTime() : 0
+      
+      if (dateB !== dateA) {
+        return dateB - dateA // Newest first
+      }
+      
+      // If created_at is the same, sort by sale_date
+      const saleDateA = a.sale_date ? new Date(a.sale_date).getTime() : 0
+      const saleDateB = b.sale_date ? new Date(b.sale_date).getTime() : 0
+      return saleDateB - saleDateA // Newest first
     })
   }, [sales, searchTerm, locationFilter])
 
