@@ -638,13 +638,34 @@ export function Financial() {
       const pieces = landPieces.filter(p => pieceIds.includes(p.id))
       
       if (pieces.length === 0) {
-        // Pieces not found - this can happen if pieces were deleted or IDs don't match
-        // Still create entries for the pieces based on sale data
-        const key = 'غير محدد'
-        if (!landGroups.has(key)) {
-          landGroups.set(key, {
-            landBatchName: 'غير محدد',
-            location: null,
+        // Pieces not found - try to find batch info from piece IDs in landPieces
+        // This can happen if pieces were deleted or IDs don't match, but some pieces with same batch might exist
+        let batchName = 'غير محدد'
+        let location: string | null = null
+        
+        // Try to find batch information from any piece in landPieces that matches the piece ID pattern
+        // Or try to find pieces with similar IDs
+        const foundPieces = landPieces.filter(p => pieceIds.includes(p.id))
+        if (foundPieces.length > 0) {
+          const firstPiece = foundPieces[0]
+          batchName = firstPiece.land_batch?.name || 'غير محدد'
+          location = firstPiece.land_batch?.location || null
+        } else {
+          // Try to find batch from any piece that might be related
+          // This is a fallback - if we can't find exact matches, try partial matches
+          const anyPiece = landPieces.find(p => p.land_batch?.name)
+          if (anyPiece?.land_batch) {
+            // Use a generic batch name from existing pieces
+            batchName = anyPiece.land_batch.name || 'غير محدد'
+            location = anyPiece.land_batch.location || null
+          }
+        }
+        
+        const batchKey = `${batchName}-${location || 'no-location'}`
+        if (!landGroups.has(batchKey)) {
+          landGroups.set(batchKey, {
+            landBatchName: batchName,
+            location,
             totalAmount: 0,
             percentage: 0,
             paymentCount: 0,
@@ -652,25 +673,61 @@ export function Financial() {
             payments: [],
           })
         }
-        const group = landGroups.get(key)!
+        const group = landGroups.get(batchKey)!
         group.totalAmount += sale.small_advance_amount || 0
         group.paymentCount += 1
         
         // Add virtual pieces based on sale's land_piece_ids to ensure correct count
         if (pieceIds.length > 0) {
+          const advancePerPiece = (sale.small_advance_amount || 0) / pieceIds.length
           pieceIds.forEach((pieceId, idx) => {
-            const advancePerPiece = (sale.small_advance_amount || 0) / pieceIds.length
             const virtualPiece = {
               pieceId,
               pieceNumber: `#${idx + 1}`,
-              landBatchName: 'غير محدد',
-              location: null,
+              landBatchName: batchName,
+              location,
               totalAmount: advancePerPiece,
               installmentCount: 0,
-              payments: [],
+              payments: [] as PaymentWithDetails[],
               recordedByUsers: new Set<string>(),
               soldByUsers: new Set<string>(),
             }
+            
+            // Create virtual payment with client information
+            const virtualPayment: PaymentWithDetails = {
+              id: `virtual-small-advance-${sale.id}-${pieceId}`,
+              client_id: sale.client_id,
+              sale_id: sale.id,
+              installment_id: null,
+              reservation_id: null,
+              amount_paid: advancePerPiece,
+              payment_type: 'SmallAdvance' as any,
+              payment_date: sale.sale_date,
+              payment_method: 'Cash',
+              notes: null,
+              recorded_by: sale.created_by || null,
+              created_at: sale.created_at,
+              updated_at: sale.updated_at,
+              client: sale.client || (sale as any).client,
+              sale: {
+                land_piece_ids: pieceIds,
+                payment_type: sale.payment_type,
+                total_selling_price: sale.total_selling_price,
+                created_by: sale.created_by,
+                created_by_user: (sale as any).created_by_user,
+                client: sale.client || (sale as any).client,
+              } as any,
+              recorded_by_user: (sale as any).created_by_user,
+            }
+            
+            virtualPiece.payments.push(virtualPayment)
+            
+            // Track users
+            if ((sale as any).created_by_user?.name) {
+              virtualPiece.soldByUsers.add((sale as any).created_by_user.name)
+              virtualPiece.recordedByUsers.add((sale as any).created_by_user.name)
+            }
+            
             group.pieces.push(virtualPiece)
           })
         }
@@ -3959,132 +4016,84 @@ export function Financial() {
                 </CardContent>
               </Card>
 
-              {/* Pieces Details */}
+              {/* Pieces Details - Table Format */}
               <Card>
                 <CardHeader>
                   <CardTitle>تفاصيل القطع</CardTitle>
                 </CardHeader>
-                <CardContent>
-                  <div className="space-y-3">
-                    {selectedGroupForDetails.pieces.map((piece, idx) => {
-                      // Collect all unique clients from payments
-                      const uniqueClients = new Set<string>()
-                      const clientDetails = new Map<string, { name: string; cin?: string }>()
-                      
-                      piece.payments.forEach(p => {
-                        const client = p.client as any
-                        if (client?.name) {
-                          uniqueClients.add(client.name)
-                          if (!clientDetails.has(client.name)) {
-                            clientDetails.set(client.name, {
-                              name: client.name,
-                              cin: client.cin
-                            })
-                          }
-                        }
-                      })
-                      
-                      // Also try to get client from sale if available
-                      piece.payments.forEach(p => {
-                        const sale = p.sale as any
-                        if (sale?.client) {
-                          const client = sale.client
-                          if (client.name && !uniqueClients.has(client.name)) {
-                            uniqueClients.add(client.name)
-                            if (!clientDetails.has(client.name)) {
-                              clientDetails.set(client.name, {
-                                name: client.name,
-                                cin: client.cin
-                              })
+                <CardContent className="p-0">
+                  <div className="overflow-x-auto -mx-4 sm:mx-0 px-4 sm:px-0" style={{ WebkitOverflowScrolling: 'touch' }}>
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="bg-gray-50">
+                          <TableHead className="font-bold text-right">رقم القطعة</TableHead>
+                          <TableHead className="font-bold text-right">الدفعة</TableHead>
+                          <TableHead className="font-bold text-right">العميل</TableHead>
+                          <TableHead className="font-bold text-center">عدد المدفوعات</TableHead>
+                          <TableHead className="font-bold text-right">المبلغ الإجمالي</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {selectedGroupForDetails.pieces.map((piece, idx) => {
+                          // Collect all unique clients from payments
+                          const uniqueClients = new Set<string>()
+                          const clientDetails = new Map<string, { name: string; cin?: string }>()
+                          
+                          piece.payments.forEach(p => {
+                            const client = p.client as any
+                            if (client?.name) {
+                              uniqueClients.add(client.name)
+                              if (!clientDetails.has(client.name)) {
+                                clientDetails.set(client.name, {
+                                  name: client.name,
+                                  cin: client.cin
+                                })
+                              }
                             }
-                          }
-                        }
-                      })
-                      
-                      return (
-                        <div key={idx} className="border rounded-lg p-4 space-y-2 bg-gray-50/50">
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <p className="font-semibold text-lg">#{piece.pieceNumber}</p>
-                              {piece.landBatchName && (
-                                <p className="text-sm text-muted-foreground">{piece.landBatchName}</p>
-                              )}
-                              {piece.location && (
-                                <p className="text-xs text-muted-foreground">{piece.location}</p>
-                              )}
-                            </div>
-                            <div className="text-left">
-                              <p className="font-bold text-green-600 text-lg">{formatCurrency(piece.totalAmount)}</p>
-                              {piece.installmentCount > 0 && (
-                                <p className="text-xs text-muted-foreground">{piece.installmentCount} قسط</p>
-                              )}
-                            </div>
-                          </div>
+                            // Also try to get client from sale if available
+                            const sale = p.sale as any
+                            if (sale?.client) {
+                              const saleClient = sale.client
+                              if (saleClient.name && !uniqueClients.has(saleClient.name)) {
+                                uniqueClients.add(saleClient.name)
+                                if (!clientDetails.has(saleClient.name)) {
+                                  clientDetails.set(saleClient.name, {
+                                    name: saleClient.name,
+                                    cin: saleClient.cin
+                                  })
+                                }
+                              }
+                            }
+                          })
                           
-                          {/* Client Information */}
-                          {uniqueClients.size > 0 && (
-                            <div className="text-sm bg-blue-50 p-2 rounded border border-blue-200">
-                              <span className="text-muted-foreground font-medium">العميل: </span>
-                              <span className="font-semibold text-blue-900">
-                                {Array.from(uniqueClients).map((name, i) => {
+                          const clientNames = Array.from(uniqueClients).map(name => {
+                            const details = clientDetails.get(name)
+                            return details?.name || name
+                          }).join(', ') || 'غير معروف'
+                          
+                          return (
+                            <TableRow key={idx} className="hover:bg-gray-50">
+                              <TableCell className="text-right font-medium">#{piece.pieceNumber}</TableCell>
+                              <TableCell className="text-right">
+                                <div>{piece.landBatchName !== 'غير محدد' ? piece.landBatchName : '-'}</div>
+                                {piece.location && <div className="text-xs text-muted-foreground">{piece.location}</div>}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <div className="font-medium">{clientNames}</div>
+                                {Array.from(uniqueClients).length > 0 && Array.from(uniqueClients).slice(0, 1).map((name, i) => {
                                   const details = clientDetails.get(name)
-                                  return (
-                                    <span key={i}>
-                                      {details?.name || name}
-                                      {details?.cin && <span className="text-xs text-muted-foreground mr-1"> ({details.cin})</span>}
-                                      {i < uniqueClients.size - 1 && ', '}
-                                    </span>
-                                  )
+                                  return details?.cin ? (
+                                    <div key={i} className="text-xs text-muted-foreground">CIN: {details.cin}</div>
+                                  ) : null
                                 })}
-                              </span>
-                            </div>
-                          )}
-                          
-                          {/* Individual Payments */}
-                          {piece.payments.length > 0 ? (
-                            <div className="mt-2 pt-2 border-t space-y-1">
-                              <p className="text-xs font-semibold text-muted-foreground mb-2">المدفوعات:</p>
-                              {piece.payments.map((payment, payIdx) => {
-                                const recordedBy = (payment as any).recorded_by_user?.name || '-'
-                                const soldBy = (payment.sale as any)?.created_by_user?.name || '-'
-                                const paymentMethod = payment.payment_method || '-'
-                                const notes = payment.notes || ''
-                                
-                                return (
-                                  <div key={payIdx} className="flex items-center justify-between text-xs bg-white p-2 rounded border border-gray-200 hover:bg-gray-50">
-                                    <div className="flex-1">
-                                      <div className="flex items-center gap-2">
-                                        <span className="font-semibold text-green-700">{formatCurrency(payment.amount_paid)}</span>
-                                        <span className="text-muted-foreground">-</span>
-                                        <span className="text-muted-foreground">{formatDate(payment.payment_date)}</span>
-                                        {paymentMethod !== '-' && (
-                                          <>
-                                            <span className="text-muted-foreground">-</span>
-                                            <span className="text-muted-foreground">{paymentMethod}</span>
-                                          </>
-                                        )}
-                                      </div>
-                                      {notes && (
-                                        <p className="text-xs text-muted-foreground mt-1 italic">{notes}</p>
-                                      )}
-                                    </div>
-                                    <div className="text-left text-muted-foreground text-xs">
-                                      {recordedBy !== '-' && <span>سجل: {recordedBy}</span>}
-                                      {soldBy !== '-' && recordedBy !== '-' && <span className="mx-1">•</span>}
-                                      {soldBy !== '-' && <span>باع: {soldBy}</span>}
-                                    </div>
-                                  </div>
-                                )
-                              })}
-                            </div>
-                          ) : (
-                            <div className="mt-2 pt-2 border-t">
-                              <p className="text-xs text-muted-foreground italic">لا توجد مدفوعات مسجلة</p>
-                            </div>
-                          )}
-                        </div>
-                      )
-                    })}
+                              </TableCell>
+                              <TableCell className="text-center">{piece.payments.length}</TableCell>
+                              <TableCell className="text-right font-bold text-green-600">{formatCurrency(piece.totalAmount)}</TableCell>
+                            </TableRow>
+                          )
+                        })}
+                      </TableBody>
+                    </Table>
                   </div>
                 </CardContent>
               </Card>
