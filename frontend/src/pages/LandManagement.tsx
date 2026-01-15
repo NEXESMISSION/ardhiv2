@@ -3586,11 +3586,13 @@ export function LandManagement() {
     let available = 0
     let reserved = 0
     let sold = 0
+    let totalArea = 0
     
     batches.forEach((batch) => {
       if (batch.land_pieces) {
         batch.land_pieces.forEach((piece: LandPiece) => {
           total++
+          totalArea += parseFloat(piece.surface_area?.toString() || '0') || 0
           if (piece.status === 'Available') available++
           else if (piece.status === 'Reserved') reserved++
           else if (piece.status === 'Sold') sold++
@@ -3598,7 +3600,7 @@ export function LandManagement() {
       }
     })
     
-    return { total, available, reserved, sold }
+    return { total, available, reserved, sold, totalArea }
   }, [batches])
 
   const filteredBatches = batches
@@ -4377,6 +4379,13 @@ export function LandManagement() {
             <div className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-50 rounded-lg border border-gray-200">
               <span className="text-sm text-muted-foreground">إجمالي القطع:</span>
               <span className="text-sm font-semibold text-gray-900">{statistics.total}</span>
+              {profile?.role === 'Owner' && (
+                <>
+                  <span className="text-sm text-muted-foreground mr-2">•</span>
+                  <span className="text-sm text-muted-foreground">إجمالي المساحات:</span>
+                  <span className="text-sm font-semibold text-gray-900">{Math.round(statistics.totalArea).toLocaleString()} م²</span>
+                </>
+              )}
             </div>
             <div className="flex items-center gap-1.5 px-3 py-1.5 bg-green-50 rounded-lg border border-green-200">
               <span className="text-sm text-muted-foreground">متاح:</span>
@@ -4432,6 +4441,13 @@ export function LandManagement() {
             <div className="flex items-center gap-1 px-2.5 py-1 bg-gray-50 rounded-lg border border-gray-200">
               <span className="text-xs text-muted-foreground">إجمالي:</span>
               <span className="text-xs font-semibold text-gray-900">{statistics.total}</span>
+              {profile?.role === 'Owner' && (
+                <>
+                  <span className="text-xs text-muted-foreground mr-1">•</span>
+                  <span className="text-xs text-muted-foreground">إجمالي المساحات:</span>
+                  <span className="text-xs font-semibold text-gray-900">{Math.round(statistics.totalArea).toLocaleString()} م²</span>
+                </>
+              )}
             </div>
             <div className="flex items-center gap-1 px-2.5 py-1 bg-green-50 rounded-lg border border-green-200">
               <span className="text-xs text-muted-foreground">متاح:</span>
