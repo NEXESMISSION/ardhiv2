@@ -4416,14 +4416,7 @@ export function LandManagement() {
           <div className="flex items-center gap-3 flex-wrap">
             <div className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-50 rounded-lg border border-gray-200">
               <span className="text-sm text-muted-foreground">إجمالي القطع:</span>
-              <span className="text-sm font-semibold text-gray-900">{statistics.total}</span>
-              {statistics.total > 0 && (
-                <>
-                  <span className="text-sm text-muted-foreground mr-2">•</span>
-                  <span className="text-sm text-muted-foreground">متوسط القطعة:</span>
-                  <span className="text-sm font-semibold text-gray-900">{Math.round(statistics.totalArea / statistics.total).toLocaleString()} م²</span>
-                </>
-              )}
+              <span className="text-sm font-semibold text-gray-900">{statistics.total} قطعة</span>
               {profile?.role === 'Owner' && (
                 <>
                   <span className="text-sm text-muted-foreground mr-2">•</span>
@@ -4485,14 +4478,7 @@ export function LandManagement() {
           <div className="flex items-center gap-2 flex-wrap">
             <div className="flex items-center gap-1 px-2.5 py-1 bg-gray-50 rounded-lg border border-gray-200">
               <span className="text-xs text-muted-foreground">إجمالي:</span>
-              <span className="text-xs font-semibold text-gray-900">{statistics.total}</span>
-              {statistics.total > 0 && (
-                <>
-                  <span className="text-xs text-muted-foreground mr-1">•</span>
-                  <span className="text-xs text-muted-foreground">متوسط:</span>
-                  <span className="text-xs font-semibold text-gray-900">{Math.round(statistics.totalArea / statistics.total).toLocaleString()} م²</span>
-                </>
-              )}
+              <span className="text-xs font-semibold text-gray-900">{statistics.total} قطعة</span>
               {profile?.role === 'Owner' && (
                 <>
                   <span className="text-xs text-muted-foreground mr-1">•</span>
