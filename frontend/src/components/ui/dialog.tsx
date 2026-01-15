@@ -174,6 +174,9 @@ const DialogContent = React.forwardRef<
 
   // Check if this is a notification dialog (has data-notification attribute)
   const isNotificationDialog = className?.includes('notification-dialog')
+  // Check if this is a confirm dialog (needs higher z-index to appear on top)
+  const isConfirmDialog = className?.includes('confirm-dialog-high-z')
+  const zIndexClass = isConfirmDialog ? 'z-[110]' : 'z-[100]'
   
   // Prevent all events from propagating to overlay (which would close the dialog)
   const handleClick = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -197,9 +200,9 @@ const DialogContent = React.forwardRef<
 
   return (
     <DialogPortal>
-      <DialogOverlay preventClose={preventClose} />
+      <DialogOverlay preventClose={preventClose} className={isConfirmDialog ? 'z-[110]' : undefined} />
       <div className={cn(
-        "fixed inset-0 z-[100] flex items-center justify-center p-2 sm:p-4",
+        `fixed inset-0 ${zIndexClass} flex items-center justify-center p-2 sm:p-4`,
         isNotificationDialog && "md:items-start md:justify-start md:left-[16rem] md:right-auto md:top-4 md:inset-auto md:p-0"
       )}>
       <div

@@ -38,7 +38,7 @@ export function ConfirmDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent 
         preventClose={disabled}
-        className="bg-white border-2 border-[#2563eb] rounded-[16px] p-[22px_26px] max-w-[440px] shadow-[0_24px_48px_rgba(0,0,0,0.45)]"
+        className="confirm-dialog-high-z bg-white border-2 border-[#2563eb] rounded-[16px] p-[22px_26px] max-w-[440px] shadow-[0_24px_48px_rgba(0,0,0,0.45)]"
       >
         <DialogFooter className="flex justify-end gap-[10px] mb-4 pb-4 border-b">
           <Button 
