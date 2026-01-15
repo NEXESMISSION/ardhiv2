@@ -638,6 +638,8 @@ export function Financial() {
       const pieces = landPieces.filter(p => pieceIds.includes(p.id))
       
       if (pieces.length === 0) {
+        // Pieces not found - this can happen if pieces were deleted or IDs don't match
+        // Still create entries for the pieces based on sale data
         const key = 'غير محدد'
         if (!landGroups.has(key)) {
           landGroups.set(key, {
@@ -653,6 +655,25 @@ export function Financial() {
         const group = landGroups.get(key)!
         group.totalAmount += sale.small_advance_amount || 0
         group.paymentCount += 1
+        
+        // Add virtual pieces based on sale's land_piece_ids to ensure correct count
+        if (pieceIds.length > 0) {
+          pieceIds.forEach((pieceId, idx) => {
+            const advancePerPiece = (sale.small_advance_amount || 0) / pieceIds.length
+            const virtualPiece = {
+              pieceId,
+              pieceNumber: `#${idx + 1}`,
+              landBatchName: 'غير محدد',
+              location: null,
+              totalAmount: advancePerPiece,
+              installmentCount: 0,
+              payments: [],
+              recordedByUsers: new Set<string>(),
+              soldByUsers: new Set<string>(),
+            }
+            group.pieces.push(virtualPiece)
+          })
+        }
       } else {
         // Group by land batch - each sale contributes to one or more batches
         const batchGroups = new Map<string, { batchName: string; location: string | null; pieces: typeof pieces }>()
