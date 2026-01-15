@@ -1612,19 +1612,23 @@ export function Financial() {
       
       const pieceIds = payment.sale?.land_piece_ids || sale.land_piece_ids || []
       const pieces = landPieces.filter(p => pieceIds.includes(p.id))
+      
       if (pieces.length === 0) {
-        // If pieces not found, add to "غير محدد" place
+        // If no pieces found, add to "غير محدد" place
         const place = 'غير محدد'
         switch (payment.payment_type) {
           case 'Installment':
             addToPlace(place, payment.amount_paid, 'installment')
             break
           case 'SmallAdvance':
+            // Always add SmallAdvance payments (for both confirmed and unconfirmed sales)
+            // Only skip if already counted from sales table
             if (!(sale.small_advance_amount && sale.small_advance_amount > 0)) {
               addToPlace(place, payment.amount_paid, 'smallAdvance')
             }
             break
           case 'BigAdvance':
+            // Only add if not already counted from sales table
             if (!(sale.big_advance_amount && sale.big_advance_amount > 0)) {
               addToPlace(place, payment.amount_paid, 'bigAdvance')
             }
