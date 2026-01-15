@@ -1531,8 +1531,8 @@ export function Installments() {
         
         // Get contract editor from first installment's sale
         const contractEditor = sale.installments[0]?.sale?.contract_editor || null
-        const createdByUser = sale.installments[0]?.sale?.created_by_user || null
-        const confirmedByUser = sale.installments[0]?.sale?.confirmed_by_user || null
+        const createdByUser = (sale.installments[0]?.sale as any)?.created_by_user || null
+        const confirmedByUser = (sale.installments[0]?.sale as any)?.confirmed_by_user || null
         
         deals.push({
           saleId: sale.saleId,
