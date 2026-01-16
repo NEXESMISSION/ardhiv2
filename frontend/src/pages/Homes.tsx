@@ -27,12 +27,12 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
-import { sanitizeText, sanitizeNotes } from '@/lib/sanitize'
+import { sanitizeText, sanitizeNotes, sanitizeCIN, sanitizePhone } from '@/lib/sanitize'
 import { showNotification } from '@/components/ui/notification'
 import { debounce } from '@/lib/throttle'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { validatePermissionServerSide } from '@/lib/permissionValidation'
-import { Plus, Edit, Trash2, ShoppingCart, X, AlertTriangle } from 'lucide-react'
+import { Plus, Edit, Trash2, ShoppingCart, X, AlertTriangle, CheckCircle, XCircle } from 'lucide-react'
 import type { House, LandStatus, Client, PaymentOffer } from '@/types/database'
 
 const statusColors: Record<LandStatus, 'success' | 'warning' | 'default' | 'secondary'> = {
@@ -69,6 +69,9 @@ export function Homes() {
   
   // Payment offer form for installment price calculation
   const [showOfferForm, setShowOfferForm] = useState(false)
+  const [houseOffers, setHouseOffers] = useState<PaymentOffer[]>([]) // List of offers for the current house
+  const [editingOffer, setEditingOffer] = useState<PaymentOffer | null>(null) // Currently editing offer
+  const [offerDialogOpen, setOfferDialogOpen] = useState(false) // Separate dialog for offer editing
   const [offerForm, setOfferForm] = useState({
     company_fee_percentage: '',
     advance_amount: '',
@@ -106,10 +109,9 @@ export function Homes() {
   const [selectedOffer, setSelectedOffer] = useState<PaymentOffer | null>(null)
   const [savingClient, setSavingClient] = useState(false)
   const [creatingSale, setCreatingSale] = useState(false)
-  const [saleClientCIN, setSaleClientCIN] = useState('')
-  const [saleClientSearchStatus, setSaleClientSearchStatus] = useState<'idle' | 'searching' | 'found' | 'not_found'>('idle')
-  const [saleClientSearching, setSaleClientSearching] = useState(false)
-  const [saleClientFound, setSaleClientFound] = useState<Client | null>(null)
+  const [searchingClient, setSearchingClient] = useState(false)
+  const [foundClient, setFoundClient] = useState<Client | null>(null)
+  const [clientSearchStatus, setClientSearchStatus] = useState<'idle' | 'searching' | 'found' | 'not_found'>('idle')
 
   // Debounced search
   const debouncedSearchFn = useCallback(
@@ -117,42 +119,66 @@ export function Homes() {
     []
   )
 
-  // Debounced CIN search for sale form
-  const debouncedSaleCINSearch = useCallback(
+  // Debounced CIN search for client dialog
+  const debouncedCINSearch = useCallback(
     debounce(async (cin: string) => {
       if (!cin || cin.trim().length < 2) {
-        setSaleClientFound(null)
-        setSaleClientSearchStatus('idle')
+        setFoundClient(null)
+        setClientSearchStatus('idle')
         return
       }
 
-      const { data, error } = await supabase
-        .from('clients')
-        .select('*')
-        .eq('cin', cin)
-        .maybeSingle()
+      const sanitizedCIN = sanitizeCIN(cin)
+      if (!sanitizedCIN || sanitizedCIN.length < 2) {
+        setFoundClient(null)
+        setClientSearchStatus('idle')
+        return
+      }
 
-      if (!error && data) {
-        setSaleClientFound(data)
-        setSaleClientSearchStatus('found')
-        setNewClient(data)
-      } else {
-        setSaleClientFound(null)
-        if (cin.length >= 4) {
-          setSaleClientSearchStatus('not_found')
+      setSearchingClient(true)
+      setClientSearchStatus('searching')
+      try {
+        const { data, error } = await supabase
+          .from('clients')
+          .select('*')
+          .eq('cin', sanitizedCIN)
+          .maybeSingle()
+
+        if (!error && data) {
+          setFoundClient(data)
+          setClientSearchStatus('found')
+          // Auto-fill form with found client data
+          setClientForm({
+            name: data.name,
+            cin: data.cin,
+            phone: data.phone || '',
+            email: data.email || '',
+            address: data.address || '',
+            client_type: data.client_type,
+            notes: data.notes || '',
+          })
+          setNewClient(data) // Set as selected client
         } else {
-          setSaleClientSearchStatus('idle')
+          setFoundClient(null)
+          if (sanitizedCIN.length >= 4) {
+            setClientSearchStatus('not_found')
+          } else {
+            setClientSearchStatus('idle')
+          }
         }
+      } catch (error) {
+        setFoundClient(null)
+        if (sanitizedCIN.length >= 4) {
+          setClientSearchStatus('not_found')
+        } else {
+          setClientSearchStatus('idle')
+        }
+      } finally {
+        setSearchingClient(false)
       }
     }, 400),
     []
   )
-
-  useEffect(() => {
-    if (saleClientCIN) {
-      debouncedSaleCINSearch(saleClientCIN)
-    }
-  }, [saleClientCIN, debouncedSaleCINSearch])
 
   useEffect(() => {
     if (searchTerm !== debouncedSearchTerm) {
@@ -163,6 +189,17 @@ export function Homes() {
   useEffect(() => {
     fetchHouses()
   }, [])
+
+  // Auto-select offer when sale dialog opens and payment type is Installment
+  useEffect(() => {
+    if (saleDialogOpen && saleForm.payment_type === 'Installment' && availableOffers.length > 0 && !selectedOffer) {
+      const defaultOffer = availableOffers.find(o => o.is_default) || availableOffers[0]
+      if (defaultOffer) {
+        setSelectedOffer(defaultOffer)
+        setSaleForm(prev => ({ ...prev, selected_offer_id: defaultOffer.id }))
+      }
+    }
+  }, [saleDialogOpen, saleForm.payment_type, availableOffers, selectedOffer])
 
   const fetchHouses = async () => {
     setLoading(true)
@@ -200,50 +237,103 @@ export function Homes() {
 
   // Calculate installment price from offer details
   const calculateInstallmentPrice = useCallback(() => {
-    if (!houseForm.price_full) return
+    if (!houseForm.price_installment || !showOfferForm) return
     
-    const priceFull = parseFloat(houseForm.price_full)
-    if (isNaN(priceFull) || priceFull <= 0) return
+    // Use the manually set installment price as the base
+    const installmentPrice = parseFloat(houseForm.price_installment)
+    if (isNaN(installmentPrice) || installmentPrice <= 0) return
     
+    const priceFull = houseForm.price_full ? parseFloat(houseForm.price_full) : 0
+    
+    // Calculate advance amount (for display and calculation of remaining amount)
     const advanceAmount = offerForm.advance_amount 
       ? (offerForm.advance_is_percentage 
           ? (priceFull * parseFloat(offerForm.advance_amount)) / 100
           : parseFloat(offerForm.advance_amount))
       : 0
     
-    const companyFeePercentage = houseForm.company_fee_percentage 
-      ? parseFloat(houseForm.company_fee_percentage) 
-      : 0
-    const companyFee = (priceFull * companyFeePercentage) / 100
+    // Remaining amount for installments = Installment price - Advance
+    // This is what will be paid in monthly installments
+    const remainingForInstallments = installmentPrice - advanceAmount
     
-    let remainingForInstallments = priceFull - advanceAmount
+    // Removed excessive logging - only log when calculation method is set
+    if (offerForm.calculation_method) {
+      console.log('[calculateInstallmentPrice] Calculation:', {
+        installmentPrice,
+        advanceAmount,
+        remainingForInstallments,
+        calculationMethod: offerForm.calculation_method
+      })
+    }
     
+    // Calculate monthly payment or number of months based on remaining amount
     if (offerForm.calculation_method === 'monthly' && offerForm.monthly_payment) {
       const monthlyPayment = parseFloat(offerForm.monthly_payment)
       if (monthlyPayment > 0 && remainingForInstallments > 0) {
+        // Calculate number of months needed based on remaining amount (after advance)
         const numberOfMonths = Math.ceil(remainingForInstallments / monthlyPayment)
-        const totalInstallments = monthlyPayment * numberOfMonths
-        const calculatedPrice = advanceAmount + totalInstallments + companyFee
-        setHouseForm(prev => ({ ...prev, price_installment: calculatedPrice.toFixed(2) }))
+        
+        console.log('[calculateInstallmentPrice] Monthly calculation:', {
+          monthlyPayment,
+          numberOfMonths,
+          remainingForInstallments,
+          breakdown: {
+            installmentPrice: installmentPrice,
+            advance: advanceAmount,
+            remaining: remainingForInstallments,
+            monthlyPayment: monthlyPayment,
+            numberOfMonths: numberOfMonths
+          }
+        })
+        
         setOfferForm(prev => ({ ...prev, number_of_months: numberOfMonths.toString() }))
+      } else if (monthlyPayment > 0 && remainingForInstallments <= 0) {
+        // If advance covers everything, no installments needed
+        setOfferForm(prev => ({ ...prev, number_of_months: '0' }))
       }
     } else if (offerForm.calculation_method === 'months' && offerForm.number_of_months) {
       const numberOfMonths = parseFloat(offerForm.number_of_months)
       if (numberOfMonths > 0 && remainingForInstallments > 0) {
+        // Calculate monthly payment from remaining amount (after advance)
         const monthlyPayment = remainingForInstallments / numberOfMonths
-        const totalInstallments = monthlyPayment * numberOfMonths
-        const calculatedPrice = advanceAmount + totalInstallments + companyFee
-        setHouseForm(prev => ({ ...prev, price_installment: calculatedPrice.toFixed(2) }))
+        
+        console.log('[calculateInstallmentPrice] Months calculation:', {
+          numberOfMonths,
+          monthlyPayment,
+          remainingForInstallments,
+          breakdown: {
+            installmentPrice: installmentPrice,
+            advance: advanceAmount,
+            remaining: remainingForInstallments,
+            monthlyPayment: monthlyPayment,
+            numberOfMonths: numberOfMonths
+          }
+        })
+        
         setOfferForm(prev => ({ ...prev, monthly_payment: monthlyPayment.toFixed(2) }))
+      } else if (numberOfMonths > 0 && remainingForInstallments <= 0) {
+        // If advance covers everything, no monthly payment needed
+        setOfferForm(prev => ({ ...prev, monthly_payment: '0' }))
       }
     }
-  }, [houseForm.price_full, houseForm.company_fee_percentage, showOfferForm, offerForm.advance_amount, offerForm.advance_is_percentage, offerForm.monthly_payment, offerForm.number_of_months, offerForm.calculation_method])
+  }, [houseForm.price_installment, showOfferForm, offerForm.advance_amount, offerForm.advance_is_percentage, offerForm.monthly_payment, offerForm.number_of_months, offerForm.calculation_method, houseForm.price_full])
 
+  // Calculate monthly payment or number of months when installment price, advance, or calculation method changes
+  // The installment price is manually set by the user and does NOT change automatically
   useEffect(() => {
-    if (houseForm.price_full) {
+    if (houseForm.price_installment && showOfferForm && offerForm.calculation_method) {
       calculateInstallmentPrice()
     }
-  }, [houseForm.price_full, calculateInstallmentPrice])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    houseForm.price_installment,
+    offerForm.advance_amount, 
+    offerForm.advance_is_percentage, 
+    offerForm.monthly_payment, 
+    offerForm.number_of_months, 
+    offerForm.calculation_method,
+    showOfferForm
+  ])
 
   const openHouseDialog = async (house?: House) => {
     if (house) {
@@ -258,34 +348,42 @@ export function Homes() {
         notes: house.notes || '',
       })
       
-      // Load existing offer if any
-      const { data: offers } = await supabase
+      // Load existing offer if any - always fetch from database
+      const { data: offersData, error: offersError } = await supabase
         .from('payment_offers')
         .select('*')
         .eq('house_id', house.id)
         .order('is_default', { ascending: false })
         .order('created_at', { ascending: true })
         .limit(1)
-        .maybeSingle()
       
-      if (offers) {
-        const offer = offers as PaymentOffer
+      if (offersError) {
+        console.error('[openHouseDialog] Error loading offer:', offersError)
+      }
+      
+      const offer = offersData && Array.isArray(offersData) && offersData.length > 0 
+        ? offersData[0] as PaymentOffer
+        : null
+      
+      if (offer) {
+        // Load offer data into form
         setOfferForm({
           company_fee_percentage: '', // Not used in offer form anymore
-          advance_amount: offer.advance_amount?.toString() || '',
+          advance_amount: offer.advance_amount ? offer.advance_amount.toString() : '',
           advance_is_percentage: offer.advance_is_percentage || false,
-          monthly_payment: offer.monthly_payment?.toString() || '',
-          number_of_months: offer.number_of_months?.toString() || '',
-          calculation_method: offer.monthly_payment && offer.monthly_payment > 0 ? 'monthly' : 'months',
+          monthly_payment: offer.monthly_payment ? offer.monthly_payment.toString() : '',
+          number_of_months: offer.number_of_months ? offer.number_of_months.toString() : '',
+          calculation_method: (offer.monthly_payment && offer.monthly_payment > 0) ? 'monthly' : 'months',
           offer_name: offer.offer_name || '',
           notes: offer.notes || '',
           is_default: offer.is_default || false,
         })
         setShowOfferForm(true)
       } else {
+        // No offer found, reset form
         setShowOfferForm(true) // Always show offer form
         setOfferForm({
-          company_fee_percentage: '', // Not used
+          company_fee_percentage: '',
           advance_amount: '',
           advance_is_percentage: false,
           monthly_payment: '',
@@ -343,7 +441,11 @@ export function Homes() {
         price_installment: parseFloat(houseForm.price_installment),
         company_fee_percentage: houseForm.company_fee_percentage ? parseFloat(houseForm.company_fee_percentage) : null,
         notes: houseForm.notes ? sanitizeNotes(houseForm.notes) : null,
-        created_by: user?.id || null,
+      }
+      
+      // Only set created_by for new houses, not when updating
+      if (!editingHouse) {
+        houseData.created_by = user?.id || null
       }
 
       console.log('[saveHouse] Prepared house data:', houseData)
@@ -353,26 +455,105 @@ export function Homes() {
 
       if (editingHouse) {
         console.log('[saveHouse] Updating existing house:', editingHouse.id)
-        const { data, error } = await supabase
+        console.log('[saveHouse] Update data:', JSON.stringify(houseData, null, 2))
+        console.log('[saveHouse] User role check:', { userId: user?.id, profile: profile })
+        
+        // First, check if we can see the house before update
+        const { data: beforeUpdate, error: beforeError } = await supabase
+          .from('houses')
+          .select('id, name, created_by')
+          .eq('id', editingHouse.id)
+          .single()
+        
+        console.log('[saveHouse] Before update - can we see the house?', { 
+          data: beforeUpdate, 
+          dataId: beforeUpdate?.id,
+          dataCreatedBy: beforeUpdate?.created_by,
+          error: beforeError,
+          errorMessage: beforeError?.message,
+          errorCode: beforeError?.code
+        })
+        
+        // Try update - if select doesn't work, we'll check separately
+        const { error: updateError } = await supabase
           .from('houses')
           .update(houseData)
           .eq('id', editingHouse.id)
+        
+        if (updateError) {
+          console.error('[saveHouse] Update error:', updateError)
+          throw updateError
+        }
+        
+        // Check if update was successful by querying the house
+        const { data: updateData, error: selectError } = await supabase
+          .from('houses')
           .select('id')
+          .eq('id', editingHouse.id)
           .single()
         
-        console.log('[saveHouse] Update response - data:', data, 'error:', error)
+        if (selectError) {
+          console.error('[saveHouse] Select error after update:', selectError)
+          throw selectError
+        }
         
-        if (error) {
-          console.error('[saveHouse] Update error:', error)
-          throw error
-        }
-        if (!data) {
+        if (!updateData) {
           console.error('[saveHouse] Update failed - no data returned')
-          throw new Error('فشل في تحديث المنزل: لم يتم إرجاع بيانات')
+          console.error('[saveHouse] This might be an RLS issue. Checking if house exists...')
+          
+          // Check if house still exists and if we can see it
+          const { data: checkData, error: checkError } = await supabase
+            .from('houses')
+            .select('id, name, created_by')
+            .eq('id', editingHouse.id)
+            .single()
+          
+          console.log('[saveHouse] House existence check after update:', { 
+            data: checkData, 
+            dataId: checkData?.id,
+            dataCreatedBy: checkData?.created_by,
+            error: checkError,
+            errorMessage: checkError?.message,
+            errorCode: checkError?.code,
+            errorDetails: checkError?.details,
+            errorHint: checkError?.hint
+          })
+          
+          // Try to get the house without single to see if it exists
+          const { data: checkDataArray, error: checkErrorArray } = await supabase
+            .from('houses')
+            .select('id, name, created_by')
+            .eq('id', editingHouse.id)
+          
+          console.log('[saveHouse] House existence check (array):', { 
+            data: checkDataArray, 
+            dataLength: checkDataArray?.length,
+            dataIsArray: Array.isArray(checkDataArray),
+            error: checkErrorArray,
+            errorMessage: checkErrorArray?.message,
+            errorCode: checkErrorArray?.code
+          })
+          
+          // Try to get ALL houses to see if we can see any
+          const { data: allHouses, error: allHousesError } = await supabase
+            .from('houses')
+            .select('id, name, created_by')
+            .limit(5)
+          
+          console.log('[saveHouse] Can we see any houses?', { 
+            data: allHouses, 
+            dataLength: allHouses?.length,
+            error: allHousesError,
+            errorMessage: allHousesError?.message
+          })
+          
+          throw new Error('فشل في تحديث المنزل: لم يتم إرجاع بيانات. قد تكون هناك مشكلة في صلاحيات قاعدة البيانات (RLS).')
         }
+        
+        // Handle both array and single object responses
+        const data = Array.isArray(updateData) ? updateData[0] : updateData
         houseId = data.id
         console.log('[saveHouse] House updated successfully, ID:', houseId)
-        showNotification(t('homes.houseUpdatedSuccess'), 'success')
       } else {
         console.log('[saveHouse] Creating new house...')
         console.log('[saveHouse] Attempting insert with data:', JSON.stringify(houseData, null, 2))
@@ -464,21 +645,38 @@ export function Homes() {
 
       // Save payment offer if offer form is filled
       if (showOfferForm && (offerForm.monthly_payment || offerForm.number_of_months)) {
+        console.log('[saveHouse] Saving payment offer...', {
+          houseId,
+          monthly_payment: offerForm.monthly_payment,
+          number_of_months: offerForm.number_of_months,
+          advance_amount: offerForm.advance_amount
+        })
+        
+        // Build offer data - only include house_id, exclude land_batch_id and land_piece_id
+        // The constraint requires exactly one of house_id, land_batch_id, or land_piece_id to be non-null
+        // By omitting the null fields, we let the database use their default (null) values
         const offerData: any = {
           house_id: houseId,
-          land_batch_id: null,
-          land_piece_id: null,
-          price_per_m2_installment: null, // Not applicable for houses
+          // Explicitly DO NOT include land_batch_id or land_piece_id - let them be null by default
           company_fee_percentage: houseForm.company_fee_percentage ? parseFloat(houseForm.company_fee_percentage) : 0,
           advance_amount: offerForm.advance_amount ? parseFloat(offerForm.advance_amount) : 0,
           advance_is_percentage: offerForm.advance_is_percentage,
-          monthly_payment: offerForm.monthly_payment ? parseFloat(offerForm.monthly_payment) : 0,
+          monthly_payment: offerForm.monthly_payment ? parseFloat(offerForm.monthly_payment) : null,
           number_of_months: offerForm.number_of_months ? parseInt(offerForm.number_of_months) : null,
           offer_name: offerForm.offer_name.trim() || null,
           notes: offerForm.notes.trim() || null,
           is_default: offerForm.is_default,
           created_by: user?.id || null,
         }
+
+        // Remove null values to avoid constraint issues - Supabase may send null explicitly
+        // which can cause check_reference constraint to fail
+        const cleanedOfferData: any = { ...offerData }
+        // Don't include land_batch_id or land_piece_id at all - let them be null by default
+        delete cleanedOfferData.land_batch_id
+        delete cleanedOfferData.land_piece_id
+        
+        console.log('[saveHouse] Offer data to save:', cleanedOfferData)
 
         // Check if offer already exists for this house
         const { data: existingOffer, error: offerCheckError } = await supabase
@@ -487,6 +685,8 @@ export function Homes() {
           .eq('house_id', houseId)
           .maybeSingle()
 
+        console.log('[saveHouse] Existing offer check:', { existingOffer, error: offerCheckError })
+
         if (offerCheckError) {
           console.error('Error checking existing offer:', offerCheckError)
           // Continue anyway - try to create new offer
@@ -494,24 +694,40 @@ export function Homes() {
 
         if (existingOffer && existingOffer.id) {
           // Update existing offer
-          const { error: updateError } = await supabase
+          console.log('[saveHouse] Updating existing offer:', existingOffer.id)
+          const { data: updatedOffer, error: updateError } = await supabase
             .from('payment_offers')
-            .update(offerData)
+            .update(cleanedOfferData)
             .eq('id', existingOffer.id)
+            .select()
+            .single()
+          
           if (updateError) {
             console.error('Error updating offer:', updateError)
-            // Don't throw - house was saved successfully
+            showNotification('تم حفظ المنزل لكن فشل تحديث العرض', 'warning')
+          } else {
+            console.log('[saveHouse] Offer updated successfully:', updatedOffer)
+            showNotification('تم حفظ المنزل والعرض بنجاح', 'success')
           }
         } else {
           // Create new offer
-          const { error: insertError } = await supabase
+          console.log('[saveHouse] Creating new offer...')
+          const { data: newOffer, error: insertError } = await supabase
             .from('payment_offers')
-            .insert([offerData])
+            .insert([cleanedOfferData])
+            .select()
+            .single()
+          
           if (insertError) {
             console.error('Error creating offer:', insertError)
-            // Don't throw - house was saved successfully
+            showNotification('تم حفظ المنزل لكن فشل إنشاء العرض', 'warning')
+          } else {
+            console.log('[saveHouse] Offer created successfully:', newOffer)
+            showNotification('تم حفظ المنزل والعرض بنجاح', 'success')
           }
         }
+      } else {
+        console.log('[saveHouse] No offer to save - form not filled or no monthly payment/number of months')
       }
 
       setHouseDialogOpen(false)
@@ -565,50 +781,159 @@ export function Homes() {
       promise_initial_payment: '',
     })
     setNewClient(null)
-    setSaleClientCIN('')
-    setSaleClientFound(null)
-    setSaleClientSearchStatus('idle')
+    setFoundClient(null)
+    setClientSearchStatus('idle')
+    setClientForm({
+      name: '',
+      cin: '',
+      phone: '',
+      email: '',
+      address: '',
+      client_type: 'Individual',
+      notes: '',
+    })
 
-    // Fetch offers for this house
-    const { data: offers } = await supabase
+    // Always fetch offers from database to ensure we have the latest data
+    const { data: offers, error: offersError } = await supabase
       .from('payment_offers')
       .select('*')
       .eq('house_id', house.id)
       .order('is_default', { ascending: false })
       .order('created_at', { ascending: true })
-
-    setAvailableOffers((offers as PaymentOffer[]) || [])
-    setSaleDialogOpen(true)
+    
+    if (offersError) {
+      console.error('[openSaleDialog] Error fetching offers:', offersError)
+    }
+    
+    const offersList = (offers as PaymentOffer[]) || []
+    setAvailableOffers(offersList)
+    
+    // Auto-select default offer or first offer if available
+    if (offersList.length > 0) {
+      const defaultOffer = offersList.find(o => o.is_default) || offersList[0]
+      setSelectedOffer(defaultOffer)
+      setSaleForm(prev => ({ ...prev, selected_offer_id: defaultOffer.id }))
+    } else {
+      setSelectedOffer(null)
+      setSaleForm(prev => ({ ...prev, selected_offer_id: '' }))
+    }
+    
+    // Open client dialog first
+    setClientDialogOpen(true)
   }
 
-  const saveClient = async () => {
-    if (!clientForm.name.trim() || !clientForm.cin.trim()) {
-      setError(t('homes.fillNameAndCIN'))
-      return
-    }
-
+  const handleCreateClient = async () => {
+    if (savingClient) return
+    
     setSavingClient(true)
+    
     try {
+      if (!clientForm.name.trim() || !clientForm.cin.trim() || !clientForm.phone.trim()) {
+        showNotification('يرجى ملء جميع الحقول المطلوبة', 'error')
+        setSavingClient(false)
+        return
+      }
+
+      const sanitizedCIN = sanitizeCIN(clientForm.cin)
+      if (!sanitizedCIN) {
+        showNotification('رقم CIN غير صالح', 'error')
+        setSavingClient(false)
+        return
+      }
+
+      const sanitizedPhone = sanitizePhone(clientForm.phone)
+      
+      // Check for duplicate CIN - if found, use it instead of showing error
+      const { data: existingClients, error: checkError } = await supabase
+        .from('clients')
+        .select('*')
+        .eq('cin', sanitizedCIN)
+        .limit(1)
+
+      if (existingClients && existingClients.length > 0) {
+        const existingClient = existingClients[0]
+        // Client exists - use it instead of creating new one
+        setFoundClient(existingClient)
+        setNewClient(existingClient)
+        setClientForm({
+          name: existingClient.name,
+          cin: existingClient.cin,
+          phone: existingClient.phone || '',
+          email: existingClient.email || '',
+          address: existingClient.address || '',
+          client_type: existingClient.client_type,
+          notes: existingClient.notes || '',
+        })
+        showNotification('تم العثور على عميل موجود. سيتم استخدام بياناته.', 'info')
+        setSavingClient(false)
+        // Close client dialog first
+        setClientDialogOpen(false)
+        // Wait a bit longer to ensure state is updated, then open sale dialog
+        setTimeout(() => {
+          // Double-check that newClient is set, if not, set it again
+          setNewClient(prev => prev || existingClient)
+          setSaleDialogOpen(true)
+        }, 200)
+        return
+      }
+
+      // Create new client
       const { data, error } = await supabase
         .from('clients')
         .insert([{
           name: sanitizeText(clientForm.name),
-          cin: clientForm.cin,
-          phone: clientForm.phone || null,
-          email: clientForm.email || null,
-          address: clientForm.address || null,
+          cin: sanitizedCIN,
+          phone: sanitizedPhone || null,
+          email: clientForm.email ? sanitizeText(clientForm.email) : null,
+          address: clientForm.address ? sanitizeText(clientForm.address) : null,
           client_type: clientForm.client_type,
-          notes: clientForm.notes || null,
+          notes: clientForm.notes ? sanitizeNotes(clientForm.notes) : null,
           created_by: user?.id || null,
         }])
         .select()
         .single()
 
-      if (error) throw error
+      let createdClient = data
       
-      setNewClient(data)
-      setClientDialogOpen(false)
+      // If select() didn't return data (RLS issue), fetch it by CIN
+      if (error || !createdClient) {
+        if (error && !error.message?.includes('permission')) {
+          throw error
+        }
+        
+        // Wait a moment for the insert to complete
+        await new Promise(resolve => setTimeout(resolve, 100))
+        
+        // Fetch the newly created client by CIN
+        const { data: fetchedClient, error: fetchError } = await supabase
+          .from('clients')
+          .select('*')
+          .eq('cin', sanitizedCIN)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single()
+        
+        if (fetchError || !fetchedClient) {
+          throw new Error('تم إنشاء العميل لكن فشل في جلب بياناته. يرجى المحاولة مرة أخرى.')
+        }
+        
+        createdClient = fetchedClient
+      }
+      
+      // Set the new client first
+      setNewClient(createdClient)
+      setFoundClient(createdClient)
       showNotification(t('homes.clientAddedSuccess'), 'success')
+      
+      // Close client dialog first
+      setClientDialogOpen(false)
+      
+      // Wait a bit longer to ensure state is updated, then open sale dialog
+      setTimeout(() => {
+        // Double-check that newClient is set, if not, set it again
+        setNewClient(prev => prev || createdClient)
+        setSaleDialogOpen(true)
+      }, 200)
     } catch (err: any) {
       setError(err.message || t('homes.errorSavingClient'))
       showNotification(t('homes.errorSavingClient') + ': ' + (err.message || t('homes.unknownError')), 'error')
@@ -618,13 +943,22 @@ export function Homes() {
   }
 
   const createSale = async () => {
-    if (!selectedHouse || !newClient) {
+    // Store newClient in a local variable to prevent it from becoming null during execution
+    const currentClient = newClient
+    
+    if (!selectedHouse || !currentClient) {
       setError(t('homes.selectClient'))
+      showNotification('يرجى اختيار عميل أولاً', 'error')
       return
     }
 
     if (!saleForm.reservation_amount || parseFloat(saleForm.reservation_amount) <= 0) {
       setError(t('homes.enterReservationAmount'))
+      return
+    }
+
+    if (!saleForm.deadline_date || saleForm.deadline_date.trim() === '') {
+      showNotification('يرجى إدخال آخر أجل لإتمام الإجراءات', 'error')
       return
     }
 
@@ -641,8 +975,9 @@ export function Homes() {
       const companyFeeAmount = (price * companyFeePercentage) / 100
       
       const saleData: any = {
-        client_id: newClient.id,
-        house_ids: [selectedHouse.id], // Using house_ids instead of land_piece_ids
+        client_id: currentClient.id,
+        land_piece_ids: [], // Empty array for house sales
+        house_ids: [selectedHouse.id], // Using house_ids for house sales
         payment_type: saleForm.payment_type,
         total_purchase_cost: purchaseCost,
         total_selling_price: price,
@@ -653,14 +988,42 @@ export function Homes() {
         company_fee_amount: companyFeeAmount,
         status: 'Pending',
         sale_date: new Date().toISOString().split('T')[0],
-        deadline_date: saleForm.deadline_date || null,
+        deadline_date: saleForm.deadline_date,
         notes: `${t('homes.sellingHouseNote')}: ${selectedHouse.name}`,
         created_by: user?.id || null,
       }
 
       if (saleForm.payment_type === 'Installment' && selectedOffer) {
         saleData.selected_offer_id = selectedOffer.id
-        // Company fee already set above from house (applies to both types)
+        // Calculate installment details
+        const advanceAmount = selectedOffer.advance_is_percentage
+          ? (price * selectedOffer.advance_amount) / 100
+          : selectedOffer.advance_amount
+        
+        // التسبقة = Advance - Reservation (العربون is deducted from التسبقة)
+        const advanceAfterReservation = Math.max(0, advanceAmount - reservationAmount)
+        
+        // Remaining for installments = Price - Advance (after reservation deduction) - Commission
+        const remainingForInstallments = Math.max(0, price - advanceAfterReservation - companyFeeAmount)
+        
+        // Calculate months and monthly payment
+        let numberOfMonths = 0
+        let monthlyAmount = 0
+        
+        if (selectedOffer.monthly_payment && selectedOffer.monthly_payment > 0) {
+          monthlyAmount = selectedOffer.monthly_payment
+          numberOfMonths = remainingForInstallments > 0
+            ? Math.ceil(remainingForInstallments / selectedOffer.monthly_payment)
+            : 0
+        } else if (selectedOffer.number_of_months && selectedOffer.number_of_months > 0) {
+          numberOfMonths = selectedOffer.number_of_months
+          monthlyAmount = remainingForInstallments > 0
+            ? remainingForInstallments / selectedOffer.number_of_months
+            : 0
+        }
+        
+        saleData.number_of_installments = numberOfMonths
+        saleData.monthly_installment_amount = monthlyAmount
       }
 
       const { data: sale, error } = await supabase
@@ -670,34 +1033,122 @@ export function Homes() {
         .single()
 
       if (error) throw error
+      
+      // Check if sale was created successfully
+      if (!sale || !sale.id) {
+        // If select() didn't return data (RLS issue), try fetching it manually
+        await new Promise(resolve => setTimeout(resolve, 100))
+        
+        const { data: fetchedSales, error: fetchError } = await supabase
+          .from('sales')
+          .select('id')
+          .eq('client_id', currentClient.id)
+          .contains('house_ids', [selectedHouse.id])
+          .eq('status', 'Pending')
+          .order('created_at', { ascending: false })
+          .limit(1)
+        
+        if (fetchError || !fetchedSales || fetchedSales.length === 0) {
+          throw new Error('تم إنشاء البيع لكن فشل في جلب بياناته. يرجى التحقق من قاعدة البيانات.')
+        }
+        
+        // Use the fetched sale
+        const saleId = fetchedSales[0].id
+        
+        // Update house status to Reserved
+        const { error: houseError } = await supabase
+          .from('houses')
+          .update({ 
+            status: 'Reserved',
+            reservation_client_id: currentClient.id,
+            reserved_until: saleForm.deadline_date || null,
+          } as any)
+          .eq('id', selectedHouse.id)
+        
+        if (houseError) {
+          // If house update fails, try to delete the sale we just created
+          await supabase.from('sales').delete().eq('id', saleId)
+          throw new Error('فشل في تحديث حالة المنزل: ' + houseError.message)
+        }
 
+        // Create payment record for reservation
+        if (reservationAmount > 0) {
+          const { error: paymentError } = await supabase
+            .from('payments')
+            .insert([{
+              client_id: currentClient.id,
+              sale_id: saleId,
+              amount_paid: reservationAmount,
+              payment_type: 'SmallAdvance',
+              payment_date: new Date().toISOString().split('T')[0],
+              payment_method: 'Cash',
+              recorded_by: user?.id || null,
+            }])
+          
+          if (paymentError) {
+            // If payment creation fails, rollback house status
+            await supabase
+              .from('houses')
+              .update({ status: 'Available', reservation_client_id: null, reserved_until: null } as any)
+              .eq('id', selectedHouse.id)
+            throw new Error('فشل في إنشاء سجل الدفع: ' + paymentError.message)
+          }
+        }
+
+        showNotification(t('homes.saleCreatedSuccess'), 'success')
+        setNewClient(null)
+        setSaleDialogOpen(false)
+        await fetchHouses()
+        navigate(`/sales/confirmation?saleId=${saleId}`)
+        return
+      }
+      
+      // Sale was returned successfully - proceed with house status update and payment
       // Update house status to Reserved
-      await supabase
+      const { error: houseError } = await supabase
         .from('houses')
         .update({ 
           status: 'Reserved',
-          reservation_client_id: newClient.id,
+          reservation_client_id: currentClient.id,
           reserved_until: saleForm.deadline_date || null,
         } as any)
         .eq('id', selectedHouse.id)
+      
+      if (houseError) {
+        // If house update fails, try to delete the sale we just created
+        await supabase.from('sales').delete().eq('id', sale.id)
+        throw new Error('فشل في تحديث حالة المنزل: ' + houseError.message)
+      }
 
       // Create payment record for reservation
-      await supabase
-        .from('payments')
-        .insert([{
-          client_id: newClient.id,
-          sale_id: sale.id,
-          amount_paid: reservationAmount,
-          payment_type: 'SmallAdvance',
-          payment_date: new Date().toISOString().split('T')[0],
-          payment_method: 'Cash',
-          recorded_by: user?.id || null,
-        }])
+      if (reservationAmount > 0) {
+        const { error: paymentError } = await supabase
+          .from('payments')
+          .insert([{
+            client_id: currentClient.id,
+            sale_id: sale.id,
+            amount_paid: reservationAmount,
+            payment_type: 'SmallAdvance',
+            payment_date: new Date().toISOString().split('T')[0],
+            payment_method: 'Cash',
+            recorded_by: user?.id || null,
+          }])
+        
+        if (paymentError) {
+          // If payment creation fails, rollback house status
+          await supabase
+            .from('houses')
+            .update({ status: 'Available', reservation_client_id: null, reserved_until: null } as any)
+            .eq('id', selectedHouse.id)
+          throw new Error('فشل في إنشاء سجل الدفع: ' + paymentError.message)
+        }
+      }
 
       showNotification(t('homes.saleCreatedSuccess'), 'success')
+      setNewClient(null)
       setSaleDialogOpen(false)
       await fetchHouses()
-      navigate('/sales')
+      navigate(`/sales/confirmation?saleId=${sale.id}`)
     } catch (err: any) {
       setError(err.message || t('homes.errorCreatingSale'))
       showNotification(t('homes.errorCreatingSale') + ': ' + (err.message || t('homes.unknownError')), 'error')
@@ -969,10 +1420,20 @@ export function Homes() {
                 <Input
                   type="number"
                   value={houseForm.price_installment}
-                  onChange={(e) => setHouseForm({ ...houseForm, price_installment: e.target.value })}
+                  onChange={(e) => {
+                    const newValue = e.target.value
+                    setHouseForm({ ...houseForm, price_installment: newValue })
+                    // Recalculate monthly payment/number of months if calculation method is set
+                    // The installment price itself is manually set and won't change automatically
+                    if (showOfferForm && offerForm.calculation_method) {
+                      setTimeout(() => calculateInstallmentPrice(), 0)
+                    }
+                  }}
                   placeholder="0"
                 />
-                <p className="text-xs text-gray-500 mt-1">{t('homes.priceWillBeCalculated')}</p>
+                <p className="text-xs text-gray-500 mt-1">
+                  {t('homes.priceInstallment')} {t('homes.priceWillBeCalculated')}
+                </p>
               </div>
               
               <div>
@@ -990,19 +1451,37 @@ export function Homes() {
                   <Input
                     type="number"
                     value={offerForm.advance_amount}
-                    onChange={(e) => setOfferForm({ ...offerForm, advance_amount: e.target.value })}
+                    onChange={(e) => {
+                      setOfferForm({ ...offerForm, advance_amount: e.target.value })
+                      // Trigger calculation immediately
+                      setTimeout(() => calculateInstallmentPrice(), 0)
+                    }}
                     placeholder="0"
                   />
                   <div className="flex items-center gap-2">
                     <input
                       type="checkbox"
                       checked={offerForm.advance_is_percentage}
-                      onChange={(e) => setOfferForm({ ...offerForm, advance_is_percentage: e.target.checked })}
+                      onChange={(e) => {
+                        setOfferForm({ ...offerForm, advance_is_percentage: e.target.checked })
+                        // Trigger calculation immediately
+                        setTimeout(() => calculateInstallmentPrice(), 0)
+                      }}
                       className="rounded"
                     />
                     <Label className="text-sm">{t('land.advanceIsPercentage')}</Label>
                   </div>
                 </div>
+                {/* Show actual advance amount */}
+                {offerForm.advance_amount && houseForm.price_full && (
+                  <p className="text-xs text-gray-600 mt-1">
+                    {t('land.advanceAmount')}: {formatCurrency(
+                      offerForm.advance_is_percentage
+                        ? (parseFloat(houseForm.price_full) * parseFloat(offerForm.advance_amount)) / 100
+                        : parseFloat(offerForm.advance_amount)
+                    )}
+                  </p>
+                )}
               </div>
 
               <div>
@@ -1022,7 +1501,11 @@ export function Homes() {
                   <Input
                     type="number"
                     value={offerForm.monthly_payment}
-                    onChange={(e) => setOfferForm({ ...offerForm, monthly_payment: e.target.value })}
+                    onChange={(e) => {
+                      setOfferForm({ ...offerForm, monthly_payment: e.target.value })
+                      // Trigger calculation immediately
+                      setTimeout(() => calculateInstallmentPrice(), 0)
+                    }}
                     placeholder="0"
                   />
                   {offerForm.monthly_payment && houseForm.price_full && (
@@ -1037,7 +1520,11 @@ export function Homes() {
                   <Input
                     type="number"
                     value={offerForm.number_of_months}
-                    onChange={(e) => setOfferForm({ ...offerForm, number_of_months: e.target.value })}
+                    onChange={(e) => {
+                      setOfferForm({ ...offerForm, number_of_months: e.target.value })
+                      // Trigger calculation immediately
+                      setTimeout(() => calculateInstallmentPrice(), 0)
+                    }}
                     placeholder="0"
                   />
                   {offerForm.number_of_months && houseForm.price_full && (
@@ -1047,6 +1534,73 @@ export function Homes() {
                   )}
                 </div>
               )}
+              
+              {/* List of existing offers */}
+              {houseOffers.length > 0 && (
+                <div className="mt-4">
+                  <Label className="mb-2 block">العروض المحفوظة:</Label>
+                  <div className="space-y-2 max-h-40 overflow-y-auto">
+                    {houseOffers.map((offer) => (
+                      <div key={offer.id} className="flex items-center justify-between p-2 bg-gray-50 rounded border">
+                        <div className="flex-1">
+                          <div className="font-medium">{offer.offer_name || 'عرض بدون اسم'}</div>
+                          <div className="text-xs text-gray-600">
+                            {offer.monthly_payment && `${formatCurrency(offer.monthly_payment)}/شهر`}
+                            {offer.number_of_months && ` × ${offer.number_of_months} شهر`}
+                            {offer.is_default && <span className="ml-2 text-green-600">(افتراضي)</span>}
+                          </div>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setEditingOffer(offer)
+                            setOfferForm({
+                              company_fee_percentage: '',
+                              advance_amount: offer.advance_amount ? offer.advance_amount.toString() : '',
+                              advance_is_percentage: offer.advance_is_percentage || false,
+                              monthly_payment: offer.monthly_payment ? offer.monthly_payment.toString() : '',
+                              number_of_months: offer.number_of_months ? offer.number_of_months.toString() : '',
+                              calculation_method: (offer.monthly_payment && offer.monthly_payment > 0) ? 'monthly' : 'months',
+                              offer_name: offer.offer_name || '',
+                              notes: offer.notes || '',
+                              is_default: offer.is_default || false,
+                            })
+                            setOfferDialogOpen(true)
+                          }}
+                        >
+                          <Edit className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              
+              {/* Add new offer button */}
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setEditingOffer(null)
+                  setOfferForm({
+                    company_fee_percentage: '',
+                    advance_amount: '',
+                    advance_is_percentage: false,
+                    monthly_payment: '',
+                    number_of_months: '',
+                    calculation_method: 'monthly',
+                    offer_name: '',
+                    notes: '',
+                    is_default: false,
+                  })
+                  setOfferDialogOpen(true)
+                }}
+                className="w-full mt-2"
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                إضافة عرض آخر
+              </Button>
             </div>
             <div>
               <Label>{t('common.notes')}</Label>
@@ -1076,7 +1630,26 @@ export function Homes() {
       </Dialog>
 
       {/* Sale Dialog */}
-      <Dialog open={saleDialogOpen} onOpenChange={setSaleDialogOpen}>
+      <Dialog open={saleDialogOpen} onOpenChange={(open) => {
+        if (!open) {
+          // Only clear state when explicitly closing (not when opening)
+          setSaleDialogOpen(false)
+          // Clear newClient when dialog is manually closed (not after sale creation)
+          setNewClient(null)
+          setSelectedHouse(null)
+          setSaleForm({
+            payment_type: 'Full',
+            reservation_amount: '',
+            deadline_date: '',
+            selected_offer_id: '',
+            promise_initial_payment: '',
+          })
+          setSelectedOffer(null)
+        } else {
+          // When opening, ensure newClient is still set
+          setSaleDialogOpen(open)
+        }
+      }}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto p-4 md:p-6">
           <DialogHeader>
             <DialogTitle className="text-lg md:text-xl">{t('homes.createSale')}</DialogTitle>
@@ -1084,38 +1657,30 @@ export function Homes() {
               {selectedHouse && `${t('homes.sellingHouse')}: ${selectedHouse.name}`}
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 pt-4">
-            {/* Client Search */}
-            <div>
-              <Label>{t('clients.cin')}</Label>
-              <Input
-                value={saleClientCIN}
-                onChange={(e) => {
-                  setSaleClientCIN(e.target.value)
-                  setSaleClientSearchStatus('searching')
+          {!newClient ? (
+            <div className="p-4 text-center text-muted-foreground">
+              <p>يرجى اختيار عميل أولاً</p>
+              <Button
+                variant="outline"
+                className="mt-4"
+                onClick={() => {
+                  setSaleDialogOpen(false)
+                  setClientDialogOpen(true)
                 }}
-                placeholder={t('clients.cin')}
-              />
-              {saleClientSearchStatus === 'searching' && (
-                <p className="text-sm text-gray-500 mt-1">{t('common.loading')}</p>
-              )}
-              {saleClientSearchStatus === 'found' && saleClientFound && (
-                <div className="mt-2 p-2 bg-green-50 border border-green-200 rounded">
-                  <p className="text-sm font-medium">{saleClientFound.name}</p>
-                  <p className="text-xs text-gray-600">{saleClientFound.phone}</p>
-                </div>
-              )}
-              {saleClientSearchStatus === 'not_found' && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="mt-2"
-                  onClick={() => setClientDialogOpen(true)}
-                >
-                  {t('clients.newClient')}
-                </Button>
-              )}
+              >
+                {t('clients.newClient')}
+              </Button>
+            </div>
+          ) : !selectedHouse ? (
+            <div className="p-4 text-center text-muted-foreground">
+              <p>يرجى اختيار منزل</p>
+            </div>
+          ) : (
+          <div className="space-y-4 pt-4">
+            {/* Client Info Display */}
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+              <p className="font-medium text-sm">العميل: {newClient.name}</p>
+              <p className="text-xs text-muted-foreground">CIN: {newClient.cin} | الهاتف: {newClient.phone}</p>
             </div>
 
             {/* Payment Type */}
@@ -1124,8 +1689,20 @@ export function Homes() {
               <Select
                 value={saleForm.payment_type}
                 onChange={(e) => {
-                  setSaleForm({ ...saleForm, payment_type: e.target.value as 'Full' | 'Installment' | 'PromiseOfSale' })
-                  setSelectedOffer(null)
+                  const newPaymentType = e.target.value as 'Full' | 'Installment' | 'PromiseOfSale'
+                  setSaleForm({ ...saleForm, payment_type: newPaymentType })
+                  
+                  // Auto-select offer when switching to Installment
+                  if (newPaymentType === 'Installment' && availableOffers.length > 0 && !selectedOffer) {
+                    const defaultOffer = availableOffers.find(o => o.is_default) || availableOffers[0]
+                    if (defaultOffer) {
+                      setSelectedOffer(defaultOffer)
+                      setSaleForm(prev => ({ ...prev, selected_offer_id: defaultOffer.id }))
+                    }
+                  } else if (newPaymentType !== 'Installment') {
+                    setSelectedOffer(null)
+                    setSaleForm(prev => ({ ...prev, selected_offer_id: '' }))
+                  }
                 }}
               >
                 <option value="Full">{t('sales.full')}</option>
@@ -1135,23 +1712,112 @@ export function Homes() {
 
             {/* Installment Offer Selection */}
             {saleForm.payment_type === 'Installment' && availableOffers.length > 0 && (
-              <div>
-                <Label>{t('land.selectedOffer')}</Label>
-                <Select
-                  value={saleForm.selected_offer_id}
-                  onChange={(e) => {
-                    setSaleForm({ ...saleForm, selected_offer_id: e.target.value })
-                    const offer = availableOffers.find(o => o.id === e.target.value)
-                    setSelectedOffer(offer || null)
-                  }}
-                >
-                  <option value="">{t('land.selectOffer')}</option>
-                  {availableOffers.map(offer => (
-                    <option key={offer.id} value={offer.id}>
-                      {offer.offer_name || t('land.offer')} {offer.id.slice(0, 8)}
-                    </option>
-                  ))}
-                </Select>
+              <div className="space-y-2">
+                <Label>عرض الدفع {selectedOffer && `(محدد تلقائياً)`}</Label>
+                <div className="bg-green-50 border border-green-200 rounded-lg p-3 space-y-2 max-h-60 overflow-y-auto">
+                  {availableOffers.map((offer) => {
+                    if (!selectedHouse) return null
+                    
+                    const price = selectedHouse.price_installment
+                    const companyFeePercentage = (selectedHouse as any).company_fee_percentage || offer.company_fee_percentage || 0
+                    const companyFeeAmount = (price * companyFeePercentage) / 100
+                    
+                    const advanceAmount = offer.advance_is_percentage
+                      ? (price * offer.advance_amount) / 100
+                      : offer.advance_amount
+                    
+                    const reservation = parseFloat(saleForm.reservation_amount) || 0
+                    const advanceAfterReservation = Math.max(0, advanceAmount - reservation)
+                    const remainingForInstallments = Math.max(0, price - advanceAfterReservation - companyFeeAmount)
+                    
+                    let numberOfMonths = 0
+                    if (offer.monthly_payment && offer.monthly_payment > 0) {
+                      numberOfMonths = remainingForInstallments > 0
+                        ? Math.ceil(remainingForInstallments / offer.monthly_payment)
+                        : 0
+                    } else if (offer.number_of_months && offer.number_of_months > 0) {
+                      numberOfMonths = offer.number_of_months
+                    }
+                    
+                    const isSelected = selectedOffer?.id === offer.id
+                    
+                    return (
+                      <div
+                        key={offer.id}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          e.preventDefault()
+                          setSelectedOffer(offer)
+                          setSaleForm({ ...saleForm, selected_offer_id: offer.id })
+                        }}
+                        onMouseDown={(e) => {
+                          e.stopPropagation()
+                        }}
+                        onTouchStart={(e) => {
+                          e.stopPropagation()
+                        }}
+                        className={`p-3 rounded-lg border cursor-pointer transition-colors ${
+                          isSelected
+                            ? 'bg-green-100 border-green-500 ring-2 ring-green-500'
+                            : 'bg-white border-green-200 hover:bg-green-50'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-1">
+                              {offer.is_default && (
+                                <Badge variant="default" className="text-xs">افتراضي</Badge>
+                              )}
+                              {offer.offer_name && (
+                                <span className="font-medium text-sm">{offer.offer_name}</span>
+                              )}
+                            </div>
+                            <div className="text-xs text-muted-foreground space-y-0.5">
+                              <div>عمولة الشركة: {companyFeePercentage}%</div>
+                              <div>
+                                التسبقة: {offer.advance_is_percentage 
+                                  ? `${offer.advance_amount}% (${formatCurrency(advanceAmount)})`
+                                  : `${formatCurrency(offer.advance_amount)}`}
+                              </div>
+                              {offer.monthly_payment && offer.monthly_payment > 0 && (
+                                <div>المبلغ الشهري: {formatCurrency(offer.monthly_payment)}</div>
+                              )}
+                              {offer.number_of_months && offer.number_of_months > 0 && (
+                                <div>عدد الأشهر: {offer.number_of_months} شهر</div>
+                              )}
+                              {numberOfMonths > 0 && (
+                                <div className="font-medium text-green-700 mt-1">
+                                  عدد الأشهر المحسوب: {numberOfMonths} شهر
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                          <div className="ml-2">
+                            <input
+                              type="radio"
+                              checked={isSelected}
+                              onChange={(e) => {
+                                e.stopPropagation()
+                                setSelectedOffer(offer)
+                                setSaleForm({ ...saleForm, selected_offer_id: offer.id })
+                              }}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                              }}
+                              onMouseDown={(e) => {
+                                e.stopPropagation()
+                              }}
+                              className="h-4 w-4 text-green-600"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  اختر عرضاً لملء الحقول تلقائياً، أو املأها يدوياً
+                </p>
               </div>
             )}
 
@@ -1168,14 +1834,244 @@ export function Homes() {
 
             {/* Deadline Date */}
             <div>
-              <Label>{t('saleConfirmation.deadline')}</Label>
+              <Label>{t('saleConfirmation.deadline')} *</Label>
               <Input
                 type="date"
                 value={saleForm.deadline_date}
                 onChange={(e) => setSaleForm({ ...saleForm, deadline_date: e.target.value })}
               />
             </div>
+
+            {/* Sale Details Summary - Calculations */}
+            {selectedHouse && newClient && saleForm.reservation_amount && (() => {
+              const reservation = parseFloat(saleForm.reservation_amount) || 0
+              const price = saleForm.payment_type === 'Full' 
+                ? selectedHouse.price_full 
+                : selectedHouse.price_installment
+              
+              const companyFeePercentage = (selectedHouse as any).company_fee_percentage || (selectedOffer?.company_fee_percentage || 0)
+              const companyFeeAmount = (price * companyFeePercentage) / 100
+              
+              if (saleForm.payment_type === 'Full') {
+                // Full Payment Details
+                const totalPayable = price + companyFeeAmount
+                const remainingAfterReservation = totalPayable - reservation
+                
+                return (
+                  <div className="bg-green-50 border border-green-200 rounded-lg p-4 space-y-3">
+                    <p className="font-semibold text-green-800 text-sm mb-2">تفاصيل البيع (بالحاضر):</p>
+                    <div className="space-y-2 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">السعر الإجمالي:</span>
+                        <span className="font-semibold text-green-700">{formatCurrency(price)}</span>
+                      </div>
+                      {companyFeePercentage > 0 && (
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">عمولة الشركة ({companyFeePercentage}%):</span>
+                          <span className="font-medium text-green-700">{formatCurrency(companyFeeAmount)}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between border-t border-green-200 pt-2">
+                        <span className="font-medium text-muted-foreground">المبلغ الإجمالي المستحق:</span>
+                        <span className="font-semibold text-green-800">{formatCurrency(totalPayable)}</span>
+                      </div>
+                      {reservation > 0 && (
+                        <>
+                          <div className="flex justify-between text-green-700">
+                            <span>العربون (مدفوع عند الحجز):</span>
+                            <span className="font-medium">{formatCurrency(reservation)}</span>
+                          </div>
+                          <div className="flex justify-between border-t border-green-200 pt-2">
+                            <span className="font-medium text-muted-foreground">المبلغ المتبقي:</span>
+                            <span className="font-semibold text-green-800">{formatCurrency(Math.max(0, remainingAfterReservation))}</span>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )
+              } else {
+                // Installment Payment Details
+                // If no offer selected but we have available offers, show message
+                if (!selectedOffer && availableOffers.length > 0) {
+                  return (
+                    <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+                      <p className="text-xs text-yellow-800">يرجى اختيار عرض الدفع من القائمة أعلاه لعرض التفاصيل</p>
+                    </div>
+                  )
+                }
+                
+                // If no offer selected and no offers available, use house price_installment for basic calculation
+                if (!selectedOffer) {
+                  // Calculate basic installment info from house price_installment
+                  const advanceAmount = 0 // No advance if no offer
+                  const advanceAfterReservation = 0
+                  const remainingForInstallments = Math.max(0, price - companyFeeAmount)
+                  
+                  return (
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-3">
+                      <p className="font-semibold text-blue-800 text-sm mb-2">تفاصيل البيع (بالتقسيط):</p>
+                      <div className="space-y-2 text-sm">
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">السعر الإجمالي:</span>
+                          <span className="font-semibold text-blue-700">{formatCurrency(price)}</span>
+                        </div>
+                        {companyFeePercentage > 0 && (
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">عمولة الشركة ({companyFeePercentage}%):</span>
+                            <span className="font-medium text-blue-700">{formatCurrency(companyFeeAmount)}</span>
+                          </div>
+                        )}
+                        <div className="flex justify-between text-green-700">
+                          <span>العربون (مدفوع عند الحجز):</span>
+                          <span className="font-medium">{formatCurrency(reservation)}</span>
+                        </div>
+                        <div className="flex justify-between text-blue-700 font-medium mt-1">
+                          <span>المتبقي للتقسيط (بدون العمولة):</span>
+                          <span className="font-semibold">{formatCurrency(remainingForInstallments)}</span>
+                        </div>
+                        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-2 mt-2">
+                          <p className="text-xs text-yellow-800">ملاحظة: لا يوجد عرض تقسيط محدد لهذا المنزل. يرجى إضافة عرض في صفحة تعديل المنزل لتحديد التسبقة والأقساط.</p>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                }
+                
+                // Calculate with selected offer
+                // Use installment price as base (not full price)
+                const installmentPrice = selectedHouse.price_installment
+                const advanceAmount = selectedOffer.advance_is_percentage
+                  ? (installmentPrice * selectedOffer.advance_amount) / 100
+                  : selectedOffer.advance_amount
+                
+                // التسبقة = Advance - Reservation (العربون is deducted from التسبقة)
+                const advanceAfterReservation = Math.max(0, advanceAmount - reservation)
+                
+                // Remaining for installments = Installment Price - Advance - Commission
+                // المتبقي للتقسيط = السعر (بالتقسيط) - التسبقة - العمولة
+                const remainingForInstallments = Math.max(0, installmentPrice - advanceAmount - companyFeeAmount)
+                
+                // Calculate months and monthly payment
+                let numberOfMonths = 0
+                let monthlyAmount = 0
+                
+                if (selectedOffer.monthly_payment && selectedOffer.monthly_payment > 0) {
+                  monthlyAmount = selectedOffer.monthly_payment
+                  numberOfMonths = remainingForInstallments > 0
+                    ? Math.ceil(remainingForInstallments / selectedOffer.monthly_payment)
+                    : 0
+                } 
+                // If offer has number_of_months, use it and calculate monthly amount
+                else if (selectedOffer.number_of_months && selectedOffer.number_of_months > 0) {
+                  numberOfMonths = selectedOffer.number_of_months
+                  monthlyAmount = remainingForInstallments > 0
+                    ? remainingForInstallments / selectedOffer.number_of_months
+                    : 0
+                }
+                
+                return (
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-3">
+                    <p className="font-semibold text-blue-800 text-sm mb-2">تفاصيل البيع (بالتقسيط):</p>
+                    <div className="bg-white rounded p-3 border border-blue-100 space-y-2 text-sm">
+                      <div className="flex justify-between items-start mb-1">
+                        <div>
+                          <p className="font-medium text-xs">{selectedHouse.name}</p>
+                          <p className="text-muted-foreground text-xs">{selectedHouse.place}</p>
+                          {selectedOffer.offer_name && (
+                            <p className="text-blue-600 text-xs mt-1">✓ {selectedOffer.offer_name}</p>
+                          )}
+                        </div>
+                        <p className="font-semibold text-blue-700 text-xs">{formatCurrency(price)}</p>
+                      </div>
+                      <div className="text-xs text-muted-foreground space-y-0.5 pl-2">
+                        <div className="text-green-700">العربون (مدفوع): {formatCurrency(reservation)}</div>
+                        <div className="text-purple-700 font-medium border-t border-purple-200 pt-1 mt-1">المستحق عند التأكيد:</div>
+                        <div className="text-xs text-purple-700 pl-2">التسبقة: {formatCurrency(advanceAmount)}</div>
+                        {reservation > 0 && (
+                          <div className="text-xs text-purple-600 pl-4">(-) العربون: {formatCurrency(reservation)}</div>
+                        )}
+                        <div className="text-xs text-purple-700 pl-2 border-t border-purple-100 pt-0.5 mt-0.5">= التسبقة (بعد خصم العربون): {formatCurrency(advanceAfterReservation)}</div>
+                        <div className="text-xs text-purple-700 pl-2">+ العمولة ({companyFeePercentage}%): {formatCurrency(companyFeeAmount)}</div>
+                        <div className="text-xs text-purple-800 font-semibold pl-2 border-t border-purple-200 pt-0.5 mt-0.5">= المستحق عند التأكيد: {formatCurrency(advanceAfterReservation + companyFeeAmount)}</div>
+                        <div className="text-blue-700 font-medium mt-1">المتبقي للتقسيط (بدون العمولة): {formatCurrency(remainingForInstallments)}</div>
+                        {monthlyAmount > 0 && (
+                          <div>المبلغ الشهري: {formatCurrency(monthlyAmount)}</div>
+                        )}
+                        {numberOfMonths > 0 && (
+                          <div className="font-medium text-blue-700">عدد الأشهر: {numberOfMonths} شهر</div>
+                        )}
+                      </div>
+                    </div>
+                    <div className="border-t border-blue-200 pt-2 mt-2">
+                      <div className="text-xs text-muted-foreground space-y-1">
+                        <div className="flex justify-between">
+                          <span>السعر الإجمالي:</span>
+                          <span className="font-medium">{formatCurrency(price)}</span>
+                        </div>
+                        <div className="flex justify-between text-green-700">
+                          <span>العربون (مدفوع عند الحجز):</span>
+                          <span className="font-medium">{formatCurrency(reservation)}</span>
+                        </div>
+                        <div className="border-t border-purple-200 pt-1 mt-1 space-y-1">
+                          <div className="flex justify-between text-purple-700 font-medium">
+                            <span>المستحق عند التأكيد:</span>
+                          </div>
+                          <div className="flex justify-between pl-2 text-purple-700">
+                            <span>التسبقة:</span>
+                            <span className="font-medium">{formatCurrency(advanceAmount)}</span>
+                          </div>
+                          {reservation > 0 && (
+                            <div className="flex justify-between pl-4 text-purple-600">
+                              <span>(-) العربون:</span>
+                              <span className="font-medium">{formatCurrency(reservation)}</span>
+                            </div>
+                          )}
+                          <div className="flex justify-between pl-2 text-purple-700 border-t border-purple-100 pt-0.5">
+                            <span>= التسبقة (بعد خصم العربون):</span>
+                            <span className="font-medium">{formatCurrency(advanceAfterReservation)}</span>
+                          </div>
+                          <div className="flex justify-between pl-2 text-purple-700">
+                            <span>+ العمولة ({companyFeePercentage.toFixed(1)}%):</span>
+                            <span className="font-medium">{formatCurrency(companyFeeAmount)}</span>
+                          </div>
+                          <div className="flex justify-between pl-2 text-purple-800 font-semibold border-t border-purple-200 pt-0.5">
+                            <span>= المستحق عند التأكيد:</span>
+                            <span className="font-semibold">{formatCurrency(advanceAfterReservation + companyFeeAmount)}</span>
+                          </div>
+                        </div>
+                        <div className="flex justify-between text-blue-700 font-medium mt-1">
+                          <span>المتبقي للتقسيط (بدون العمولة):</span>
+                          <span className="font-semibold">{formatCurrency(remainingForInstallments)}</span>
+                        </div>
+                        {monthlyAmount > 0 && (
+                          <div className="flex justify-between">
+                            <span>المبلغ الشهري:</span>
+                            <span className="font-medium">{formatCurrency(monthlyAmount)}</span>
+                          </div>
+                        )}
+                        {numberOfMonths > 0 && (
+                          <div className="flex justify-between border-t border-blue-100 pt-1 mt-1">
+                            <span className="font-medium">عدد الأشهر:</span>
+                            <span className="font-semibold text-blue-800">{numberOfMonths} شهر</span>
+                          </div>
+                        )}
+                        <div className="text-xs text-muted-foreground mt-2 pt-2 border-t border-blue-100">
+                          <p className="font-medium mb-1">ملاحظة:</p>
+                          <p>• العربون: مبلغ يتم دفعه عند إنشاء البيع (الحجز)</p>
+                          <p>• التسبقة + العمولة: تُدفع عند تأكيد البيع</p>
+                          {numberOfMonths > 0 && (
+                            <p>• المبلغ المتبقي: يتم تقسيطه على {numberOfMonths} شهر بمبلغ {formatCurrency(monthlyAmount)} شهرياً</p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )
+              }
+            })()}
           </div>
+          )}
           <DialogFooter className="flex-col sm:flex-row gap-2 sm:gap-0 pt-4">
             <Button 
               variant="outline" 
@@ -1196,63 +2092,187 @@ export function Homes() {
       </Dialog>
 
       {/* Client Dialog */}
-      <Dialog open={clientDialogOpen} onOpenChange={setClientDialogOpen}>
-        <DialogContent className="p-4 md:p-6 max-w-md">
+      <Dialog open={clientDialogOpen} onOpenChange={(open) => {
+        setClientDialogOpen(open)
+        if (!open) {
+          // Reset form when dialog closes
+          setClientForm({
+            name: '',
+            cin: '',
+            phone: '',
+            email: '',
+            address: '',
+            client_type: 'Individual',
+            notes: '',
+          })
+          setFoundClient(null)
+          setNewClient(null)
+          setClientSearchStatus('idle')
+        } else {
+          // Clear found client when dialog opens (so message only shows after search)
+          setFoundClient(null)
+          setClientSearchStatus('idle')
+        }
+      }}>
+        <DialogContent className="w-[95vw] sm:w-full max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="text-lg md:text-xl">{t('clients.newClient')}</DialogTitle>
+            <DialogTitle className="text-lg md:text-xl">إضافة عميل جديد</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 pt-4">
-            <div>
-              <Label>{t('clients.clientName')} *</Label>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="clientCIN" className="text-sm">رقم الهوية *</Label>
+              <div className="relative">
+                <Input
+                  id="clientCIN"
+                  value={clientForm.cin}
+                  onChange={(e) => {
+                    const newCIN = e.target.value
+                    setClientForm({ ...clientForm, cin: newCIN })
+                    // Clear found client if CIN changes and doesn't match
+                    if (foundClient && newCIN !== foundClient.cin) {
+                      setFoundClient(null)
+                      setNewClient(null)
+                      setClientSearchStatus('idle')
+                      // Also clear name if it was auto-filled from search
+                      if (foundClient.name && clientForm.name === foundClient.name) {
+                        setClientForm(prev => ({ ...prev, name: '' }))
+                      }
+                    }
+                    // Trigger search by CIN
+                    debouncedCINSearch(newCIN)
+                  }}
+                  placeholder="رقم الهوية"
+                  className={`h-9 ${searchingClient ? 'pr-10' : ''} ${clientSearchStatus === 'found' ? 'border-green-500' : clientSearchStatus === 'not_found' ? 'border-blue-300' : ''}`}
+                  autoFocus
+                />
+                {searchingClient && (
+                  <div className="absolute left-3 top-1/2 -translate-y-1/2">
+                    <div className="h-4 w-4 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin"></div>
+                  </div>
+                )}
+                {!searchingClient && clientForm.cin && clientForm.cin.trim().length >= 2 && (
+                  <div className="absolute left-3 top-1/2 -translate-y-1/2">
+                    {clientSearchStatus === 'found' && (
+                      <CheckCircle className="h-4 w-4 text-green-600" />
+                    )}
+                    {clientSearchStatus === 'not_found' && (
+                      <XCircle className="h-4 w-4 text-blue-500" />
+                    )}
+                  </div>
+                )}
+              </div>
+              {foundClient && clientForm.cin && clientForm.cin.trim().length >= 2 && (
+                <div className="bg-green-50 border border-green-200 rounded-lg p-2.5 mt-1">
+                  <div className="flex items-start gap-2">
+                    <CheckCircle className="h-4 w-4 text-green-600 mt-0.5 flex-shrink-0" />
+                    <div className="text-xs text-green-800 flex-1">
+                      <p className="font-medium mb-0.5">✓ تم العثور على عميل: {foundClient.name}</p>
+                      <p className="text-xs">CIN: {foundClient.cin} {foundClient.phone && `| الهاتف: ${foundClient.phone}`}</p>
+                      <p className="text-xs mt-1">تم ملء البيانات تلقائياً. يمكنك تعديلها أو المتابعة.</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+              {clientSearchStatus === 'not_found' && !foundClient && clientForm.cin && clientForm.cin.trim().length >= 4 && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-2.5 mt-1">
+                  <div className="flex items-start gap-2">
+                    <XCircle className="h-4 w-4 text-blue-600 mt-0.5 flex-shrink-0" />
+                    <div className="text-xs text-blue-800">
+                      <p className="font-medium mb-0.5">لا يوجد عميل بهذا الرقم</p>
+                      <p className="text-xs">يمكنك المتابعة لإضافة عميل جديد.</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="clientName" className="text-sm">الاسم *</Label>
               <Input
+                id="clientName"
                 value={clientForm.name}
                 onChange={(e) => setClientForm({ ...clientForm, name: e.target.value })}
+                placeholder="اسم العميل"
+                className="h-9"
               />
             </div>
-            <div>
-              <Label>{t('clients.cin')} *</Label>
+            <div className="space-y-1.5">
+              <Label htmlFor="clientPhone" className="text-sm">رقم الهاتف *</Label>
               <Input
-                value={clientForm.cin}
-                onChange={(e) => setClientForm({ ...clientForm, cin: e.target.value })}
-              />
-            </div>
-            <div>
-              <Label>{t('clients.phone')}</Label>
-              <Input
+                id="clientPhone"
                 value={clientForm.phone}
                 onChange={(e) => setClientForm({ ...clientForm, phone: e.target.value })}
+                placeholder="مثال: 5822092120192614/10/593"
+                className="h-9"
+                maxLength={50}
               />
             </div>
-            <div>
-              <Label>{t('clients.email')}</Label>
+            <div className="space-y-1.5">
+              <Label htmlFor="clientEmail" className="text-sm">البريد الإلكتروني</Label>
               <Input
+                id="clientEmail"
                 type="email"
                 value={clientForm.email}
                 onChange={(e) => setClientForm({ ...clientForm, email: e.target.value })}
+                placeholder="البريد الإلكتروني (اختياري)"
+                className="h-9"
               />
             </div>
-            <div>
-              <Label>{t('clients.address')}</Label>
+            <div className="space-y-1.5">
+              <Label htmlFor="clientAddress" className="text-sm">العنوان</Label>
               <Input
+                id="clientAddress"
                 value={clientForm.address}
                 onChange={(e) => setClientForm({ ...clientForm, address: e.target.value })}
+                placeholder="العنوان (اختياري)"
+                className="h-9"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="clientType" className="text-sm">نوع العميل</Label>
+              <Select
+                value={clientForm.client_type}
+                onChange={(e) => setClientForm({ ...clientForm, client_type: e.target.value as 'Individual' | 'Company' })}
+              >
+                <option value="Individual">فردي</option>
+                <option value="Company">شركة</option>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="clientNotes" className="text-sm">ملاحظات</Label>
+              <Textarea
+                id="clientNotes"
+                value={clientForm.notes}
+                onChange={(e) => setClientForm({ ...clientForm, notes: e.target.value })}
+                placeholder="ملاحظات (اختياري)"
+                className="min-h-[70px]"
               />
             </div>
           </div>
-          <DialogFooter className="flex-col sm:flex-row gap-2 sm:gap-0 pt-4">
-            <Button 
-              variant="outline" 
-              onClick={() => setClientDialogOpen(false)}
-              className="w-full sm:w-auto"
-            >
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setClientDialogOpen(false)}>
               {t('common.cancel')}
             </Button>
             <Button 
-              onClick={saveClient} 
-              disabled={savingClient}
-              className="w-full sm:w-auto"
+              onClick={async () => {
+                // If client found, use it directly, otherwise create new
+                if (foundClient) {
+                  // Set newClient first
+                  setNewClient(foundClient)
+                  // Close client dialog first
+                  setClientDialogOpen(false)
+                  // Wait a bit to ensure state is updated, then open sale dialog
+                  setTimeout(() => {
+                    // Double-check that newClient is set, if not, set it again
+                    setNewClient(prev => prev || foundClient)
+                    setSaleDialogOpen(true)
+                  }, 200)
+                } else {
+                  await handleCreateClient()
+                }
+              }}
+              disabled={savingClient || searchingClient || !clientForm.name || !clientForm.cin || !clientForm.phone}
             >
-              {savingClient ? t('common.saving') : t('common.save')}
+              {savingClient ? 'جاري الحفظ...' : searchingClient ? 'جاري البحث...' : foundClient ? 'استخدام والمتابعة' : 'حفظ والمتابعة'}
             </Button>
           </DialogFooter>
         </DialogContent>

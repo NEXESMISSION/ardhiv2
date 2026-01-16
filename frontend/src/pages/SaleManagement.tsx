@@ -241,6 +241,21 @@ export function SaleManagement() {
         if (pieceError) throw pieceError
       }
 
+      // Step 5: Reset house status
+      const houseIds = (selectedSale as any).house_ids || []
+      if (houseIds.length > 0) {
+        const { error: houseError } = await supabase
+          .from('houses')
+          .update({ 
+            status: 'Available',
+            reserved_until: null,
+            reservation_client_id: null
+          } as any)
+          .in('id', houseIds)
+
+        if (houseError) throw houseError
+      }
+
       showNotification('تم إرجاع البيع بنجاح', 'success')
       setUndoDialogOpen(false)
       setSelectedSale(null)
@@ -304,6 +319,27 @@ export function SaleManagement() {
       }
 
       console.log('[handleDeleteSale] Deletion successful')
+      
+      // Step: Update house statuses back to Available if this sale had houses
+      const houseIds = (selectedSale as any).house_ids || []
+      if (houseIds.length > 0) {
+        console.log('[handleDeleteSale] Updating house statuses for house_ids:', houseIds)
+        const { error: houseError } = await supabase
+          .from('houses')
+          .update({ 
+            status: 'Available',
+            reserved_until: null,
+            reservation_client_id: null
+          } as any)
+          .in('id', houseIds)
+        
+        if (houseError) {
+          console.error('[handleDeleteSale] Error updating house statuses:', houseError)
+          // Don't throw - sale is already deleted, just log the error
+        } else {
+          console.log('[handleDeleteSale] House statuses updated successfully')
+        }
+      }
       
       // Remove the sale from the local state immediately
       setSales(prevSales => prevSales.filter(s => s.id !== selectedSale.id))
@@ -838,7 +874,7 @@ export function SaleManagement() {
                           // This ensures pieces go back to confirmation page
                           const { data: saleData } = await supabase
                             .from('sales')
-                            .select('land_piece_ids')
+                            .select('land_piece_ids, house_ids')
                             .eq('id', saleId)
                             .single()
                           
@@ -851,6 +887,23 @@ export function SaleManagement() {
                             
                             if (piecesError) {
                               console.warn('Error updating land pieces status:', piecesError)
+                              // Don't throw - sale reset is more important
+                            }
+                          }
+
+                          // 3c. Reset houses status back to Available (if they were Reserved/Sold)
+                          if (saleData && (saleData as any).house_ids && (saleData as any).house_ids.length > 0) {
+                            const { error: housesError } = await supabase
+                              .from('houses')
+                              .update({ 
+                                status: 'Available',
+                                reserved_until: null,
+                                reservation_client_id: null
+                              } as any)
+                              .in('id', (saleData as any).house_ids)
+                            
+                            if (housesError) {
+                              console.warn('Error updating houses status:', housesError)
                               // Don't throw - sale reset is more important
                             }
                           }

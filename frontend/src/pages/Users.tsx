@@ -24,7 +24,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog'
-import { Plus, Edit, Trash2, User, Shield, Activity, TrendingUp, CheckCircle2, ShoppingCart, Map as MapIcon, Users as UsersIcon, Calendar, FileText, CreditCard, Home, Building, Wallet, DollarSign, Lock, Eye, EyeOff, AlertCircle, Briefcase, MessageSquare, XCircle, ArrowUp, ArrowDown, Phone, Download, Settings, Search, Filter, ChevronDown, ChevronRight, CheckSquare, Square } from 'lucide-react'
+import { Plus, Edit, Trash2, User, Shield, Activity, TrendingUp, CheckCircle2, ShoppingCart, Map as MapIcon, Users as UsersIcon, Calendar, FileText, CreditCard, Home, Home as HomeIcon, Building, Wallet, DollarSign, Lock, Eye, EyeOff, AlertCircle, Briefcase, MessageSquare, XCircle, ArrowUp, ArrowDown, Phone, Download, Settings, Search, Filter, ChevronDown, ChevronRight, CheckSquare, Square } from 'lucide-react'
 import type { User as UserType, UserRole, Sale, WorkerProfile } from '@/types/database'
 import { sanitizeText, sanitizeEmail } from '@/lib/sanitize'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
@@ -49,22 +49,23 @@ const roleColors: Record<UserRole, 'default' | 'secondary' | 'destructive'> = {
 const ALL_PAGES = [
   { id: 'home', name: 'الرئيسية', icon: Home, description: 'الصفحة الرئيسية' },
   { id: 'land', name: 'إدارة الأراضي', icon: MapIcon, description: 'إدارة قطع الأراضي' },
-  { id: 'clients', name: 'العملاء', icon: UsersIcon, description: 'إدارة العملاء' },
-  { id: 'sales', name: 'السجل', icon: ShoppingCart, description: 'سجل المبيعات' },
+  { id: 'homes', name: 'إدارة المنازل', icon: HomeIcon, description: 'إدارة المنازل' },
   { id: 'confirm-sales', name: 'تأكيد المبيعات', icon: CheckCircle2, description: 'تأكيد عمليات البيع' },
-  { id: 'sale-management', name: 'إدارة المبيعات', icon: Settings, description: 'إدارة وإعادة تعيين المبيعات' },
-  { id: 'calendar', name: 'تقويم المواعيد', icon: Calendar, description: 'تقويم مواعيد البيع' },
-  { id: 'phone-calls', name: 'مكالمات', icon: Phone, description: 'تتبع مكالمات المواعيد' },
-  { id: 'download', name: 'تحميل التطبيق', icon: Download, description: 'تحميل تطبيق Android' },
   { id: 'installments', name: 'الأقساط', icon: CreditCard, description: 'إدارة الأقساط' },
+  { id: 'clients', name: 'العملاء', icon: UsersIcon, description: 'إدارة العملاء' },
+  { id: 'phone-calls', name: 'مكالمات', icon: Phone, description: 'تتبع مكالمات المواعيد' },
+  { id: 'calendar', name: 'تقويم المواعيد', icon: Calendar, description: 'تقويم مواعيد البيع' },
   { id: 'finance', name: 'المالية', icon: DollarSign, description: 'التقارير المالية' },
+  { id: 'sales', name: 'السجل', icon: ShoppingCart, description: 'سجل المبيعات' },
+  { id: 'users', name: 'المستخدمين', icon: User, description: 'إدارة المستخدمين' },
+  { id: 'sale-management', name: 'إدارة المبيعات', icon: Settings, description: 'إدارة وإعادة تعيين المبيعات' },
+  { id: 'contract-editors', name: 'محررين', icon: FileText, description: 'إدارة محررين العقود' },
+  { id: 'download', name: 'تحميل التطبيق', icon: Download, description: 'تحميل تطبيق Android' },
   { id: 'expenses', name: 'المصاريف', icon: Wallet, description: 'إدارة المصاريف' },
   { id: 'debts', name: 'الديون', icon: FileText, description: 'إدارة الديون' },
   { id: 'real-estate', name: 'التطوير والبناء', icon: Building, description: 'المشاريع العقارية' },
   { id: 'workers', name: 'العمال', icon: Briefcase, description: 'إدارة العمال' },
   { id: 'messages', name: 'الرسائل', icon: MessageSquare, description: 'الرسائل والمحادثات' },
-  { id: 'users', name: 'المستخدمين', icon: User, description: 'إدارة المستخدمين' },
-  { id: 'contract-editors', name: 'محررين', icon: FileText, description: 'إدارة محررين العقود' },
   { id: 'security', name: 'الأمان', icon: Shield, description: 'سجلات الأمان' },
 ]
 

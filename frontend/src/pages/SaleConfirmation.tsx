@@ -44,6 +44,7 @@ interface Rendezvous {
 interface SaleWithDetails extends Sale {
   client: Client | null
   land_pieces: LandPiece[]
+  houses?: any[] // For house sales
   _totalBigAdvancePaid?: number
   _totalPaid?: number
   rendezvous?: Rendezvous[]
@@ -57,6 +58,7 @@ export function SaleConfirmation() {
   const [error, setError] = useState<string | null>(null)
   const [selectedSale, setSelectedSale] = useState<SaleWithDetails | null>(null)
   const [selectedPiece, setSelectedPiece] = useState<LandPiece | null>(null)
+  const [selectedHouse, setSelectedHouse] = useState<any | null>(null) // For house sales
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false)
   const [confirming, setConfirming] = useState(false)
   const confirmingRef = useRef(false) // Use ref to prevent race conditions
@@ -837,16 +839,39 @@ export function SaleConfirmation() {
   }, [sales, searchTerm, locationFilter])
 
 
+  // Update confirmationType from pendingConfirmationType when dialog opens
+  useEffect(() => {
+    if (confirmDialogOpen && pendingConfirmationType) {
+      setConfirmationType(pendingConfirmationType)
+    } else if (!confirmDialogOpen) {
+      // Reset pendingConfirmationType when dialog closes
+      setPendingConfirmationType(null)
+    }
+  }, [confirmDialogOpen, pendingConfirmationType])
+
   // Recalculate receivedAmount when companyFeePercentage or selectedSale changes for installment sales
   useEffect(() => {
-    if (confirmDialogOpen && selectedSale && selectedPiece && confirmationType === 'bigAdvance' && selectedSale.payment_type === 'Installment') {
+    if (confirmDialogOpen && selectedSale && (selectedPiece || selectedHouse) && confirmationType === 'bigAdvance' && selectedSale.payment_type === 'Installment') {
       const offerToUse = selectedOffer || ((selectedSale as any).selected_offer as PaymentOffer | null)
       if (offerToUse) {
         // Recalculate receivedAmount when commission changes
-        const values = calculatePieceValues(selectedSale, selectedPiece, offerToUse)
-        const pricePerPiece = values.pricePerPiece
-        const reservationPerPiece = values.reservationPerPiece
-        const companyFeePerPiece = values.companyFeePerPiece
+        let pricePerPiece = 0
+        let reservationPerPiece = 0
+        let companyFeePerPiece = 0
+        
+        if (selectedHouse) {
+          // For houses, calculate from house price
+          const housePrice = selectedHouse.price_installment || selectedHouse.price_full
+          const companyFeePercentage = selectedHouse.company_fee_percentage || 0
+          pricePerPiece = housePrice
+          companyFeePerPiece = (housePrice * companyFeePercentage) / 100
+          reservationPerPiece = (selectedSale.small_advance_amount || 0)
+        } else if (selectedPiece) {
+          const values = calculatePieceValues(selectedSale, selectedPiece, offerToUse)
+          pricePerPiece = values.pricePerPiece
+          reservationPerPiece = values.reservationPerPiece
+          companyFeePerPiece = values.companyFeePerPiece
+        }
         
         // Calculate advance amount
         const advanceAmount = offerToUse.advance_is_percentage
@@ -1010,15 +1035,21 @@ export function SaleConfirmation() {
           return true // Include in list
         })
         
-        // Then get land pieces for remaining sales
+        // Then get land pieces and houses for remaining sales
         if (salesNeedingConfirmation.length > 0) {
           const allPieceIds = new Set<string>()
+          const allHouseIds = new Set<string>()
+          
           salesNeedingConfirmation.forEach((sale: any) => {
             if (sale.land_piece_ids && Array.isArray(sale.land_piece_ids)) {
               sale.land_piece_ids.forEach((id: string) => allPieceIds.add(id))
             }
+            if (sale.house_ids && Array.isArray(sale.house_ids)) {
+              sale.house_ids.forEach((id: string) => allHouseIds.add(id))
+            }
           })
           
+          // Fetch land pieces
           if (allPieceIds.size > 0) {
             const { data: piecesData, error: piecesError } = await supabase
               .from('land_pieces')
@@ -1034,17 +1065,42 @@ export function SaleConfirmation() {
               sale.land_pieces = (piecesData || []).filter((p: any) => 
                 sale.land_piece_ids && Array.isArray(sale.land_piece_ids) && sale.land_piece_ids.includes(p.id)
               )
-              
-              // Attach payment info for display
-              sale._totalBigAdvancePaid = bigAdvancePaidBySale[sale.id] || 0
-              sale._totalPaid = totalPaidBySale[sale.id] || 0
-              sale._smallAdvancePaid = smallAdvancePaidBySale[sale.id] || 0
             })
           } else {
             salesNeedingConfirmation.forEach((sale: any) => {
               sale.land_pieces = []
             })
           }
+          
+          // Fetch houses
+          if (allHouseIds.size > 0) {
+            const { data: housesData, error: housesError } = await supabase
+              .from('houses')
+              .select('*')
+              .in('id', Array.from(allHouseIds))
+            
+            if (housesError) {
+              console.warn('Error fetching houses:', housesError)
+            }
+            
+            // Attach houses to each sale
+            salesNeedingConfirmation.forEach((sale: any) => {
+              sale.houses = (housesData || []).filter((h: any) => 
+                sale.house_ids && Array.isArray(sale.house_ids) && sale.house_ids.includes(h.id)
+              )
+            })
+          } else {
+            salesNeedingConfirmation.forEach((sale: any) => {
+              sale.houses = []
+            })
+          }
+          
+          // Attach payment info for display to all sales
+          salesNeedingConfirmation.forEach((sale: any) => {
+            sale._totalBigAdvancePaid = bigAdvancePaidBySale[sale.id] || 0
+            sale._totalPaid = totalPaidBySale[sale.id] || 0
+            sale._smallAdvancePaid = smallAdvancePaidBySale[sale.id] || 0
+          })
           
           // Fetch rendezvous data for all sales
           const { data: rendezvousData, error: rendezvousError } = await supabase
@@ -1433,6 +1489,20 @@ export function SaleConfirmation() {
 
   // Calculate per-piece values
   const calculatePieceValues = (sale: SaleWithDetails, piece: LandPiece, offer?: PaymentOffer | null) => {
+    // Guard against null piece
+    if (!piece) {
+      console.error('calculatePieceValues called with null piece')
+      return {
+        pricePerPiece: 0,
+        reservationPerPiece: 0,
+        companyFeePerPiece: 0,
+        totalPayablePerPiece: 0,
+        advancePerPiece: 0,
+        feePercentage: 0,
+        offer: null
+      }
+    }
+    
     const pieceCount = sale.land_piece_ids.length
     
     // Get the offer to use - prioritize passed offer, then selectedOffer state, then sale's selected_offer
@@ -1539,6 +1609,65 @@ export function SaleConfirmation() {
       advancePerPiece,
       feePercentage,
       offer: offerToUse
+    }
+  }
+
+  const handleCancelHouse = async (sale: SaleWithDetails, house: any) => {
+    if (!confirm('هل أنت متأكد من إلغاء بيع هذا المنزل وإعادته إلى الحالة المتاحة؟ سيتم استرداد المبلغ المدفوع.')) {
+      return
+    }
+
+    try {
+      setError(null)
+      
+      // Get all payments for this sale
+      const { data: paymentsData } = await supabase
+        .from('payments')
+        .select('amount_paid')
+        .eq('sale_id', sale.id)
+      
+      const totalPaid = (paymentsData || []).reduce((sum, p) => sum + (parseFloat(p.amount_paid.toString()) || 0), 0)
+      
+      // Cancel the entire sale (house sales are always single-item)
+      const { error: cancelError } = await supabase
+        .from('sales')
+        .update({ status: 'Cancelled' } as any)
+        .eq('id', sale.id)
+      
+      if (cancelError) throw cancelError
+      
+      // Create refund if money was paid
+      if (totalPaid > 0) {
+        await supabase.from('payments').insert([{
+          client_id: sale.client_id,
+          sale_id: sale.id,
+          amount_paid: -totalPaid,
+          payment_type: 'Refund',
+          payment_date: new Date().toISOString().split('T')[0],
+          notes: `استرداد لإلغاء بيع المنزل #${sale.id.slice(0, 8)}`,
+          recorded_by: user?.id || null,
+        }] as any)
+      }
+      
+      // Release the house - update status back to Available
+      await supabase
+        .from('houses')
+        .update({ 
+          status: 'Available',
+          reservation_client_id: null,
+          reserved_until: null
+        } as any)
+        .eq('id', house.id)
+      
+      fetchSales()
+      showNotification('تم إلغاء بيع المنزل بنجاح', 'success')
+    } catch (err) {
+      console.error('Error cancelling house sale:', err)
+      const error = err as any
+      let errorMessage = error.message || 'خطأ غير معروف'
+      
+      setError('حدث خطأ أثناء إلغاء بيع المنزل: ' + errorMessage)
+      showNotification('حدث خطأ أثناء إلغاء بيع المنزل: ' + errorMessage, 'error')
     }
   }
 
@@ -1690,7 +1819,7 @@ export function SaleConfirmation() {
 
 
   const handleConfirmation = async () => {
-    if (!selectedSale || !selectedPiece) return
+    if (!selectedSale || (!selectedPiece && !selectedHouse)) return
     
     // Set pendingConfirmationType before showing pre-confirmation dialog
     setPendingConfirmationType(confirmationType)
@@ -1713,7 +1842,7 @@ export function SaleConfirmation() {
   }
 
   const proceedWithConfirmation = async () => {
-    if (!selectedSale || !selectedPiece) return
+    if (!selectedSale || (!selectedPiece && !selectedHouse)) return
     
     // Prevent double execution using ref (more reliable than state for race conditions)
     if (confirmingRef.current) {
@@ -1727,7 +1856,9 @@ export function SaleConfirmation() {
     setConfirmBeforeConfirmOpen(false)
     
     try {
-      const pieceCount = selectedSale.land_piece_ids.length
+      // Check if this is a house sale
+      const isHouseSale = selectedHouse && (selectedSale as any).house_ids && (selectedSale as any).house_ids.length > 0
+      const itemCount = isHouseSale ? ((selectedSale as any).house_ids?.length || 1) : (selectedSale.land_piece_ids?.length || 1)
       // Get the offer to use - prioritize selectedOffer state, then sale's selected_offer
       const offerToUse = selectedOffer || ((selectedSale as any).selected_offer as PaymentOffer | null)
       
@@ -1758,12 +1889,23 @@ export function SaleConfirmation() {
         companyFeePerPiece = totalCompanyFee
         totalPayablePerPiece = totalPayable
       } else {
-        // Single piece calculation
-        const values = calculatePieceValues(selectedSale, selectedPiece, offerToUse)
-        pricePerPiece = values.pricePerPiece
-        reservationPerPiece = values.reservationPerPiece
-        companyFeePerPiece = values.companyFeePerPiece
-        totalPayablePerPiece = values.totalPayablePerPiece
+        // Single piece or house calculation
+        if (selectedHouse) {
+          // For houses, calculate from house price
+          const housePrice = selectedHouse.price_installment || selectedHouse.price_full
+          const companyFeePercentage = selectedHouse.company_fee_percentage || 0
+          pricePerPiece = housePrice
+          companyFeePerPiece = (housePrice * companyFeePercentage) / 100
+          totalPayablePerPiece = housePrice + companyFeePerPiece
+          reservationPerPiece = (selectedSale.small_advance_amount || 0)
+          // TODO: Calculate advance from offer if available
+        } else if (selectedPiece) {
+          const values = calculatePieceValues(selectedSale, selectedPiece, offerToUse)
+          pricePerPiece = values.pricePerPiece
+          reservationPerPiece = values.reservationPerPiece
+          companyFeePerPiece = values.companyFeePerPiece
+          totalPayablePerPiece = values.totalPayablePerPiece
+        }
       }
       
       // For installment sales with offers, always recalculate received amount from current values
@@ -1806,10 +1948,19 @@ export function SaleConfirmation() {
           }
         }
 
-      if (pieceCount === 1 || (keepPiecesTogether && confirmingAllPieces && pieceCount > 1)) {
-        // Single piece - update the sale directly
+      // Check if this is a house sale (already declared above)
+      if (itemCount === 1 || (keepPiecesTogether && confirmingAllPieces && itemCount > 1)) {
+        // Single piece or house - update the sale directly
         const offerToUse = selectedOffer || ((selectedSale as any).selected_offer as PaymentOffer | null)
-        const { feePercentage } = calculatePieceValues(selectedSale, selectedPiece, offerToUse)
+        let feePercentage = 0
+        
+        if (selectedHouse) {
+          // For houses, get fee percentage from house
+          feePercentage = selectedHouse.company_fee_percentage || 0
+        } else if (selectedPiece) {
+          const values = calculatePieceValues(selectedSale, selectedPiece, offerToUse)
+          feePercentage = values.feePercentage
+        }
         // Use current confirmation time for sale_date (ensures finance page uses confirmation time)
         const confirmationDate = new Date().toISOString().split('T')[0]
         const confirmationDateTime = new Date().toISOString()
@@ -2237,9 +2388,25 @@ export function SaleConfirmation() {
         }
       } else if (!keepPiecesTogether || !confirmingAllPieces) {
         // Multiple pieces - split the sale (only if not keeping pieces together or not confirming all)
-        const costPerPiece = selectedSale.total_purchase_cost / pieceCount
-        const profitPerPiece = selectedSale.profit_margin / pieceCount
-        const { feePercentage: calculatedFeePercentage } = calculatePieceValues(selectedSale, selectedPiece)
+        // Skip splitting for house sales (houses are always single-item sales)
+        if (isHouseSale) {
+          // For house sales, don't split - just confirm the single house
+          // This code path shouldn't be reached for houses, but handle it gracefully
+          console.warn('Attempted to split house sale, which is not supported')
+          return
+        }
+        
+        // Use itemCount for pieces
+        const currentItemCount = selectedSale.land_piece_ids?.length || 1
+        const costPerPiece = selectedSale.total_purchase_cost / currentItemCount
+        const profitPerPiece = selectedSale.profit_margin / currentItemCount
+        
+        // Only calculate fee percentage if we have a piece
+        let calculatedFeePercentage = 0
+        if (selectedPiece) {
+          const values = calculatePieceValues(selectedSale, selectedPiece)
+          calculatedFeePercentage = values.feePercentage
+        }
         
         // Create a new sale for this piece
         const newSaleData: any = {
@@ -2674,8 +2841,8 @@ export function SaleConfirmation() {
                 total_purchase_cost: remainingCost,
                 profit_margin: remainingProfit,
                 small_advance_amount: remainingReservation,
-                big_advance_amount: selectedSale.big_advance_amount ? (selectedSale.big_advance_amount * remainingCount / pieceCount) : 0,
-                monthly_installment_amount: selectedSale.monthly_installment_amount ? (selectedSale.monthly_installment_amount * remainingCount / pieceCount) : null,
+                big_advance_amount: selectedSale.big_advance_amount ? (selectedSale.big_advance_amount * remainingCount / itemCount) : 0,
+                monthly_installment_amount: selectedSale.monthly_installment_amount ? (selectedSale.monthly_installment_amount * remainingCount / itemCount) : null,
               } as any)
               .eq('id', selectedSale.id)
           }
@@ -2698,8 +2865,8 @@ export function SaleConfirmation() {
                 total_purchase_cost: remainingCost,
                 profit_margin: remainingProfit,
                 small_advance_amount: remainingReservation,
-                big_advance_amount: selectedSale.big_advance_amount ? (selectedSale.big_advance_amount * remainingCount / pieceCount) : 0,
-                monthly_installment_amount: selectedSale.monthly_installment_amount ? (selectedSale.monthly_installment_amount * remainingCount / pieceCount) : null,
+                big_advance_amount: selectedSale.big_advance_amount ? (selectedSale.big_advance_amount * remainingCount / itemCount) : 0,
+                monthly_installment_amount: selectedSale.monthly_installment_amount ? (selectedSale.monthly_installment_amount * remainingCount / itemCount) : null,
               } as any)
               .eq('id', selectedSale.id)
           }
@@ -2708,10 +2875,10 @@ export function SaleConfirmation() {
 
       // If confirming all pieces and NOT keeping them together, confirm each remaining piece automatically
       // Use pieceCount to check, as it's more reliable than land_pieces array
-      if (confirmingAllPieces && pieceCount > 1 && !keepPiecesTogether) {
+      if (confirmingAllPieces && itemCount > 1 && !keepPiecesTogether) {
         // Wait a moment for the first piece confirmation to complete and sale to be updated
         await new Promise(resolve => setTimeout(resolve, 200))
-        console.log(`[CONFIRM ALL] Starting confirmation loop for ${pieceCount} pieces`)
+        console.log(`[CONFIRM ALL] Starting confirmation loop for ${itemCount} items`)
         // Store original sale ID and piece IDs BEFORE any confirmations
         const originalSaleId = selectedSale.id
         // Get all pieces - use land_pieces if available, otherwise fetch them
@@ -3277,6 +3444,9 @@ export function SaleConfirmation() {
           {filteredSales.map((sale) => {
             const client = sale.client
             const pieces = sale.land_pieces || []
+            const houses = (sale as any).houses || []
+            // Combine pieces and houses for display - prioritize pieces if both exist
+            const items = pieces.length > 0 ? pieces : houses
             
             return (
               <Card key={sale.id} className="border-l-4 border-l-primary">
@@ -3423,21 +3593,58 @@ export function SaleConfirmation() {
                   </div>
                 </CardHeader>
                 <CardContent className="pt-0 pb-3">
-                  {/* Mobile Card View / Desktop Table View for Pieces */}
+                  {/* Mobile Card View / Desktop Table View for Pieces/Houses */}
                   <div className="md:hidden space-y-2">
-                    {pieces.map((piece: any) => {
-                      const { pricePerPiece, reservationPerPiece, companyFeePerPiece, totalPayablePerPiece, advancePerPiece } = calculatePieceValues(sale, piece)
+                    {items.map((item: any) => {
+                      const saleHouses = (sale as any).houses || []
+                      const isHouse = saleHouses.length > 0 && saleHouses.some((h: any) => h.id === item.id)
+                      const piece = isHouse ? null : item
+                      const house = isHouse ? item : null
+                      
+                      // Calculate values
+                      let pricePerPiece = 0
+                      let reservationPerPiece = 0
+                      let companyFeePerPiece = 0
+                      let totalPayablePerPiece = 0
+                      let advancePerPiece = 0
+                      
+                      if (house) {
+                        const housePrice = house.price_installment || house.price_full
+                        const companyFeePercentage = house.company_fee_percentage || 0
+                        pricePerPiece = housePrice
+                        companyFeePerPiece = (housePrice * companyFeePercentage) / 100
+                        totalPayablePerPiece = housePrice + companyFeePerPiece
+                        reservationPerPiece = (sale.small_advance_amount || 0) / saleHouses.length
+                        
+                        // Calculate advance for installment sales
+                        if (sale.payment_type === 'Installment' && (sale as any).selected_offer) {
+                          const offer = (sale as any).selected_offer
+                          const advanceAmount = offer.advance_is_percentage
+                            ? (housePrice * offer.advance_amount) / 100
+                            : offer.advance_amount
+                          advancePerPiece = Math.max(0, advanceAmount - reservationPerPiece)
+                        }
+                      } else if (piece) {
+                        const values = calculatePieceValues(sale, piece)
+                        pricePerPiece = values.pricePerPiece
+                        reservationPerPiece = values.reservationPerPiece
+                        companyFeePerPiece = values.companyFeePerPiece
+                        totalPayablePerPiece = values.totalPayablePerPiece
+                        advancePerPiece = values.advancePerPiece
+                      }
                       
                       return (
-                        <Card key={piece.id} className="bg-muted/30">
+                        <Card key={item.id} className="bg-muted/30">
                           <CardContent className="p-3">
                             <div className="space-y-2">
                               <div className="flex items-start justify-between">
                                 <div>
                                   <div className="font-medium text-sm">
-                                    {piece.land_batch?.name || 'دفعة'} - #{piece.piece_number}
+                                    {house ? `${house.name} - ${house.place}` : piece ? `${piece.land_batch?.name || 'دفعة'} - #${piece.piece_number}` : 'غير محدد'}
                                   </div>
-                                  <div className="text-xs text-muted-foreground">{piece.surface_area} م²</div>
+                                  <div className="text-xs text-muted-foreground">
+                                    {house ? (house.surface ? `${house.surface} م²` : '') : piece ? `${piece.surface_area} م²` : ''}
+                                  </div>
                                 </div>
                               </div>
                               
@@ -3465,8 +3672,8 @@ export function SaleConfirmation() {
                                   </div>
                                 )}
                                 {(sale.payment_type as any) === 'PromiseOfSale' && (() => {
-                                  const pieceCount = sale.land_piece_ids.length
-                                  const initialPaymentPerPiece = (sale.promise_initial_payment || 0) / pieceCount
+                                  const itemCount = house ? saleHouses.length : (sale.land_piece_ids?.length || 1)
+                                  const initialPaymentPerPiece = (sale.promise_initial_payment || 0) / itemCount
                                   return (
                                     <div>
                                       <span className="text-muted-foreground">المستلم:</span>
@@ -3475,9 +3682,9 @@ export function SaleConfirmation() {
                                   )
                                 })()}
                                 {(sale.payment_type as any) === 'PromiseOfSale' && (() => {
-                                  const pieceCount = sale.land_piece_ids.length
+                                  const itemCount = house ? saleHouses.length : (sale.land_piece_ids?.length || 1)
                                   const totalPricePerPiece = totalPayablePerPiece
-                                  const initialPaymentPerPiece = (sale.promise_initial_payment || 0) / pieceCount
+                                  const initialPaymentPerPiece = (sale.promise_initial_payment || 0) / itemCount
                                   const remaining = totalPricePerPiece - initialPaymentPerPiece - reservationPerPiece
                                   return (
                                     <div>
@@ -3489,7 +3696,7 @@ export function SaleConfirmation() {
                               </div>
                               
                               <div className="flex flex-wrap gap-2 pt-2 border-t">
-                                {profile?.role === 'Owner' && (
+                                {profile?.role === 'Owner' && !house && piece && (
                                   <Button
                                     onClick={() => openEditDialog(sale, piece)}
                                     variant="outline"
@@ -3510,7 +3717,7 @@ export function SaleConfirmation() {
                                   موعد
                                 </Button>
                                 <Button
-                                  onClick={() => handleCancelPiece(sale, piece)}
+                                  onClick={() => house ? handleCancelHouse(sale, house) : piece ? handleCancelPiece(sale, piece) : undefined}
                                   variant="destructive"
                                   size="sm"
                                   className="text-xs h-8 flex-1"
@@ -3522,9 +3729,17 @@ export function SaleConfirmation() {
                                   <Button
                                     onClick={() => {
                                       setSelectedSale(sale)
-                                      setSelectedPiece(piece)
-                                      setPendingConfirmationType('full')
-                                      openConfirmDialog(sale, piece, 'full')
+                                      if (house) {
+                                        setSelectedHouse(house)
+                                        setSelectedPiece(null)
+                                        setPendingConfirmationType('full')
+                                        setConfirmDialogOpen(true)
+                                      } else if (piece) {
+                                        setSelectedPiece(piece)
+                                        setSelectedHouse(null)
+                                        setPendingConfirmationType('full')
+                                        openConfirmDialog(sale, piece, 'full')
+                                      }
                                     }}
                                     className="bg-green-600 hover:bg-green-700 text-xs h-8 flex-1"
                                     size="sm"
@@ -3537,9 +3752,17 @@ export function SaleConfirmation() {
                                   <Button
                                     onClick={() => {
                                       setSelectedSale(sale)
-                                      setSelectedPiece(piece)
-                                      setPendingConfirmationType('bigAdvance')
-                                      openConfirmDialog(sale, piece, 'bigAdvance')
+                                      if (house) {
+                                        setSelectedHouse(house)
+                                        setSelectedPiece(null)
+                                        setPendingConfirmationType('bigAdvance')
+                                        setConfirmDialogOpen(true)
+                                      } else if (piece) {
+                                        setSelectedPiece(piece)
+                                        setSelectedHouse(null)
+                                        setPendingConfirmationType('bigAdvance')
+                                        openConfirmDialog(sale, piece, 'bigAdvance')
+                                      }
                                     }}
                                     className="bg-blue-600 hover:bg-blue-700 text-xs h-8 flex-1"
                                     size="sm"
@@ -3552,9 +3775,17 @@ export function SaleConfirmation() {
                                   <Button
                                     onClick={() => {
                                       setSelectedSale(sale)
-                                      setSelectedPiece(piece)
-                                      setPendingConfirmationType('full')
-                                      openConfirmDialog(sale, piece, 'full')
+                                      if (house) {
+                                        setSelectedHouse(house)
+                                        setSelectedPiece(null)
+                                        setPendingConfirmationType('full')
+                                        setConfirmDialogOpen(true)
+                                      } else if (piece) {
+                                        setSelectedPiece(piece)
+                                        setSelectedHouse(null)
+                                        setPendingConfirmationType('full')
+                                        openConfirmDialog(sale, piece, 'full')
+                                      }
                                     }}
                                     className={`${(sale.promise_initial_payment || 0) > 0 ? 'bg-orange-600 hover:bg-orange-700' : 'bg-purple-600 hover:bg-purple-700'} text-xs h-8 flex-1`}
                                     size="sm"
@@ -3576,7 +3807,7 @@ export function SaleConfirmation() {
                     <Table className="min-w-full text-sm">
                       <TableHeader>
                         <TableRow>
-                          <TableHead className="text-xs">القطعة</TableHead>
+                          <TableHead className="text-xs">{houses.length > 0 ? 'المنزل' : 'القطعة'}</TableHead>
                           <TableHead className="text-right text-xs">السعر</TableHead>
                           <TableHead className="text-right text-xs">العمولة</TableHead>
                           <TableHead className="text-right text-xs">الإجمالي</TableHead>
@@ -3594,16 +3825,53 @@ export function SaleConfirmation() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {pieces.map((piece: any) => {
-                          const { pricePerPiece, reservationPerPiece, companyFeePerPiece, totalPayablePerPiece, advancePerPiece } = calculatePieceValues(sale, piece, (sale as any).selected_offer)
+                        {items.map((item: any) => {
+                          const saleHouses = (sale as any).houses || []
+                          const isHouse = saleHouses.length > 0 && saleHouses.some((h: any) => h.id === item.id)
+                          const piece = isHouse ? null : item
+                          const house = isHouse ? item : null
+                          
+                          // Calculate values
+                          let pricePerPiece = 0
+                          let reservationPerPiece = 0
+                          let companyFeePerPiece = 0
+                          let totalPayablePerPiece = 0
+                          let advancePerPiece = 0
+                          
+                          if (house) {
+                            const housePrice = house.price_installment || house.price_full
+                            const companyFeePercentage = house.company_fee_percentage || 0
+                            pricePerPiece = housePrice
+                            companyFeePerPiece = (housePrice * companyFeePercentage) / 100
+                            totalPayablePerPiece = housePrice + companyFeePerPiece
+                            reservationPerPiece = (sale.small_advance_amount || 0) / saleHouses.length
+                            
+                            // Calculate advance for installment sales
+                            if (sale.payment_type === 'Installment' && (sale as any).selected_offer) {
+                              const offer = (sale as any).selected_offer
+                              const advanceAmount = offer.advance_is_percentage
+                                ? (housePrice * offer.advance_amount) / 100
+                                : offer.advance_amount
+                              advancePerPiece = Math.max(0, advanceAmount - reservationPerPiece)
+                            }
+                          } else if (piece) {
+                            const values = calculatePieceValues(sale, piece, (sale as any).selected_offer)
+                            pricePerPiece = values.pricePerPiece
+                            reservationPerPiece = values.reservationPerPiece
+                            companyFeePerPiece = values.companyFeePerPiece
+                            totalPayablePerPiece = values.totalPayablePerPiece
+                            advancePerPiece = values.advancePerPiece
+                          }
                           
                           return (
-                            <TableRow key={piece.id} className="hover:bg-gray-50">
+                            <TableRow key={item.id} className="hover:bg-gray-50">
                               <TableCell className="py-2">
                                 <div className="font-medium text-xs">
-                                  {piece.land_batch?.name || 'دفعة'} - #{piece.piece_number}
+                                  {house ? `${house.name} - ${house.place}` : `${piece.land_batch?.name || 'دفعة'} - #${piece.piece_number}`}
                                 </div>
-                                <div className="text-xs text-muted-foreground">{piece.surface_area} م²</div>
+                                <div className="text-xs text-muted-foreground">
+                                  {house ? (house.surface ? `${house.surface} م²` : '') : `${piece.surface_area} م²`}
+                                </div>
                               </TableCell>
                               <TableCell className="text-right py-2 text-xs">{formatCurrency(pricePerPiece)}</TableCell>
                               <TableCell className="text-right py-2 text-xs text-blue-600">{formatCurrency(companyFeePerPiece)}</TableCell>
@@ -3613,15 +3881,16 @@ export function SaleConfirmation() {
                                 <TableCell className="text-right py-2 text-xs text-purple-600">{formatCurrency(advancePerPiece)}</TableCell>
                               )}
                               {sale.payment_type === 'PromiseOfSale' && (() => {
-                                const initialPayment = (sale.promise_initial_payment || 0) / sale.land_piece_ids.length
+                                const itemCount = house ? saleHouses.length : (sale.land_piece_ids?.length || 1)
+                                const initialPayment = (sale.promise_initial_payment || 0) / itemCount
                                 return (
                                   <TableCell className="text-right py-2 text-xs text-green-600">{formatCurrency(initialPayment)}</TableCell>
                                 )
                               })()}
                               {sale.payment_type === 'PromiseOfSale' && (() => {
-                                const pieceCount = sale.land_piece_ids.length
+                                const itemCount = house ? saleHouses.length : (sale.land_piece_ids?.length || 1)
                                 const totalPricePerPiece = totalPayablePerPiece
-                                const initialPaymentPerPiece = (sale.promise_initial_payment || 0) / pieceCount
+                                const initialPaymentPerPiece = (sale.promise_initial_payment || 0) / itemCount
                                 const reservationAmount = reservationPerPiece
                                 const remaining = totalPricePerPiece - initialPaymentPerPiece - reservationAmount
                                 return (
@@ -3630,7 +3899,7 @@ export function SaleConfirmation() {
                               })()}
                               <TableCell className="py-2">
                                 <div className="flex flex-wrap gap-1">
-                                  {profile?.role === 'Owner' && (
+                                  {profile?.role === 'Owner' && !house && piece && (
                                     <Button
                                       onClick={() => openEditDialog(sale, piece)}
                                       variant="outline"
@@ -3650,22 +3919,42 @@ export function SaleConfirmation() {
                                     <Calendar className="ml-1 h-3 w-3" />
                                     موعد
                                   </Button>
-                                  <Button
-                                    onClick={() => handleCancelPiece(sale, piece)}
-                                    variant="destructive"
-                                    size="sm"
-                                    className="text-xs px-2 h-7"
-                                  >
-                                    <XCircle className="ml-1 h-3 w-3" />
-                                    إلغاء
-                                  </Button>
+                                  {house ? (
+                                    <Button
+                                      onClick={() => handleCancelHouse(sale, house)}
+                                      variant="destructive"
+                                      size="sm"
+                                      className="text-xs px-2 h-7"
+                                    >
+                                      <XCircle className="ml-1 h-3 w-3" />
+                                      إلغاء
+                                    </Button>
+                                  ) : piece ? (
+                                    <Button
+                                      onClick={() => handleCancelPiece(sale, piece)}
+                                      variant="destructive"
+                                      size="sm"
+                                      className="text-xs px-2 h-7"
+                                    >
+                                      <XCircle className="ml-1 h-3 w-3" />
+                                      إلغاء
+                                    </Button>
+                                  ) : null}
                                   {sale.payment_type === 'Full' && (
                                     <Button
                                       onClick={() => {
                                         setSelectedSale(sale)
-                                        setSelectedPiece(piece)
-                                        setPendingConfirmationType('full')
-                                        openConfirmDialog(sale, piece, 'full')
+                                        if (house) {
+                                          setSelectedHouse(house)
+                                          setSelectedPiece(null)
+                                          setPendingConfirmationType('full')
+                                          setConfirmDialogOpen(true)
+                                        } else if (piece) {
+                                          setSelectedPiece(piece)
+                                          setSelectedHouse(null)
+                                          setPendingConfirmationType('full')
+                                          openConfirmDialog(sale, piece, 'full')
+                                        }
                                       }}
                                       className="bg-green-600 hover:bg-green-700 text-xs px-2 h-7"
                                       size="sm"
@@ -3679,9 +3968,17 @@ export function SaleConfirmation() {
                                       <Button
                                         onClick={() => {
                                           setSelectedSale(sale)
-                                          setSelectedPiece(piece)
-                                          setPendingConfirmationType('bigAdvance')
-                                          openConfirmDialog(sale, piece, 'bigAdvance')
+                                          if (house) {
+                                            setSelectedHouse(house)
+                                            setSelectedPiece(null)
+                                            setPendingConfirmationType('bigAdvance')
+                                            setConfirmDialogOpen(true)
+                                          } else if (piece) {
+                                            setSelectedPiece(piece)
+                                            setSelectedHouse(null)
+                                            setPendingConfirmationType('bigAdvance')
+                                            openConfirmDialog(sale, piece, 'bigAdvance')
+                                          }
                                         }}
                                         className="bg-blue-600 hover:bg-blue-700 text-xs px-2 h-7"
                                         size="sm"
@@ -3695,9 +3992,17 @@ export function SaleConfirmation() {
                                     <Button
                                       onClick={() => {
                                         setSelectedSale(sale)
-                                        setSelectedPiece(piece)
-                                        setPendingConfirmationType('full')
-                                        openConfirmDialog(sale, piece, 'full')
+                                        if (house) {
+                                          setSelectedHouse(house)
+                                          setSelectedPiece(null)
+                                          setPendingConfirmationType('full')
+                                          setConfirmDialogOpen(true)
+                                        } else if (piece) {
+                                          setSelectedPiece(piece)
+                                          setSelectedHouse(null)
+                                          setPendingConfirmationType('full')
+                                          openConfirmDialog(sale, piece, 'full')
+                                        }
                                       }}
                                       className={`${(sale.promise_initial_payment || 0) > 0 ? 'bg-orange-600 hover:bg-orange-700' : 'bg-purple-600 hover:bg-purple-700'} text-xs px-2 h-7`}
                                       size="sm"
@@ -3748,7 +4053,7 @@ export function SaleConfirmation() {
               })()}
             </DialogTitle>
           </DialogHeader>
-          {selectedSale && selectedPiece && (() => {
+          {selectedSale && (selectedPiece || selectedHouse) && (() => {
                   // Get the offer to use - prioritize selectedOffer state, then sale's selected_offer
                   const offerToUse = selectedOffer || ((selectedSale as any).selected_offer as PaymentOffer | null)
                   
@@ -3760,7 +4065,16 @@ export function SaleConfirmation() {
                   let feePercentage = 0
                   let calculatedOffer = offerToUse
                   
-                  if (confirmingAllPieces && selectedSale.land_pieces && selectedSale.land_pieces.length > 1) {
+                  if (selectedHouse) {
+                    // House sale calculation
+                    const housePrice = selectedHouse.price_installment || selectedHouse.price_full
+                    const companyFeePercentage = selectedHouse.company_fee_percentage || 0
+                    pricePerPiece = housePrice
+                    companyFeePerPiece = (housePrice * companyFeePercentage) / 100
+                    totalPayablePerPiece = housePrice + companyFeePerPiece
+                    reservationPerPiece = (selectedSale.small_advance_amount || 0)
+                    feePercentage = companyFeePercentage
+                  } else if (confirmingAllPieces && selectedSale.land_pieces && selectedSale.land_pieces.length > 1) {
                     // Calculate totals for all pieces
                     let totalPrice = 0
                     let totalReservation = 0
@@ -3782,7 +4096,7 @@ export function SaleConfirmation() {
                     companyFeePerPiece = totalCompanyFee
                     totalPayablePerPiece = totalPayable
                     feePercentage = totalFeePercentage
-                  } else {
+                  } else if (selectedPiece) {
                     // Single piece calculation
                     const values = calculatePieceValues(selectedSale, selectedPiece, offerToUse)
                     pricePerPiece = values.pricePerPiece
@@ -3809,15 +4123,22 @@ export function SaleConfirmation() {
             // NOTE: For installments, advance is calculated from PRICE (not total payable with commission)
             // Commission is collected SEPARATELY at confirmation with the advance
             let advanceAmount = 0
+            let fullAdvanceAmount = 0
             if (calculatedOffer && confirmationType === 'bigAdvance' && selectedSale.payment_type === 'Installment') {
               // Advance should be calculated from pricePerPiece (WITHOUT commission)
               // For "confirm all", pricePerPiece is already the total for all pieces
-              const fullAdvanceAmount = calculatedOffer.advance_is_percentage
-                ? (pricePerPiece * calculatedOffer.advance_amount) / 100
+              // For houses, use house price; for pieces, use piece price
+              const basePrice = selectedHouse 
+                ? (selectedHouse.price_installment || selectedHouse.price_full)
+                : pricePerPiece
+              
+              fullAdvanceAmount = calculatedOffer.advance_is_percentage
+                ? (basePrice * calculatedOffer.advance_amount) / 100
                 : (confirmingAllPieces && selectedSale.land_pieces && selectedSale.land_pieces.length > 1
                     ? calculatedOffer.advance_amount * selectedSale.land_pieces.length
                     : calculatedOffer.advance_amount)
               // التسبقة = Advance - Reservation (العربون is deducted from التسبقة)
+              // NOTE: advanceAmount is the amount AFTER deducting reservation (this is what will be collected)
               advanceAmount = Math.max(0, fullAdvanceAmount - reservationPerPiece)
             } else if (confirmationType === 'full') {
               if ((selectedSale.payment_type as any) === 'PromiseOfSale') {
@@ -3835,13 +4156,21 @@ export function SaleConfirmation() {
             }
             }
             
-            // Calculate remaining for installments = Price - Advance (after reservation deduction) - Commission
-            // التسبقة = Advance - Reservation (العربون is deducted from التسبقة)
+            // Calculate remaining for installments = Price - Full Advance - Commission
+            // NOTE: Use fullAdvanceAmount (before reservation deduction) for remaining calculation
+            // The reservation is already paid, so it doesn't affect the remaining amount
             // Commission is collected separately at confirmation with advance
-            let remainingAfterAdvance = pricePerPiece - advanceAmount - companyFeePerPiece
+            let remainingAfterAdvance = 0
             if (confirmationType === 'full' && selectedSale.payment_type === 'PromiseOfSale') {
               // For PromiseOfSale, remaining is already calculated in advanceAmount
               remainingAfterAdvance = advanceAmount
+            } else if (confirmationType === 'bigAdvance' && selectedSale.payment_type === 'Installment') {
+              // For installment: Remaining = Price - Full Advance - Commission
+              // Use fullAdvanceAmount (the original advance before reservation deduction)
+              remainingAfterAdvance = pricePerPiece - (fullAdvanceAmount || advanceAmount) - companyFeePerPiece
+            } else {
+              // For full payment: Remaining = Total Payable - Reservation
+              remainingAfterAdvance = totalPayablePerPiece - (reservationPaid ? reservationPerPiece : 0)
             }
             
             // Calculate number of months and monthly payment from offer
@@ -3956,20 +4285,12 @@ export function SaleConfirmation() {
                       </span>
                     </div>
                     
-                    {confirmationType === 'bigAdvance' && selectedSale.payment_type === 'Installment' && calculatedOffer && (() => {
-                      // Calculate full advance amount for display
-                      // For "confirm all", pricePerPiece is already the total for all pieces
-                      const fullAdvanceAmount = calculatedOffer.advance_is_percentage
-                        ? (pricePerPiece * calculatedOffer.advance_amount) / 100
-                        : (confirmingAllPieces && selectedSale.land_pieces && selectedSale.land_pieces.length > 1
-                            ? calculatedOffer.advance_amount * selectedSale.land_pieces.length
-                            : calculatedOffer.advance_amount)
-                      
+                    {confirmationType === 'bigAdvance' && selectedSale.payment_type === 'Installment' && calculatedOffer && fullAdvanceAmount > 0 && (() => {
                       return (
                         <>
                           {/* Amount to collect at confirmation = التسبقة (after reservation deduction) + Commission */}
                           <div className="bg-purple-50 border border-purple-200 rounded p-3 mt-2">
-                            {/* Breakdown of التسبقة calculation */}
+                            {/* Breakdown of التسبقة calculation - shown for reference only */}
                             <div className="space-y-1">
                               <div className="flex justify-between items-center text-xs sm:text-sm">
                                 <span className="text-purple-700">التسبقة:</span>
@@ -3979,7 +4300,7 @@ export function SaleConfirmation() {
                               </div>
                               {reservationPaid && reservationPerPiece > 0 && (
                                 <div className="flex justify-between items-center text-xs sm:text-sm text-purple-600 pl-2">
-                                  <span>(-) العربون:</span>
+                                  <span>(-) العربون (مدفوع مسبقاً):</span>
                                   <span className="font-semibold">
                                     {formatCurrency(reservationPerPiece)}
                                   </span>
@@ -4292,7 +4613,7 @@ export function SaleConfirmation() {
         open={confirmBeforeConfirmOpen}
         onOpenChange={setConfirmBeforeConfirmOpen}
         onConfirm={() => {
-          if (selectedSale && selectedPiece && pendingConfirmationType && !confirming) {
+          if (selectedSale && (selectedPiece || selectedHouse) && pendingConfirmationType && !confirming) {
             setConfirmBeforeConfirmOpen(false)
             proceedWithConfirmation()
           }
@@ -4300,13 +4621,18 @@ export function SaleConfirmation() {
         disabled={confirming}
         title="تأكيد البيع"
         description={
-          selectedSale && selectedPiece && (() => {
+          selectedSale && (selectedPiece || selectedHouse) && (() => {
             const clientName = selectedSale.client?.name || 'غير معروف'
-            const pieceInfo = confirmingAllPieces && selectedSale.land_pieces && selectedSale.land_pieces.length > 1
-              ? `${selectedSale.land_pieces.length} قطع`
-              : `#${selectedPiece.piece_number}`
+            let itemInfo = ''
+            if (selectedHouse) {
+              itemInfo = `${selectedHouse.name} - ${selectedHouse.place}`
+            } else if (confirmingAllPieces && selectedSale.land_pieces && selectedSale.land_pieces.length > 1) {
+              itemInfo = `${selectedSale.land_pieces.length} قطع`
+            } else if (selectedPiece) {
+              itemInfo = `#${selectedPiece.piece_number}`
+            }
             
-            return `هل أنت متأكد أنك تريد إتمام البيع للعميل ${clientName} (${pieceInfo})؟`
+            return `هل أنت متأكد أنك تريد إتمام البيع للعميل ${clientName} (${itemInfo})؟`
           })() || 'هل أنت متأكد أنك تريد إتمام البيع؟'
         }
         confirmText={confirming ? 'جاري التأكيد...' : 'نعم، متأكد'}

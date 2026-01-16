@@ -3,7 +3,7 @@
 export const translations = {
   ar: {
     // Navigation
-      nav: {
+    nav: {
       home: 'الرئيسية',
       land: 'إدارة الأراضي',
       homes: 'إدارة المنازل',
@@ -138,8 +138,8 @@ export const translations = {
     errorCreatingSale: 'خطأ في إنشاء البيع',
     sellingHouseNote: 'بيع منزل',
     companyFeeAppliesToBoth: 'تطبق على كلا النوعين (بالحاضر وبالتقسيط)',
-  },
-    // Land Management
+    },
+  // Land Management
   land: {
     title: 'إدارة الأراضي',
       batch: 'دفعة',
