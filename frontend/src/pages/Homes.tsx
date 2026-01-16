@@ -1054,16 +1054,16 @@ export function Homes() {
         
         // Use the fetched sale
         const saleId = fetchedSales[0].id
-        
-        // Update house status to Reserved
+
+      // Update house status to Reserved
         const { error: houseError } = await supabase
-          .from('houses')
-          .update({ 
-            status: 'Reserved',
+        .from('houses')
+        .update({ 
+          status: 'Reserved',
             reservation_client_id: currentClient.id,
-            reserved_until: saleForm.deadline_date || null,
-          } as any)
-          .eq('id', selectedHouse.id)
+          reserved_until: saleForm.deadline_date || null,
+        } as any)
+        .eq('id', selectedHouse.id)
         
         if (houseError) {
           // If house update fails, try to delete the sale we just created
@@ -1071,8 +1071,8 @@ export function Homes() {
           throw new Error('فشل في تحديث حالة المنزل: ' + houseError.message)
         }
 
-        // Create payment record for reservation
-        if (reservationAmount > 0) {
+      // Create payment record for reservation
+      if (reservationAmount > 0) {
           const { error: paymentError } = await supabase
             .from('payments')
             .insert([{
@@ -1087,7 +1087,7 @@ export function Homes() {
           
           if (paymentError) {
             // If payment creation fails, rollback house status
-            await supabase
+        await supabase
               .from('houses')
               .update({ status: 'Available', reservation_client_id: null, reserved_until: null } as any)
               .eq('id', selectedHouse.id)

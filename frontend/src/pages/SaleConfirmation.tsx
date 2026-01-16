@@ -102,6 +102,7 @@ export function SaleConfirmation() {
   const [editDialogOpen, setEditDialogOpen] = useState(false)
   const [editingSale, setEditingSale] = useState<SaleWithDetails | null>(null)
   const [editingPiece, setEditingPiece] = useState<LandPiece | null>(null)
+  const [editingHouse, setEditingHouse] = useState<any | null>(null) // For house sales
   const [savingEdit, setSavingEdit] = useState(false)
   const [editForm, setEditForm] = useState({
     total_selling_price: '',
@@ -187,8 +188,8 @@ export function SaleConfirmation() {
     setRendezvousDialogOpen(true)
   }
 
-  // Open edit dialog for sale (Owner only)
-  const openEditDialog = async (sale: SaleWithDetails, piece: LandPiece) => {
+  // Open edit dialog for sale (Owner only) - supports both pieces and houses
+  const openEditDialog = async (sale: SaleWithDetails, piece?: LandPiece, house?: any) => {
     if (profile?.role !== 'Owner') {
       showNotification('ليس لديك صلاحية لتعديل المبيعات', 'error')
       return
@@ -221,6 +222,79 @@ export function SaleConfirmation() {
       freshSale = sale
     }
 
+    // Handle both pieces and houses
+    if (house) {
+      // Fetch fresh house data from database
+      let freshHouse: any = null
+      try {
+        const { data, error: houseError } = await supabase
+          .from('houses')
+          .select('*')
+          .eq('id', house.id)
+          .single()
+
+        if (houseError) {
+          console.error('Error fetching fresh house data:', houseError)
+          freshHouse = house
+        } else if (data) {
+          freshHouse = data
+        } else {
+          freshHouse = house
+        }
+      } catch (error) {
+        console.error('Error fetching fresh house:', error)
+        freshHouse = house
+      }
+
+      // Set the fresh data
+      if (freshSale) setEditingSale(freshSale)
+      if (freshHouse) setEditingHouse(freshHouse)
+      setEditingPiece(null) // Clear piece when editing house
+      
+      // Use the fresh sale data (or fallback to passed sale)
+      const currentSale = freshSale || sale
+      const currentHouse = freshHouse || house
+      
+      // For houses, use the sale price directly (single house per sale)
+      const housePrice = currentSale.total_selling_price
+      
+      // Initialize form with current sale values
+      const currentCommissionAmount = currentSale.company_fee_amount ? currentSale.company_fee_amount.toFixed(2) : ''
+      const currentReservation = currentSale.small_advance_amount ? currentSale.small_advance_amount.toFixed(2) : ''
+      setEditForm({
+        total_selling_price: housePrice.toFixed(2),
+        company_fee_percentage: (currentSale.company_fee_percentage || 0).toString(),
+        company_fee_amount: currentCommissionAmount,
+        commission_input_method: 'percentage',
+        company_fee_note: (currentSale as any).company_fee_note || '',
+        small_advance_amount: currentReservation,
+        selected_offer_id: currentSale.selected_offer_id || '',
+        notes: currentSale.notes || '',
+        sale_date: currentSale.sale_date || '',
+        deadline_date: currentSale.deadline_date || '',
+        contract_editor_id: currentSale.contract_editor_id || '',
+        installment_start_date: currentSale.installment_start_date || '',
+        number_of_installments: currentSale.number_of_installments?.toString() || '',
+        monthly_installment_amount: currentSale.monthly_installment_amount ? currentSale.monthly_installment_amount.toFixed(2) : '',
+        promise_initial_payment: currentSale.promise_initial_payment ? currentSale.promise_initial_payment.toFixed(2) : '',
+        promise_completion_date: currentSale.promise_completion_date || '',
+      })
+      
+      // Load available payment offers for this house
+      try {
+        const { data: houseOffers } = await supabase
+          .from('payment_offers')
+          .select('*')
+          .eq('house_id', house.id)
+          .order('is_default', { ascending: false })
+          .order('created_at', { ascending: true })
+        
+        setAvailableOffersForEdit(houseOffers || [])
+      } catch (error) {
+        console.error('Error loading house offers:', error)
+        setAvailableOffersForEdit([])
+      }
+    } else if (piece) {
     // Fetch fresh piece data from database
     let freshPiece: LandPiece | null = null
     try {
@@ -249,6 +323,7 @@ export function SaleConfirmation() {
     // Set the fresh data
     if (freshSale) setEditingSale(freshSale)
     if (freshPiece) setEditingPiece(freshPiece)
+      setEditingHouse(null) // Clear house when editing piece
     
     // Use the fresh sale data (or fallback to passed sale)
     const currentSale = freshSale || sale
@@ -315,6 +390,10 @@ export function SaleConfirmation() {
     } catch (error) {
       console.error('Error loading offers:', error)
       setAvailableOffersForEdit([])
+      }
+    } else {
+      showNotification('يجب تحديد قطعة أرض أو منزل للتعديل', 'error')
+      return
     }
     
     setEditDialogOpen(true)
@@ -322,7 +401,7 @@ export function SaleConfirmation() {
 
   // Save edited sale
   const saveEditSale = async () => {
-    if (!editingSale || !editingPiece || savingEdit) return
+    if (!editingSale || (!editingPiece && !editingHouse) || savingEdit) return
     
     // Server-side permission validation
     try {
@@ -341,7 +420,9 @@ export function SaleConfirmation() {
     setSavingEdit(true)
     
     try {
-      const pieceCount = editingSale.land_piece_ids.length
+      // Handle both pieces and houses
+      const isHouseSale = !!editingHouse
+      const pieceCount = isHouseSale ? 1 : (editingSale.land_piece_ids?.length || 1)
       const newPricePerPiece = parseFloat(editForm.total_selling_price) || 0
       
       if (newPricePerPiece <= 0) {
@@ -394,8 +475,12 @@ export function SaleConfirmation() {
         // Calculate relationship between number_of_installments and monthly_installment_amount
         const pricePerPiece = parseFloat(editForm.total_selling_price) || 0
         const reservationPerPiece = parseFloat(editForm.small_advance_amount) || 0
-        const advancePerPiece = editingSale.big_advance_amount ? (editingSale.big_advance_amount / pieceCount) : 0
-        const commissionPerPiece = newCompanyFee > 0 ? (newCompanyFee / pieceCount) : 0
+        const advancePerPiece = isHouseSale 
+          ? (editingSale.big_advance_amount || 0)
+          : (editingSale.big_advance_amount ? (editingSale.big_advance_amount / pieceCount) : 0)
+        const commissionPerPiece = isHouseSale
+          ? newCompanyFee
+          : (newCompanyFee > 0 ? (newCompanyFee / pieceCount) : 0)
         const remainingForInstallments = pricePerPiece - reservationPerPiece - advancePerPiece - commissionPerPiece
         
         if (editForm.number_of_installments && editForm.monthly_installment_amount) {
@@ -440,7 +525,44 @@ export function SaleConfirmation() {
         updates.promise_completion_date = editForm.promise_completion_date || null
       }
       
-      if (pieceCount === 1 || (keepPiecesTogether && confirmingAllPieces && pieceCount > 1)) {
+      if (isHouseSale) {
+        // House sale - update price directly
+        const houseCost = editingHouse.purchase_cost || 0
+        const newTotalPrice = newPricePerPiece
+        const newProfit = newTotalPrice - houseCost
+        
+        updates.total_selling_price = newTotalPrice
+        // If company_fee_percentage is 0, company_fee_amount should also be 0
+        // Otherwise, use calculated amount or null
+        if (newCompanyFeePercentage === 0) {
+          updates.company_fee_amount = 0
+        } else {
+          updates.company_fee_amount = newCompanyFee > 0 ? parseFloat(newCompanyFee.toFixed(2)) : null
+        }
+        updates.profit_margin = newProfit
+        
+        // Update house price in database
+        if (editingSale.payment_type === 'Full' || editingSale.payment_type === 'PromiseOfSale') {
+          const { error: houseUpdateError } = await supabase
+            .from('houses')
+            .update({ price_full: newPricePerPiece })
+            .eq('id', editingHouse.id)
+          if (houseUpdateError) {
+            console.error('Error updating house price:', houseUpdateError)
+            throw houseUpdateError
+          }
+        } else {
+          // For installment, update price_installment
+          const { error: houseUpdateError } = await supabase
+            .from('houses')
+            .update({ price_installment: newPricePerPiece })
+            .eq('id', editingHouse.id)
+          if (houseUpdateError) {
+            console.error('Error updating house price:', houseUpdateError)
+            throw houseUpdateError
+          }
+        }
+      } else if (pieceCount === 1 || (keepPiecesTogether && confirmingAllPieces && pieceCount > 1)) {
         // Single piece - update price directly
         const pieceCost = editingPiece.purchase_cost || 0
         const newTotalPrice = newPricePerPiece
@@ -510,10 +632,14 @@ export function SaleConfirmation() {
               : selectedOffer.advance_amount
           }
         } else {
-          advancePerPiece = editingSale.big_advance_amount ? (editingSale.big_advance_amount / pieceCount) : 0
+          advancePerPiece = isHouseSale
+            ? (editingSale.big_advance_amount || 0)
+            : (editingSale.big_advance_amount ? (editingSale.big_advance_amount / pieceCount) : 0)
         }
         
-        const commissionPerPiece = newCompanyFee > 0 ? (newCompanyFee / pieceCount) : 0
+        const commissionPerPiece = isHouseSale
+          ? newCompanyFee
+          : (newCompanyFee > 0 ? (newCompanyFee / pieceCount) : 0)
         const remainingForInstallments = pricePerPiece - reservationPerPiece - advancePerPiece - commissionPerPiece
         
         // Calculate monthly amount and months
@@ -537,7 +663,8 @@ export function SaleConfirmation() {
         }
         
         // Update offer's price_per_m2_installment to match the new price (always update if offer exists)
-        const pricePerM2 = editingPiece.surface_area > 0 ? (pricePerPiece / editingPiece.surface_area) : 0
+        const surfaceArea = isHouseSale ? (editingHouse.surface || 0) : (editingPiece.surface_area || 0)
+        const pricePerM2 = surfaceArea > 0 ? (pricePerPiece / surfaceArea) : 0
         
         if (editForm.selected_offer_id) {
           // Update selected offer with new price and installments
@@ -587,13 +714,11 @@ export function SaleConfirmation() {
             const { data: existingOffer } = await supabase
               .from('payment_offers')
               .select('id')
-              .eq('land_piece_id', editingPiece.id)
+              .eq(isHouseSale ? 'house_id' : 'land_piece_id', isHouseSale ? editingHouse.id : editingPiece.id)
               .eq('is_default', true)
               .maybeSingle()
             
-            const offerData = {
-              land_piece_id: editingPiece.id,
-              land_batch_id: editingPiece.land_batch_id,
+            const offerData: any = {
               price_per_m2_installment: pricePerM2,
               company_fee_percentage: newCompanyFeePercentage,
               advance_amount: advancePerPiece,
@@ -601,6 +726,16 @@ export function SaleConfirmation() {
               monthly_payment: monthlyAmount > 0 ? monthlyAmount : null,
               number_of_months: months > 0 ? months : null,
               is_default: true,
+            }
+            
+            if (isHouseSale) {
+              offerData.house_id = editingHouse.id
+              offerData.land_piece_id = null
+              offerData.land_batch_id = null
+            } else {
+              offerData.land_piece_id = editingPiece.id
+              offerData.land_batch_id = editingPiece.land_batch_id
+              offerData.house_id = null
             }
             
             if (existingOffer) {
@@ -626,9 +761,11 @@ export function SaleConfirmation() {
         }
       }
       
-      // Update piece price in database FIRST (for both single and multi-piece sales)
-      // This ensures the piece price is stored and will be used by calculatePieceValues
-      const updatedPiecePrice = newPricePerPiece
+      // Update piece/house price in database FIRST (for both single and multi-piece sales)
+      // This ensures the price is stored and will be used by calculatePieceValues
+      const updatedPrice = newPricePerPiece
+      if (!isHouseSale) {
+        // Update piece price
       if (editingSale.payment_type === 'Full' || editingSale.payment_type === 'PromiseOfSale') {
         const { error: pieceUpdateError } = await supabase
           .from('land_pieces')
@@ -647,6 +784,7 @@ export function SaleConfirmation() {
         if (pieceUpdateError) {
           console.error('Error updating piece price:', pieceUpdateError)
           throw pieceUpdateError
+          }
         }
       }
       
@@ -679,13 +817,40 @@ export function SaleConfirmation() {
       // Update the sale in state immediately to reflect changes
       setSales(prevSales => prevSales.map(sale => {
         if (sale.id === editingSale.id) {
+          if (isHouseSale) {
+            // Update the house in houses array with new price
+            const updatedHouses = (sale as any).houses?.map((h: any) => {
+              if (h.id === editingHouse.id) {
+                if (sale.payment_type === 'Full' || sale.payment_type === 'PromiseOfSale') {
+                  return { ...h, price_full: updatedPrice }
+                } else {
+                  return { ...h, price_installment: updatedPrice }
+                }
+              }
+              return h
+            }) || []
+            
+            return {
+              ...sale,
+              ...updates,
+              houses: updatedHouses,
+              // Update selected_offer if it was changed
+              selected_offer: updatedOffer || (sale as any).selected_offer,
+              // Ensure company_fee_percentage is set correctly (preserve 0 as 0, not null)
+              company_fee_percentage: (editForm.commission_input_method === 'percentage' && editForm.company_fee_percentage !== '') 
+                ? newCompanyFeePercentage  // User specified a percentage (including 0), use it
+                : (newCompanyFeePercentage > 0 ? newCompanyFeePercentage : null),
+              // Ensure company_fee_amount matches company_fee_percentage
+              company_fee_amount: (newCompanyFeePercentage === 0) ? 0 : (updates.company_fee_amount || null)
+            }
+          } else {
           // Update the piece in land_pieces array with new price
           const updatedPieces = sale.land_pieces?.map((p: any) => {
             if (p.id === editingPiece.id) {
               if (sale.payment_type === 'Full' || sale.payment_type === 'PromiseOfSale') {
-                return { ...p, selling_price_full: updatedPiecePrice }
+                  return { ...p, selling_price_full: updatedPrice }
               } else {
-                return { ...p, selling_price_installment: updatedPiecePrice }
+                  return { ...p, selling_price_installment: updatedPrice }
               }
             }
             return p
@@ -703,6 +868,7 @@ export function SaleConfirmation() {
               : (newCompanyFeePercentage > 0 ? newCompanyFeePercentage : null),
             // Ensure company_fee_amount matches company_fee_percentage
             company_fee_amount: (newCompanyFeePercentage === 0) ? 0 : (updates.company_fee_amount || null)
+            }
           }
         }
         return sale
@@ -712,6 +878,7 @@ export function SaleConfirmation() {
       setEditDialogOpen(false)
       setEditingSale(null)
       setEditingPiece(null)
+      setEditingHouse(null)
       
       // No need to refresh - state is already updated above
       // This prevents losing scroll position
@@ -2218,7 +2385,17 @@ export function SaleConfirmation() {
           updates.notes = (selectedSale.notes || '') + '\n' + confirmationNotes
         }
 
-        // Update land piece status first
+        // Update land piece or house status
+        if (selectedHouse) {
+          // House sale - update house status
+          const houseStatus = confirmationType === 'full' ? 'Sold' : 'Reserved'
+          const { error: houseError } = await supabase
+            .from('houses')
+            .update({ status: houseStatus } as any)
+            .eq('id', selectedHouse.id)
+          if (houseError) throw houseError
+        } else if (selectedPiece) {
+          // Land piece sale - update piece status
         if (confirmationType === 'full') {
           const { error: pieceError } = await supabase
             .from('land_pieces')
@@ -2286,6 +2463,7 @@ export function SaleConfirmation() {
                 if (offersError) {
                   console.error('Error creating piece offers:', offersError)
                   // Don't throw - piece status update was successful, offers are secondary
+                  }
                   }
                 }
               }
@@ -3696,12 +3874,13 @@ export function SaleConfirmation() {
                               </div>
                               
                               <div className="flex flex-wrap gap-2 pt-2 border-t">
-                                {profile?.role === 'Owner' && !house && piece && (
+                                {profile?.role === 'Owner' && (
                                   <Button
-                                    onClick={() => openEditDialog(sale, piece)}
+                                    onClick={() => house ? openEditDialog(sale, undefined, house) : (piece ? openEditDialog(sale, piece) : null)}
                                     variant="outline"
                                     size="sm"
                                     className="text-xs h-8 flex-1 border-blue-300 text-blue-700 hover:bg-blue-50"
+                                    disabled={!house && !piece}
                                   >
                                     <Edit className="ml-1 h-3 w-3" />
                                     تعديل
@@ -3735,10 +3914,10 @@ export function SaleConfirmation() {
                                         setPendingConfirmationType('full')
                                         setConfirmDialogOpen(true)
                                       } else if (piece) {
-                                        setSelectedPiece(piece)
+                                      setSelectedPiece(piece)
                                         setSelectedHouse(null)
-                                        setPendingConfirmationType('full')
-                                        openConfirmDialog(sale, piece, 'full')
+                                      setPendingConfirmationType('full')
+                                      openConfirmDialog(sale, piece, 'full')
                                       }
                                     }}
                                     className="bg-green-600 hover:bg-green-700 text-xs h-8 flex-1"
@@ -3758,10 +3937,10 @@ export function SaleConfirmation() {
                                         setPendingConfirmationType('bigAdvance')
                                         setConfirmDialogOpen(true)
                                       } else if (piece) {
-                                        setSelectedPiece(piece)
+                                      setSelectedPiece(piece)
                                         setSelectedHouse(null)
-                                        setPendingConfirmationType('bigAdvance')
-                                        openConfirmDialog(sale, piece, 'bigAdvance')
+                                      setPendingConfirmationType('bigAdvance')
+                                      openConfirmDialog(sale, piece, 'bigAdvance')
                                       }
                                     }}
                                     className="bg-blue-600 hover:bg-blue-700 text-xs h-8 flex-1"
@@ -3781,10 +3960,10 @@ export function SaleConfirmation() {
                                         setPendingConfirmationType('full')
                                         setConfirmDialogOpen(true)
                                       } else if (piece) {
-                                        setSelectedPiece(piece)
+                                      setSelectedPiece(piece)
                                         setSelectedHouse(null)
-                                        setPendingConfirmationType('full')
-                                        openConfirmDialog(sale, piece, 'full')
+                                      setPendingConfirmationType('full')
+                                      openConfirmDialog(sale, piece, 'full')
                                       }
                                     }}
                                     className={`${(sale.promise_initial_payment || 0) > 0 ? 'bg-orange-600 hover:bg-orange-700' : 'bg-purple-600 hover:bg-purple-700'} text-xs h-8 flex-1`}
@@ -3899,12 +4078,13 @@ export function SaleConfirmation() {
                               })()}
                               <TableCell className="py-2">
                                 <div className="flex flex-wrap gap-1">
-                                  {profile?.role === 'Owner' && !house && piece && (
+                                  {profile?.role === 'Owner' && (
                                     <Button
-                                      onClick={() => openEditDialog(sale, piece)}
+                                      onClick={() => house ? openEditDialog(sale, undefined, house) : (piece ? openEditDialog(sale, piece) : null)}
                                       variant="outline"
                                       size="sm"
                                       className="text-xs px-2 h-7 border-blue-300 text-blue-700 hover:bg-blue-50"
+                                      disabled={!house && !piece}
                                     >
                                       <Edit className="ml-1 h-3 w-3" />
                                       تعديل
@@ -3920,15 +4100,15 @@ export function SaleConfirmation() {
                                     موعد
                                   </Button>
                                   {house ? (
-                                    <Button
+                                  <Button
                                       onClick={() => handleCancelHouse(sale, house)}
-                                      variant="destructive"
-                                      size="sm"
-                                      className="text-xs px-2 h-7"
-                                    >
-                                      <XCircle className="ml-1 h-3 w-3" />
-                                      إلغاء
-                                    </Button>
+                                    variant="destructive"
+                                    size="sm"
+                                    className="text-xs px-2 h-7"
+                                  >
+                                    <XCircle className="ml-1 h-3 w-3" />
+                                    إلغاء
+                                  </Button>
                                   ) : piece ? (
                                     <Button
                                       onClick={() => handleCancelPiece(sale, piece)}
@@ -4744,12 +4924,16 @@ export function SaleConfirmation() {
           <DialogHeader>
             <DialogTitle>تعديل بيانات البيع</DialogTitle>
           </DialogHeader>
-          {editingSale && editingPiece && (
+          {editingSale && (editingPiece || editingHouse) && (
             <div className="space-y-4">
               <div className="bg-gray-50 p-3 rounded-lg">
                 <p className="text-sm font-medium">العميل: {editingSale.client?.name || 'غير معروف'}</p>
                 <p className="text-xs text-muted-foreground">
-                  القطعة: {(editingPiece as any).land_batch?.name || 'دفعة'} - #{editingPiece.piece_number} ({editingPiece.surface_area} م²)
+                  {editingHouse ? (
+                    <>المنزل: {editingHouse.name} - {editingHouse.place} ({editingHouse.surface} م²)</>
+                  ) : (
+                    <>القطعة: {(editingPiece as any).land_batch?.name || 'دفعة'} - #{editingPiece.piece_number} ({editingPiece.surface_area} م²)</>
+                  )}
                 </p>
                 <p className="text-xs text-muted-foreground">نوع الدفع: {
                   editingSale.payment_type === 'Full' ? 'بالحاضر' :
@@ -4770,10 +4954,13 @@ export function SaleConfirmation() {
                       
                       // If number of installments is set, recalculate monthly amount
                       if (editingSale.payment_type === 'Installment' && editForm.number_of_installments && parseInt(editForm.number_of_installments) > 0) {
-                        const pieceCount = editingSale.land_piece_ids.length
+                        const isHouseSale = !!editingHouse
+                        const pieceCount = isHouseSale ? 1 : (editingSale.land_piece_ids?.length || 1)
                         const pricePerPiece = parseFloat(newPrice) || 0
                         const reservationPerPiece = parseFloat(editForm.small_advance_amount) || 0
-                        const advancePerPiece = editingSale.big_advance_amount ? (editingSale.big_advance_amount / pieceCount) : 0
+                        const advancePerPiece = isHouseSale
+                          ? (editingSale.big_advance_amount || 0)
+                          : (editingSale.big_advance_amount ? (editingSale.big_advance_amount / pieceCount) : 0)
                         
                         // Calculate commission per piece (same logic as save function)
                         let commissionPerPiece = 0
@@ -4803,7 +4990,11 @@ export function SaleConfirmation() {
                     required
                   />
                   <p className="text-xs text-muted-foreground">
-                    السعر الحالي: {formatCurrency(editingSale.total_selling_price / editingSale.land_piece_ids.length)}
+                    السعر الحالي: {formatCurrency(
+                      editingHouse 
+                        ? editingSale.total_selling_price 
+                        : (editingSale.total_selling_price / (editingSale.land_piece_ids?.length || 1))
+                    )}
                   </p>
                 </div>
 
@@ -4905,7 +5096,11 @@ export function SaleConfirmation() {
                         step="0.01"
                       />
                       <p className="text-xs text-muted-foreground">
-                        النسبة الحالية: {editingSale.company_fee_percentage || 0}%
+                        النسبة الحالية: {editingSale.company_fee_percentage || 0}% = {formatCurrency(
+                          editingHouse 
+                            ? (editingSale.company_fee_amount || 0)
+                            : ((editingSale.company_fee_amount || 0) / (editingSale.land_piece_ids?.length || 1))
+                        )}
                         {parseFloat(editForm.company_fee_percentage) > 0 && parseFloat(editForm.total_selling_price) > 0 && (
                           <span className="mr-2"> = {formatCurrency((parseFloat(editForm.total_selling_price) * parseFloat(editForm.company_fee_percentage)) / 100)}</span>
                         )}
@@ -4951,7 +5146,11 @@ export function SaleConfirmation() {
                         step="0.01"
                       />
                       <p className="text-xs text-muted-foreground">
-                        المبلغ الحالي: {formatCurrency((editingSale.company_fee_amount || 0) / editingSale.land_piece_ids.length)}
+                        المبلغ الحالي: {formatCurrency(
+                          editingHouse 
+                            ? (editingSale.company_fee_amount || 0)
+                            : ((editingSale.company_fee_amount || 0) / (editingSale.land_piece_ids?.length || 1))
+                        )}
                         {parseFloat(editForm.company_fee_amount) > 0 && parseFloat(editForm.total_selling_price) > 0 && (
                           <span className="mr-2"> = {((parseFloat(editForm.company_fee_amount) / parseFloat(editForm.total_selling_price)) * 100).toFixed(2)}%</span>
                         )}
@@ -5019,7 +5218,11 @@ export function SaleConfirmation() {
                     step="0.01"
                   />
                   <p className="text-xs text-muted-foreground">
-                    العربون الحالي: {formatCurrency((editingSale.small_advance_amount || 0) / editingSale.land_piece_ids.length)}
+                    العربون الحالي: {formatCurrency(
+                      editingHouse 
+                        ? (editingSale.small_advance_amount || 0)
+                        : ((editingSale.small_advance_amount || 0) / (editingSale.land_piece_ids?.length || 1))
+                    )}
                   </p>
                 </div>
 
@@ -5230,7 +5433,11 @@ export function SaleConfirmation() {
                         step="0.01"
                       />
                       <p className="text-xs text-muted-foreground">
-                        المبلغ الحالي: {editingSale.monthly_installment_amount ? formatCurrency(editingSale.monthly_installment_amount / editingSale.land_piece_ids.length) : 'غير محدد'}
+                        المبلغ الحالي: {editingSale.monthly_installment_amount ? formatCurrency(
+                          editingHouse 
+                            ? editingSale.monthly_installment_amount
+                            : (editingSale.monthly_installment_amount / (editingSale.land_piece_ids?.length || 1))
+                        ) : 'غير محدد'}
                       </p>
                     </div>
                   </>
