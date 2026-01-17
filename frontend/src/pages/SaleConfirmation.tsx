@@ -258,9 +258,61 @@ export function SaleConfirmation() {
       // For houses, use the sale price directly (single house per sale)
       const housePrice = currentSale.total_selling_price
       
-      // Initialize form with current sale values
+      // Load available payment offers for this house first (needed for fallback values)
+      let houseOffers: PaymentOffer[] = []
+      try {
+        const { data: offers } = await supabase
+          .from('payment_offers')
+          .select('*')
+          .eq('house_id', house.id)
+          .order('is_default', { ascending: false })
+          .order('created_at', { ascending: true })
+        
+        houseOffers = (offers || []) as PaymentOffer[]
+        setAvailableOffersForEdit(houseOffers)
+      } catch (error) {
+        console.error('Error loading house offers:', error)
+        setAvailableOffersForEdit([])
+      }
+      
+      // Get selected offer for fallback values
+      const selectedOffer = currentSale.selected_offer_id 
+        ? houseOffers.find(o => o.id === currentSale.selected_offer_id)
+        : null
+      
+      // Initialize form with current sale values, fallback to offer values if sale doesn't have them
       const currentCommissionAmount = currentSale.company_fee_amount ? currentSale.company_fee_amount.toFixed(2) : ''
       const currentReservation = currentSale.small_advance_amount ? currentSale.small_advance_amount.toFixed(2) : ''
+      
+      // For installment fields, use sale values if available, otherwise calculate from offer
+      let numberOfInstallments = currentSale.number_of_installments?.toString() || ''
+      let monthlyInstallmentAmount = currentSale.monthly_installment_amount ? currentSale.monthly_installment_amount.toFixed(2) : ''
+      
+      // If sale doesn't have installment values and we have an offer, calculate from offer
+      if ((!numberOfInstallments || !monthlyInstallmentAmount) && selectedOffer && currentSale.payment_type === 'Installment') {
+        // Calculate remaining amount for installments
+        const advanceAmount = selectedOffer.advance_is_percentage
+          ? (housePrice * selectedOffer.advance_amount) / 100
+          : selectedOffer.advance_amount
+        const reservation = parseFloat(currentReservation) || 0
+        const advanceAfterReservation = Math.max(0, advanceAmount - reservation)
+        const companyFeeAmount = parseFloat(currentCommissionAmount) || 0
+        const remainingForInstallments = Math.max(0, housePrice - advanceAfterReservation - companyFeeAmount)
+        
+        // IMPORTANT: Prioritize number_of_months from offer if set
+        if (!numberOfInstallments && selectedOffer.number_of_months && selectedOffer.number_of_months > 0) {
+          numberOfInstallments = selectedOffer.number_of_months.toString()
+          if (remainingForInstallments > 0 && !monthlyInstallmentAmount) {
+            monthlyInstallmentAmount = (remainingForInstallments / selectedOffer.number_of_months).toFixed(2)
+          }
+        } else if (!monthlyInstallmentAmount && selectedOffer.monthly_payment && selectedOffer.monthly_payment > 0) {
+          monthlyInstallmentAmount = selectedOffer.monthly_payment.toFixed(2)
+          if (remainingForInstallments > 0 && !numberOfInstallments) {
+            numberOfInstallments = Math.ceil(remainingForInstallments / selectedOffer.monthly_payment).toString()
+          }
+        }
+      }
+      
       setEditForm({
         total_selling_price: housePrice.toFixed(2),
         company_fee_percentage: (currentSale.company_fee_percentage || 0).toString(),
@@ -274,26 +326,11 @@ export function SaleConfirmation() {
         deadline_date: currentSale.deadline_date || '',
         contract_editor_id: currentSale.contract_editor_id || '',
         installment_start_date: currentSale.installment_start_date || '',
-        number_of_installments: currentSale.number_of_installments?.toString() || '',
-        monthly_installment_amount: currentSale.monthly_installment_amount ? currentSale.monthly_installment_amount.toFixed(2) : '',
+        number_of_installments: numberOfInstallments,
+        monthly_installment_amount: monthlyInstallmentAmount,
         promise_initial_payment: currentSale.promise_initial_payment ? currentSale.promise_initial_payment.toFixed(2) : '',
         promise_completion_date: currentSale.promise_completion_date || '',
       })
-      
-      // Load available payment offers for this house
-      try {
-        const { data: houseOffers } = await supabase
-          .from('payment_offers')
-          .select('*')
-          .eq('house_id', house.id)
-          .order('is_default', { ascending: false })
-          .order('created_at', { ascending: true })
-        
-        setAvailableOffersForEdit(houseOffers || [])
-      } catch (error) {
-        console.error('Error loading house offers:', error)
-        setAvailableOffersForEdit([])
-      }
     } else if (piece) {
     // Fetch fresh piece data from database
     let freshPiece: LandPiece | null = null
@@ -333,32 +370,9 @@ export function SaleConfirmation() {
     const pieceCount = currentSale.land_piece_ids.length
     const pricePerPiece = currentSale.total_selling_price / pieceCount
     
-    // Initialize form with current sale values
-    const currentCommissionAmount = currentSale.company_fee_amount ? (currentSale.company_fee_amount / pieceCount).toFixed(2) : ''
-    const currentReservationPerPiece = currentSale.small_advance_amount ? (currentSale.small_advance_amount / pieceCount).toFixed(2) : ''
-    setEditForm({
-      total_selling_price: pricePerPiece.toFixed(2),
-      company_fee_percentage: (currentSale.company_fee_percentage || 0).toString(),
-      company_fee_amount: currentCommissionAmount,
-      commission_input_method: 'percentage',
-      company_fee_note: (currentSale as any).company_fee_note || '',
-      small_advance_amount: currentReservationPerPiece,
-      selected_offer_id: currentSale.selected_offer_id || '',
-      notes: currentSale.notes || '',
-      sale_date: currentSale.sale_date || '',
-      deadline_date: currentSale.deadline_date || '',
-      contract_editor_id: currentSale.contract_editor_id || '',
-      installment_start_date: currentSale.installment_start_date || '',
-      number_of_installments: currentSale.number_of_installments?.toString() || '',
-      monthly_installment_amount: currentSale.monthly_installment_amount ? (currentSale.monthly_installment_amount / pieceCount).toFixed(2) : '',
-      promise_initial_payment: currentSale.promise_initial_payment ? (currentSale.promise_initial_payment / pieceCount).toFixed(2) : '',
-      promise_completion_date: currentSale.promise_completion_date || '',
-    })
-    
-    // Load available payment offers for this piece
+    // Load available payment offers for this piece first (needed for fallback values)
+    const offers: PaymentOffer[] = []
     try {
-      const offers: PaymentOffer[] = []
-      
       // Get piece-specific offers
       const { data: pieceOffers } = await supabase
         .from('payment_offers')
@@ -390,7 +404,64 @@ export function SaleConfirmation() {
     } catch (error) {
       console.error('Error loading offers:', error)
       setAvailableOffersForEdit([])
+    }
+    
+    // Get selected offer for fallback values
+    const selectedOffer = currentSale.selected_offer_id 
+      ? offers.find(o => o.id === currentSale.selected_offer_id)
+      : null
+    
+    // Initialize form with current sale values, fallback to offer values if sale doesn't have them
+    const currentCommissionAmount = currentSale.company_fee_amount ? (currentSale.company_fee_amount / pieceCount).toFixed(2) : ''
+    const currentReservationPerPiece = currentSale.small_advance_amount ? (currentSale.small_advance_amount / pieceCount).toFixed(2) : ''
+    
+    // For installment fields, use sale values if available, otherwise calculate from offer
+    let numberOfInstallments = currentSale.number_of_installments?.toString() || ''
+    let monthlyInstallmentAmount = currentSale.monthly_installment_amount ? (currentSale.monthly_installment_amount / pieceCount).toFixed(2) : ''
+    
+    // If sale doesn't have installment values and we have an offer, calculate from offer
+    if ((!numberOfInstallments || !monthlyInstallmentAmount) && selectedOffer && currentSale.payment_type === 'Installment') {
+      // Calculate remaining amount for installments
+      const advanceAmount = selectedOffer.advance_is_percentage
+        ? (pricePerPiece * selectedOffer.advance_amount) / 100
+        : selectedOffer.advance_amount
+      const reservation = parseFloat(currentReservationPerPiece) || 0
+      const advanceAfterReservation = Math.max(0, advanceAmount - reservation)
+      const companyFeeAmount = parseFloat(currentCommissionAmount) || 0
+      const remainingForInstallments = Math.max(0, pricePerPiece - advanceAfterReservation - companyFeeAmount)
+      
+      // IMPORTANT: Prioritize number_of_months from offer if set
+      if (!numberOfInstallments && selectedOffer.number_of_months && selectedOffer.number_of_months > 0) {
+        numberOfInstallments = selectedOffer.number_of_months.toString()
+        if (remainingForInstallments > 0 && !monthlyInstallmentAmount) {
+          monthlyInstallmentAmount = (remainingForInstallments / selectedOffer.number_of_months).toFixed(2)
+        }
+      } else if (!monthlyInstallmentAmount && selectedOffer.monthly_payment && selectedOffer.monthly_payment > 0) {
+        monthlyInstallmentAmount = selectedOffer.monthly_payment.toFixed(2)
+        if (remainingForInstallments > 0 && !numberOfInstallments) {
+          numberOfInstallments = Math.ceil(remainingForInstallments / selectedOffer.monthly_payment).toString()
+        }
       }
+    }
+    
+    setEditForm({
+      total_selling_price: pricePerPiece.toFixed(2),
+      company_fee_percentage: (currentSale.company_fee_percentage || 0).toString(),
+      company_fee_amount: currentCommissionAmount,
+      commission_input_method: 'percentage',
+      company_fee_note: (currentSale as any).company_fee_note || '',
+      small_advance_amount: currentReservationPerPiece,
+      selected_offer_id: currentSale.selected_offer_id || '',
+      notes: currentSale.notes || '',
+      sale_date: currentSale.sale_date || '',
+      deadline_date: currentSale.deadline_date || '',
+      contract_editor_id: currentSale.contract_editor_id || '',
+      installment_start_date: currentSale.installment_start_date || '',
+      number_of_installments: numberOfInstallments,
+      monthly_installment_amount: monthlyInstallmentAmount,
+      promise_initial_payment: currentSale.promise_initial_payment ? (currentSale.promise_initial_payment / pieceCount).toFixed(2) : '',
+      promise_completion_date: currentSale.promise_completion_date || '',
+    })
     } else {
       showNotification('يجب تحديد قطعة أرض أو منزل للتعديل', 'error')
       return
@@ -1464,14 +1535,31 @@ export function SaleConfirmation() {
       const remainingAmount = calculatedPricePerPiece - reservationPerPiece - advanceAmount
       
       let numberOfMonths = 0
-      if (offer.monthly_payment && offer.monthly_payment > 0) {
-        numberOfMonths = remainingAmount > 0 ? Math.ceil(remainingAmount / offer.monthly_payment) : 0
-      } else if (offer.number_of_months && offer.number_of_months > 0) {
+      // IMPORTANT: Prioritize number_of_months if set - this was the primary input method
+      if (offer.number_of_months && offer.number_of_months > 0) {
         numberOfMonths = offer.number_of_months
+      } else if (offer.monthly_payment && offer.monthly_payment > 0) {
+        numberOfMonths = remainingAmount > 0 ? Math.ceil(remainingAmount / offer.monthly_payment) : 0
       } else {
         numberOfMonths = 12
       }
       setNumberOfInstallments(numberOfMonths.toString())
+    } else if (offer && sale.payment_type === 'Installment') {
+      // For installment sales, try to get number_of_months from offer even if not bigAdvance type
+      // IMPORTANT: Prioritize number_of_months if set - this was the primary input method
+      if (offer.number_of_months && offer.number_of_months > 0) {
+        setNumberOfInstallments(offer.number_of_months.toString())
+      } else if (offer.monthly_payment && offer.monthly_payment > 0) {
+        // Calculate from monthly_payment if number_of_months is not set
+        const advanceAmount = offer.advance_is_percentage
+          ? (calculatedPricePerPiece * offer.advance_amount) / 100
+          : offer.advance_amount
+        const remainingAmount = calculatedPricePerPiece - reservationPerPiece - advanceAmount
+        const calculatedMonths = remainingAmount > 0 ? Math.ceil(remainingAmount / offer.monthly_payment) : 0
+        setNumberOfInstallments(calculatedMonths.toString())
+      } else {
+        setNumberOfInstallments(sale.number_of_installments?.toString() || '12')
+      }
     } else {
       setNumberOfInstallments(sale.number_of_installments?.toString() || '12')
     }
@@ -2193,14 +2281,28 @@ export function SaleConfirmation() {
               return
             }
             
-            if (selectedOffer && selectedOffer.monthly_payment && selectedOffer.monthly_payment > 0) {
-              // Offer has monthly_payment - calculate number of months
-              installments = Math.ceil(remainingAfterAdvance / selectedOffer.monthly_payment)
-              monthlyAmount = selectedOffer.monthly_payment
+            // IMPORTANT: Prioritize manually edited sale values over offer values
+            // If sale has manually edited values, use those instead of recalculating from offer
+            if (selectedSale.number_of_installments && selectedSale.number_of_installments > 0 && selectedSale.monthly_installment_amount && selectedSale.monthly_installment_amount > 0) {
+              // Sale has both manually edited values - use them directly
+              installments = selectedSale.number_of_installments
+              monthlyAmount = selectedSale.monthly_installment_amount
+            } else if (selectedSale.number_of_installments && selectedSale.number_of_installments > 0) {
+              // Sale has manually edited number of installments - use it and calculate monthly amount
+              installments = selectedSale.number_of_installments
+              monthlyAmount = remainingAfterAdvance / installments
+            } else if (selectedSale.monthly_installment_amount && selectedSale.monthly_installment_amount > 0) {
+              // Sale has manually edited monthly amount - use it and calculate number of installments
+              monthlyAmount = selectedSale.monthly_installment_amount
+              installments = Math.ceil(remainingAfterAdvance / monthlyAmount)
             } else if (selectedOffer && selectedOffer.number_of_months && selectedOffer.number_of_months > 0) {
-              // Offer has number_of_months - calculate monthly payment
+              // No manual edits - use offer's number_of_months (prioritize over monthly_payment)
               installments = selectedOffer.number_of_months
               monthlyAmount = remainingAfterAdvance / selectedOffer.number_of_months
+            } else if (selectedOffer && selectedOffer.monthly_payment && selectedOffer.monthly_payment > 0) {
+              // No manual edits - use offer's monthly_payment
+              installments = Math.ceil(remainingAfterAdvance / selectedOffer.monthly_payment)
+              monthlyAmount = selectedOffer.monthly_payment
             } else {
               // No offer or offer doesn't have payment info - use form values
               installments = parseInt(numberOfInstallments) || selectedSale.number_of_installments || 12
@@ -2659,14 +2761,28 @@ export function SaleConfirmation() {
               return
             }
             
-            if (selectedOffer && selectedOffer.monthly_payment && selectedOffer.monthly_payment > 0) {
-              // Offer has monthly_payment - calculate number of months
-              installments = Math.ceil(remainingAfterAdvance / selectedOffer.monthly_payment)
-              monthlyAmount = selectedOffer.monthly_payment
+            // IMPORTANT: Prioritize manually edited sale values over offer values
+            // If sale has manually edited values, use those instead of recalculating from offer
+            if (selectedSale.number_of_installments && selectedSale.number_of_installments > 0 && selectedSale.monthly_installment_amount && selectedSale.monthly_installment_amount > 0) {
+              // Sale has both manually edited values - use them directly
+              installments = selectedSale.number_of_installments
+              monthlyAmount = selectedSale.monthly_installment_amount
+            } else if (selectedSale.number_of_installments && selectedSale.number_of_installments > 0) {
+              // Sale has manually edited number of installments - use it and calculate monthly amount
+              installments = selectedSale.number_of_installments
+              monthlyAmount = remainingAfterAdvance / installments
+            } else if (selectedSale.monthly_installment_amount && selectedSale.monthly_installment_amount > 0) {
+              // Sale has manually edited monthly amount - use it and calculate number of installments
+              monthlyAmount = selectedSale.monthly_installment_amount
+              installments = Math.ceil(remainingAfterAdvance / monthlyAmount)
             } else if (selectedOffer && selectedOffer.number_of_months && selectedOffer.number_of_months > 0) {
-              // Offer has number_of_months - calculate monthly payment
+              // No manual edits - use offer's number_of_months (prioritize over monthly_payment)
               installments = selectedOffer.number_of_months
               monthlyAmount = remainingAfterAdvance / selectedOffer.number_of_months
+            } else if (selectedOffer && selectedOffer.monthly_payment && selectedOffer.monthly_payment > 0) {
+              // No manual edits - use offer's monthly_payment
+              installments = Math.ceil(remainingAfterAdvance / selectedOffer.monthly_payment)
+              monthlyAmount = selectedOffer.monthly_payment
             } else {
               // No offer or offer doesn't have payment info - use form values
               installments = parseInt(numberOfInstallments) || selectedSale.number_of_installments || 12
@@ -4353,21 +4469,36 @@ export function SaleConfirmation() {
               remainingAfterAdvance = totalPayablePerPiece - (reservationPaid ? reservationPerPiece : 0)
             }
             
-            // Calculate number of months and monthly payment from offer
+            // Calculate number of months and monthly payment
+            // IMPORTANT: Prioritize manually edited sale values over offer values
+            // If sale has manually edited values, use those instead of recalculating from offer
             let calculatedMonths = 0
             let monthlyPaymentAmount = 0
-            if (calculatedOffer && confirmationType === 'bigAdvance' && selectedSale.payment_type === 'Installment') {
-              if (calculatedOffer.monthly_payment && calculatedOffer.monthly_payment > 0) {
-                // Offer has monthly_payment - calculate number of months
+            if (confirmationType === 'bigAdvance' && selectedSale.payment_type === 'Installment') {
+              // Check if sale has manually edited values first
+              if (selectedSale.number_of_installments && selectedSale.number_of_installments > 0 && selectedSale.monthly_installment_amount && selectedSale.monthly_installment_amount > 0) {
+                // Sale has both manually edited values - use them directly
+                calculatedMonths = selectedSale.number_of_installments
+                monthlyPaymentAmount = selectedSale.monthly_installment_amount
+              } else if (selectedSale.number_of_installments && selectedSale.number_of_installments > 0) {
+                // Sale has manually edited number of installments - use it and calculate monthly amount
+                calculatedMonths = selectedSale.number_of_installments
+                monthlyPaymentAmount = remainingAfterAdvance > 0 ? remainingAfterAdvance / calculatedMonths : 0
+              } else if (selectedSale.monthly_installment_amount && selectedSale.monthly_installment_amount > 0) {
+                // Sale has manually edited monthly amount - use it and calculate number of installments
+                monthlyPaymentAmount = selectedSale.monthly_installment_amount
+                calculatedMonths = remainingAfterAdvance > 0 ? Math.ceil(remainingAfterAdvance / monthlyPaymentAmount) : 0
+              } else if (calculatedOffer && calculatedOffer.number_of_months && calculatedOffer.number_of_months > 0) {
+                // No manual edits - use offer's number_of_months (prioritize over monthly_payment)
+                calculatedMonths = calculatedOffer.number_of_months
+                monthlyPaymentAmount = remainingAfterAdvance > 0 ? remainingAfterAdvance / calculatedOffer.number_of_months : 0
+              } else if (calculatedOffer && calculatedOffer.monthly_payment && calculatedOffer.monthly_payment > 0) {
+                // No manual edits - use offer's monthly_payment
                 // For "confirm all", multiply monthly payment by number of pieces
                 monthlyPaymentAmount = confirmingAllPieces && selectedSale.land_pieces && selectedSale.land_pieces.length > 1
                   ? calculatedOffer.monthly_payment * selectedSale.land_pieces.length
                   : calculatedOffer.monthly_payment
                 calculatedMonths = remainingAfterAdvance > 0 ? Math.ceil(remainingAfterAdvance / monthlyPaymentAmount) : 0
-              } else if (calculatedOffer.number_of_months && calculatedOffer.number_of_months > 0) {
-                // Offer has number_of_months - calculate monthly payment
-                calculatedMonths = calculatedOffer.number_of_months
-                monthlyPaymentAmount = remainingAfterAdvance > 0 ? remainingAfterAdvance / calculatedOffer.number_of_months : 0
               }
             }
             
@@ -5246,7 +5377,50 @@ export function SaleConfirmation() {
                         <Select
                           id="edit-offer"
                           value={editForm.selected_offer_id}
-                          onChange={(e) => setEditForm({ ...editForm, selected_offer_id: e.target.value })}
+                          onChange={(e) => {
+                            const newOfferId = e.target.value
+                            const selectedOffer = availableOffersForEdit.find(o => o.id === newOfferId)
+                            
+                            // Auto-fill installment fields from offer
+                            const updates: any = { selected_offer_id: newOfferId }
+                            
+                            if (selectedOffer && editingSale.payment_type === 'Installment') {
+                              const pieceCount = editingHouse ? 1 : (editingSale.land_piece_ids?.length || 1)
+                              const pricePerPiece = parseFloat(editForm.total_selling_price) || 0
+                              const reservationPerPiece = parseFloat(editForm.small_advance_amount) || 0
+                              const advancePerPiece = editingSale.big_advance_amount 
+                                ? (editingSale.big_advance_amount / pieceCount) 
+                                : 0
+                              
+                              // Calculate commission per piece
+                              let commissionPerPiece = 0
+                              if (editForm.commission_input_method === 'percentage') {
+                                const feePercentage = parseFloat(editForm.company_fee_percentage) || 0
+                                commissionPerPiece = (pricePerPiece * feePercentage) / 100
+                              } else {
+                                commissionPerPiece = parseFloat(editForm.company_fee_amount) || 0
+                              }
+                              
+                              const remainingForInstallments = pricePerPiece - reservationPerPiece - advancePerPiece - commissionPerPiece
+                              
+                              // IMPORTANT: Prioritize number_of_months from offer if set
+                              if (selectedOffer.number_of_months && selectedOffer.number_of_months > 0) {
+                                // Use offer's number_of_months and calculate monthly amount
+                                updates.number_of_installments = selectedOffer.number_of_months.toString()
+                                if (remainingForInstallments > 0) {
+                                  updates.monthly_installment_amount = (remainingForInstallments / selectedOffer.number_of_months).toFixed(2)
+                                }
+                              } else if (selectedOffer.monthly_payment && selectedOffer.monthly_payment > 0) {
+                                // Use offer's monthly_payment and calculate number of installments
+                                updates.monthly_installment_amount = selectedOffer.monthly_payment.toFixed(2)
+                                if (remainingForInstallments > 0) {
+                                  updates.number_of_installments = Math.ceil(remainingForInstallments / selectedOffer.monthly_payment).toString()
+                                }
+                              }
+                            }
+                            
+                            setEditForm({ ...editForm, ...updates })
+                          }}
                         >
                           <option value="">-- لا يوجد عرض محدد --</option>
                           {availableOffersForEdit.map((offer) => (
@@ -5387,7 +5561,17 @@ export function SaleConfirmation() {
                         min="1"
                       />
                       <p className="text-xs text-muted-foreground">
-                        العدد الحالي: {editingSale.number_of_installments || 'غير محدد'}
+                        العدد الحالي: {(() => {
+                          // Show sale value if available, otherwise show offer value
+                          if (editingSale.number_of_installments) {
+                            return editingSale.number_of_installments
+                          }
+                          const selectedOffer = availableOffersForEdit.find(o => o.id === editForm.selected_offer_id)
+                          if (selectedOffer && selectedOffer.number_of_months && selectedOffer.number_of_months > 0) {
+                            return selectedOffer.number_of_months
+                          }
+                          return 'غير محدد'
+                        })()}
                       </p>
                     </div>
 
@@ -5433,11 +5617,20 @@ export function SaleConfirmation() {
                         step="0.01"
                       />
                       <p className="text-xs text-muted-foreground">
-                        المبلغ الحالي: {editingSale.monthly_installment_amount ? formatCurrency(
-                          editingHouse 
-                            ? editingSale.monthly_installment_amount
-                            : (editingSale.monthly_installment_amount / (editingSale.land_piece_ids?.length || 1))
-                        ) : 'غير محدد'}
+                        المبلغ الحالي: {(() => {
+                          // Show sale value if available, otherwise show offer value
+                          if (editingSale.monthly_installment_amount) {
+                            const amount = editingHouse 
+                              ? editingSale.monthly_installment_amount
+                              : (editingSale.monthly_installment_amount / (editingSale.land_piece_ids?.length || 1))
+                            return formatCurrency(amount)
+                          }
+                          const selectedOffer = availableOffersForEdit.find(o => o.id === editForm.selected_offer_id)
+                          if (selectedOffer && selectedOffer.monthly_payment && selectedOffer.monthly_payment > 0) {
+                            return formatCurrency(selectedOffer.monthly_payment)
+                          }
+                          return 'غير محدد'
+                        })()}
                       </p>
                     </div>
                   </>

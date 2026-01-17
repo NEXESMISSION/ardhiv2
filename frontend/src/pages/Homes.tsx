@@ -245,86 +245,121 @@ export function Homes() {
     
     const priceFull = houseForm.price_full ? parseFloat(houseForm.price_full) : 0
     
-    // Calculate advance amount (for display and calculation of remaining amount)
-    const advanceAmount = offerForm.advance_amount 
-      ? (offerForm.advance_is_percentage 
-          ? (priceFull * parseFloat(offerForm.advance_amount)) / 100
-          : parseFloat(offerForm.advance_amount))
-      : 0
-    
-    // Remaining amount for installments = Installment price - Advance
-    // This is what will be paid in monthly installments
-    const remainingForInstallments = installmentPrice - advanceAmount
-    
-    // Removed excessive logging - only log when calculation method is set
-    if (offerForm.calculation_method) {
-      console.log('[calculateInstallmentPrice] Calculation:', {
-        installmentPrice,
-        advanceAmount,
-        remainingForInstallments,
-        calculationMethod: offerForm.calculation_method
-      })
-    }
-    
-    // Calculate monthly payment or number of months based on remaining amount
-    if (offerForm.calculation_method === 'monthly' && offerForm.monthly_payment) {
-      const monthlyPayment = parseFloat(offerForm.monthly_payment)
-      if (monthlyPayment > 0 && remainingForInstallments > 0) {
-        // Calculate number of months needed based on remaining amount (after advance)
-        const numberOfMonths = Math.ceil(remainingForInstallments / monthlyPayment)
-        
-        console.log('[calculateInstallmentPrice] Monthly calculation:', {
-          monthlyPayment,
-          numberOfMonths,
+    // Use functional update to get latest form state and avoid stale closures
+    setOfferForm(prev => {
+      // Calculate advance amount (for display and calculation of remaining amount)
+      const advanceAmount = prev.advance_amount 
+        ? (prev.advance_is_percentage 
+            ? (priceFull * parseFloat(prev.advance_amount)) / 100
+            : parseFloat(prev.advance_amount))
+        : 0
+      
+      // Remaining amount for installments = Installment price - Advance
+      // This is what will be paid in monthly installments
+      const remainingForInstallments = installmentPrice - advanceAmount
+      
+      // Removed excessive logging - only log when calculation method is set
+      if (prev.calculation_method) {
+        console.log('[calculateInstallmentPrice] Calculation:', {
+          installmentPrice,
+          advanceAmount,
           remainingForInstallments,
-          breakdown: {
-            installmentPrice: installmentPrice,
-            advance: advanceAmount,
-            remaining: remainingForInstallments,
-            monthlyPayment: monthlyPayment,
-            numberOfMonths: numberOfMonths
-          }
+          calculationMethod: prev.calculation_method,
+          monthlyPayment: prev.monthly_payment,
+          numberOfMonths: prev.number_of_months
         })
-        
-        setOfferForm(prev => ({ ...prev, number_of_months: numberOfMonths.toString() }))
-      } else if (monthlyPayment > 0 && remainingForInstallments <= 0) {
-        // If advance covers everything, no installments needed
-        setOfferForm(prev => ({ ...prev, number_of_months: '0' }))
       }
-    } else if (offerForm.calculation_method === 'months' && offerForm.number_of_months) {
-      const numberOfMonths = parseFloat(offerForm.number_of_months)
-      if (numberOfMonths > 0 && remainingForInstallments > 0) {
-        // Calculate monthly payment from remaining amount (after advance)
-        const monthlyPayment = remainingForInstallments / numberOfMonths
-        
-        console.log('[calculateInstallmentPrice] Months calculation:', {
-          numberOfMonths,
-          monthlyPayment,
-          remainingForInstallments,
-          breakdown: {
-            installmentPrice: installmentPrice,
-            advance: advanceAmount,
-            remaining: remainingForInstallments,
-            monthlyPayment: monthlyPayment,
-            numberOfMonths: numberOfMonths
-          }
-        })
-        
-        setOfferForm(prev => ({ ...prev, monthly_payment: monthlyPayment.toFixed(2) }))
-      } else if (numberOfMonths > 0 && remainingForInstallments <= 0) {
-        // If advance covers everything, no monthly payment needed
-        setOfferForm(prev => ({ ...prev, monthly_payment: '0' }))
+      
+      const updates: Partial<typeof prev> = {}
+      
+      // Calculate monthly payment or number of months based on remaining amount
+      // CRITICAL: Only calculate based on the selected calculation_method - never change it
+      if (prev.calculation_method === 'monthly' && prev.monthly_payment) {
+        const monthlyPayment = parseFloat(prev.monthly_payment)
+        if (!isNaN(monthlyPayment) && monthlyPayment > 0 && remainingForInstallments > 0) {
+          // Calculate number of months needed based on remaining amount (after advance)
+          const numberOfMonths = Math.ceil(remainingForInstallments / monthlyPayment)
+          
+          console.log('[calculateInstallmentPrice] Monthly calculation:', {
+            monthlyPayment,
+            numberOfMonths,
+            remainingForInstallments,
+            calculationMethod: prev.calculation_method, // Log to verify it's not changing
+            breakdown: {
+              installmentPrice: installmentPrice,
+              advance: advanceAmount,
+              remaining: remainingForInstallments,
+              monthlyPayment: monthlyPayment,
+              numberOfMonths: numberOfMonths
+            }
+          })
+          
+          updates.number_of_months = numberOfMonths.toString()
+        } else if (!isNaN(monthlyPayment) && monthlyPayment > 0 && remainingForInstallments <= 0) {
+          // If advance covers everything, no installments needed
+          updates.number_of_months = '0'
+        }
+      } else if (prev.calculation_method === 'months' && prev.number_of_months) {
+        const numberOfMonths = parseFloat(prev.number_of_months)
+        if (!isNaN(numberOfMonths) && numberOfMonths > 0 && remainingForInstallments > 0) {
+          // Calculate monthly payment from remaining amount (after advance)
+          const monthlyPayment = remainingForInstallments / numberOfMonths
+          
+          console.log('[calculateInstallmentPrice] Months calculation:', {
+            numberOfMonths,
+            monthlyPayment,
+            remainingForInstallments,
+            calculationMethod: prev.calculation_method, // Log to verify it's not changing
+            breakdown: {
+              installmentPrice: installmentPrice,
+              advance: advanceAmount,
+              remaining: remainingForInstallments,
+              monthlyPayment: monthlyPayment,
+              numberOfMonths: numberOfMonths
+            }
+          })
+          
+          updates.monthly_payment = monthlyPayment.toFixed(2)
+        } else if (!isNaN(numberOfMonths) && numberOfMonths > 0 && remainingForInstallments <= 0) {
+          // If advance covers everything, no monthly payment needed
+          updates.monthly_payment = '0'
+        }
       }
-    }
-  }, [houseForm.price_installment, showOfferForm, offerForm.advance_amount, offerForm.advance_is_percentage, offerForm.monthly_payment, offerForm.number_of_months, offerForm.calculation_method, houseForm.price_full])
+      
+      // Only update if there are changes to avoid infinite loops
+      // IMPORTANT: Always preserve the calculation_method - never change it during calculation
+      if (Object.keys(updates).length > 0) {
+        return { ...prev, ...updates, calculation_method: prev.calculation_method }
+      }
+      
+      return prev
+    })
+  }, [houseForm.price_installment, houseForm.price_full, showOfferForm])
 
   // Calculate monthly payment or number of months when installment price, advance, or calculation method changes
   // The installment price is manually set by the user and does NOT change automatically
   useEffect(() => {
     if (houseForm.price_installment && showOfferForm && offerForm.calculation_method) {
-      calculateInstallmentPrice()
+      // Only calculate if we have the required input value for the selected method
+      // IMPORTANT: Only calculate based on the selected method, not based on which field has a value
+      // This prevents the method from switching when the calculated value is set
+      let shouldCalculate = false
+      
+      if (offerForm.calculation_method === 'monthly') {
+        // Only calculate if monthly_payment is provided and valid
+        const monthlyPayment = parseFloat(offerForm.monthly_payment || '0')
+        shouldCalculate = !isNaN(monthlyPayment) && monthlyPayment > 0
+      } else if (offerForm.calculation_method === 'months') {
+        // Only calculate if number_of_months is provided and valid
+        const numberOfMonths = parseFloat(offerForm.number_of_months || '0')
+        shouldCalculate = !isNaN(numberOfMonths) && numberOfMonths > 0
+      }
+      
+      if (shouldCalculate) {
+        console.log('[useEffect] Triggering calculation with method:', offerForm.calculation_method)
+        calculateInstallmentPrice()
+      }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     houseForm.price_installment,
     offerForm.advance_amount, 
@@ -332,7 +367,8 @@ export function Homes() {
     offerForm.monthly_payment, 
     offerForm.number_of_months, 
     offerForm.calculation_method,
-    showOfferForm
+    showOfferForm,
+    calculateInstallmentPrice
   ])
 
   const openHouseDialog = async (house?: House) => {
@@ -1007,18 +1043,22 @@ export function Homes() {
         const remainingForInstallments = Math.max(0, price - advanceAfterReservation - companyFeeAmount)
         
         // Calculate months and monthly payment
+        // IMPORTANT: Prioritize number_of_months if set - this was the primary input method
+        // Only calculate from monthly_payment if number_of_months is not set
         let numberOfMonths = 0
         let monthlyAmount = 0
         
-        if (selectedOffer.monthly_payment && selectedOffer.monthly_payment > 0) {
-          monthlyAmount = selectedOffer.monthly_payment
-          numberOfMonths = remainingForInstallments > 0
-            ? Math.ceil(remainingForInstallments / selectedOffer.monthly_payment)
-            : 0
-        } else if (selectedOffer.number_of_months && selectedOffer.number_of_months > 0) {
+        if (selectedOffer.number_of_months && selectedOffer.number_of_months > 0) {
+          // Use number_of_months directly - this is the primary input
           numberOfMonths = selectedOffer.number_of_months
           monthlyAmount = remainingForInstallments > 0
             ? remainingForInstallments / selectedOffer.number_of_months
+            : 0
+        } else if (selectedOffer.monthly_payment && selectedOffer.monthly_payment > 0) {
+          // Calculate number of months from monthly payment only if number_of_months is not set
+          monthlyAmount = selectedOffer.monthly_payment
+          numberOfMonths = remainingForInstallments > 0
+            ? Math.ceil(remainingForInstallments / selectedOffer.monthly_payment)
             : 0
         }
         
@@ -1488,7 +1528,9 @@ export function Homes() {
                 <Label>{t('land.calculationMethod')}</Label>
                 <Select
                   value={offerForm.calculation_method}
-                  onChange={(e) => setOfferForm({ ...offerForm, calculation_method: e.target.value as 'monthly' | 'months' })}
+                  onChange={(e) => {
+                    setOfferForm(prev => ({ ...prev, calculation_method: e.target.value as 'monthly' | 'months' }))
+                  }}
                 >
                   <option value="monthly">{t('land.calculateByMonthly')}</option>
                   <option value="months">{t('land.calculateByMonths')}</option>
@@ -1502,9 +1544,8 @@ export function Homes() {
                     type="number"
                     value={offerForm.monthly_payment}
                     onChange={(e) => {
-                      setOfferForm({ ...offerForm, monthly_payment: e.target.value })
-                      // Trigger calculation immediately
-                      setTimeout(() => calculateInstallmentPrice(), 0)
+                      const newValue = e.target.value
+                      setOfferForm(prev => ({ ...prev, monthly_payment: newValue }))
                     }}
                     placeholder="0"
                   />
@@ -1521,9 +1562,8 @@ export function Homes() {
                     type="number"
                     value={offerForm.number_of_months}
                     onChange={(e) => {
-                      setOfferForm({ ...offerForm, number_of_months: e.target.value })
-                      // Trigger calculation immediately
-                      setTimeout(() => calculateInstallmentPrice(), 0)
+                      const newValue = e.target.value
+                      setOfferForm(prev => ({ ...prev, number_of_months: newValue }))
                     }}
                     placeholder="0"
                   />
@@ -1731,12 +1771,14 @@ export function Homes() {
                     const remainingForInstallments = Math.max(0, price - advanceAfterReservation - companyFeeAmount)
                     
                     let numberOfMonths = 0
-                    if (offer.monthly_payment && offer.monthly_payment > 0) {
+                    // Prioritize number_of_months if set - this was the primary input method
+                    // Only calculate from monthly_payment if number_of_months is not set
+                    if (offer.number_of_months && offer.number_of_months > 0) {
+                      numberOfMonths = offer.number_of_months
+                    } else if (offer.monthly_payment && offer.monthly_payment > 0) {
                       numberOfMonths = remainingForInstallments > 0
                         ? Math.ceil(remainingForInstallments / offer.monthly_payment)
                         : 0
-                    } else if (offer.number_of_months && offer.number_of_months > 0) {
-                      numberOfMonths = offer.number_of_months
                     }
                     
                     const isSelected = selectedOffer?.id === offer.id
@@ -1785,10 +1827,9 @@ export function Homes() {
                               {offer.number_of_months && offer.number_of_months > 0 && (
                                 <div>عدد الأشهر: {offer.number_of_months} شهر</div>
                               )}
-                              {numberOfMonths > 0 && (
-                                <div className="font-medium text-green-700 mt-1">
-                                  عدد الأشهر المحسوب: {numberOfMonths} شهر
-                                </div>
+                              {/* Show calculated months only if offer doesn't have number_of_months set */}
+                              {numberOfMonths > 0 && !offer.number_of_months && (
+                                <div>عدد الأشهر: {numberOfMonths} شهر</div>
                               )}
                             </div>
                           </div>
@@ -1953,20 +1994,22 @@ export function Homes() {
                 const remainingForInstallments = Math.max(0, installmentPrice - advanceAmount - companyFeeAmount)
                 
                 // Calculate months and monthly payment
+                // IMPORTANT: Prioritize number_of_months if set - this was the primary input method
+                // Only calculate from monthly_payment if number_of_months is not set
                 let numberOfMonths = 0
                 let monthlyAmount = 0
                 
-                if (selectedOffer.monthly_payment && selectedOffer.monthly_payment > 0) {
-                  monthlyAmount = selectedOffer.monthly_payment
-                  numberOfMonths = remainingForInstallments > 0
-                    ? Math.ceil(remainingForInstallments / selectedOffer.monthly_payment)
-                    : 0
-                } 
-                // If offer has number_of_months, use it and calculate monthly amount
-                else if (selectedOffer.number_of_months && selectedOffer.number_of_months > 0) {
+                if (selectedOffer.number_of_months && selectedOffer.number_of_months > 0) {
+                  // Use number_of_months directly - this is the primary input
                   numberOfMonths = selectedOffer.number_of_months
                   monthlyAmount = remainingForInstallments > 0
                     ? remainingForInstallments / selectedOffer.number_of_months
+                    : 0
+                } else if (selectedOffer.monthly_payment && selectedOffer.monthly_payment > 0) {
+                  // Calculate number of months from monthly payment only if number_of_months is not set
+                  monthlyAmount = selectedOffer.monthly_payment
+                  numberOfMonths = remainingForInstallments > 0
+                    ? Math.ceil(remainingForInstallments / selectedOffer.monthly_payment)
                     : 0
                 }
                 

@@ -170,17 +170,85 @@ export function Users() {
 
   const fetchAllLandPieces = async () => {
     try {
-      const { data, error } = await supabase
-        .from('land_pieces')
-        .select('id, piece_number, surface_area, land_batch_id, status, land_batches(name)')
-        .order('piece_number', { ascending: true })
+      // Fetch ALL pieces - fetch in chunks to ensure we get everything
+      let allPieces: any[] = []
+      let from = 0
+      const chunkSize = 1000
+      let hasMore = true
       
-      if (error) throw error
-      setAllLandPieces(data || [])
+      while (hasMore) {
+        const { data, error } = await supabase
+          .from('land_pieces')
+          .select('id, piece_number, surface_area, land_batch_id, status, land_batches(name)')
+          .range(from, from + chunkSize - 1)
+        
+        if (error) throw error
+        
+        if (data && data.length > 0) {
+          allPieces = [...allPieces, ...data]
+          // If we got less than chunkSize, we've reached the end
+          hasMore = data.length === chunkSize
+          from += chunkSize
+        } else {
+          hasMore = false
+        }
+      }
+      
+      const chunksFetched = from > 0 ? Math.ceil(from / chunkSize) : (allPieces.length > 0 ? 1 : 0)
+      console.log(`[Users] Fetched ${allPieces.length} pieces in ${chunksFetched} chunk(s)`)
+      
+      // Natural sort pieces by piece_number to handle alphanumeric (1, 2, 10, 1A, 1B, B1, B2, etc.)
+      const sortedData = allPieces.sort((a: any, b: any) => {
+        const pieceNumA = String(a.piece_number || '')
+        const pieceNumB = String(b.piece_number || '')
+        
+        // Extract prefix, number, and suffix for proper natural sorting
+        const matchA = pieceNumA.match(/^([A-Za-z\u0600-\u06FF]*)(\d+)([A-Za-z\u0600-\u06FF]*)$/i) || 
+                       pieceNumA.match(/^([A-Za-z\u0600-\u06FF]+)$/i) || 
+                       pieceNumA.match(/^(\d+)$/)
+        const matchB = pieceNumB.match(/^([A-Za-z\u0600-\u06FF]*)(\d+)([A-Za-z\u0600-\u06FF]*)$/i) || 
+                       pieceNumB.match(/^([A-Za-z\u0600-\u06FF]+)$/i) || 
+                       pieceNumB.match(/^(\d+)$/)
+        
+        if (matchA && matchB) {
+          // Case 1: Both have numbers (e.g., "1", "B1", "14A")
+          if (matchA[2] && matchB[2]) {
+            const prefixA = (matchA[1] || '').toLowerCase()
+            const prefixB = (matchB[1] || '').toLowerCase()
+            const numA = parseInt(matchA[2], 10)
+            const numB = parseInt(matchB[2], 10)
+            const suffixA = (matchA[3] || '').toLowerCase()
+            const suffixB = (matchB[3] || '').toLowerCase()
+            
+            // Compare prefixes first (empty prefix comes before letters)
+            if (prefixA !== prefixB) {
+              if (!prefixA) return -1 // Numbers come before letters
+              if (!prefixB) return 1
+              return prefixA.localeCompare(prefixB)
+            }
+            // Then compare numbers
+            if (numA !== numB) {
+              return numA - numB
+            }
+            // Finally compare suffixes
+            return suffixA.localeCompare(suffixB)
+          }
+          // Case 2: One has number, one doesn't (numbers come first)
+          if (matchA[2] && !matchB[2]) return -1
+          if (!matchA[2] && matchB[2]) return 1
+          // Case 3: Both are pure letters or pure numbers
+          return pieceNumA.localeCompare(pieceNumB, undefined, { numeric: true, sensitivity: 'base' })
+        }
+        // Fallback to string comparison
+        return pieceNumA.localeCompare(pieceNumB, undefined, { numeric: true, sensitivity: 'base' })
+      })
+      
+      setAllLandPieces(sortedData)
+      console.log(`[Users] Fetched ${sortedData.length} land pieces total`)
       // Auto-expand batches that have selected pieces
-      if (data && form.allowedPieces.length > 0) {
+      if (sortedData && form.allowedPieces.length > 0) {
         const batchesWithSelectedPieces = new Set<string>()
-        data.forEach((piece: any) => {
+        sortedData.forEach((piece: any) => {
           if (form.allowedPieces.includes(piece.id)) {
             batchesWithSelectedPieces.add(piece.land_batch_id)
           }
@@ -1847,23 +1915,29 @@ export function Users() {
                         ? allLandPieces.filter(p => form.allowedBatches.includes(p.land_batch_id))
                         : allLandPieces
                       
+                      console.log(`[Users] After batch filter (${form.allowedBatches.length} batches selected): ${filteredPieces.length} pieces`)
+                      
                       // Apply batch filter
                       if (piecesBatchFilter !== 'all') {
                         filteredPieces = filteredPieces.filter(p => p.land_batch_id === piecesBatchFilter)
+                        console.log(`[Users] After piecesBatchFilter (${piecesBatchFilter}): ${filteredPieces.length} pieces`)
                       }
                       
                       // Apply status filter
                       if (piecesStatusFilter !== 'all') {
                         filteredPieces = filteredPieces.filter(p => p.status === piecesStatusFilter)
+                        console.log(`[Users] After status filter (${piecesStatusFilter}): ${filteredPieces.length} pieces`)
                       }
                       
                       // Apply search filter
                       if (piecesSearchTerm) {
                         const search = piecesSearchTerm.toLowerCase()
-                        filteredPieces = filteredPieces.filter(p => 
-                          p.piece_number?.toLowerCase().includes(search) ||
-                          (p as any).land_batches?.name?.toLowerCase().includes(search)
-                        )
+                        filteredPieces = filteredPieces.filter(p => {
+                          const pieceNum = String(p.piece_number || '').toLowerCase()
+                          const batchName = ((p as any).land_batches?.name || '').toLowerCase()
+                          return pieceNum.includes(search) || batchName.includes(search)
+                        })
+                        console.log(`[Users] After search filter ("${piecesSearchTerm}"): ${filteredPieces.length} pieces`)
                       }
                       
                       // Group by batch (with robust deduplication)
@@ -1905,6 +1979,54 @@ export function Users() {
                         return nameA.localeCompare(nameB)
                       })
                       
+                      // Natural sort function for alphanumeric piece numbers (e.g., 1, 2, 10, 14, 14A, 14B, 15, B1, B2, B10)
+                      const naturalSortPieces = (pieces: any[]) => {
+                        return [...pieces].sort((a, b) => {
+                          const pieceNumA = String(a.piece_number || '')
+                          const pieceNumB = String(b.piece_number || '')
+                          
+                          // Extract prefix, number, and suffix for proper natural sorting
+                          const matchA = pieceNumA.match(/^([A-Za-z\u0600-\u06FF]*)(\d+)([A-Za-z\u0600-\u06FF]*)$/i) || 
+                                         pieceNumA.match(/^([A-Za-z\u0600-\u06FF]+)$/i) || 
+                                         pieceNumA.match(/^(\d+)$/)
+                          const matchB = pieceNumB.match(/^([A-Za-z\u0600-\u06FF]*)(\d+)([A-Za-z\u0600-\u06FF]*)$/i) || 
+                                         pieceNumB.match(/^([A-Za-z\u0600-\u06FF]+)$/i) || 
+                                         pieceNumB.match(/^(\d+)$/)
+                          
+                          if (matchA && matchB) {
+                            // Case 1: Both have numbers (e.g., "1", "B1", "14A")
+                            if (matchA[2] && matchB[2]) {
+                              const prefixA = (matchA[1] || '').toLowerCase()
+                              const prefixB = (matchB[1] || '').toLowerCase()
+                              const numA = parseInt(matchA[2], 10)
+                              const numB = parseInt(matchB[2], 10)
+                              const suffixA = (matchA[3] || '').toLowerCase()
+                              const suffixB = (matchB[3] || '').toLowerCase()
+                              
+                              // Compare prefixes first (empty prefix comes before letters)
+                              if (prefixA !== prefixB) {
+                                if (!prefixA) return -1 // Numbers come before letters
+                                if (!prefixB) return 1
+                                return prefixA.localeCompare(prefixB)
+                              }
+                              // Then compare numbers
+                              if (numA !== numB) {
+                                return numA - numB
+                              }
+                              // Finally compare suffixes
+                              return suffixA.localeCompare(suffixB)
+                            }
+                            // Case 2: One has number, one doesn't (numbers come first)
+                            if (matchA[2] && !matchB[2]) return -1
+                            if (!matchA[2] && matchB[2]) return 1
+                            // Case 3: Both are pure letters or pure numbers
+                            return pieceNumA.localeCompare(pieceNumB, undefined, { numeric: true, sensitivity: 'base' })
+                          }
+                          // Fallback to string comparison
+                          return pieceNumA.localeCompare(pieceNumB, undefined, { numeric: true, sensitivity: 'base' })
+                        })
+                      }
+                      
                       if (sortedBatches.length === 0) {
                         return (
                           <p className="text-xs text-gray-500 text-center py-4">
@@ -1914,6 +2036,8 @@ export function Users() {
                       }
                       
                       return sortedBatches.map(([batchId, pieces]) => {
+                        // Sort pieces within batch using natural sort
+                        const sortedPieces = naturalSortPieces(pieces)
                         // Use deduplicated batch map
                         const batch = batchMap.get(batchId)
                         const batchName = batch?.name || 'غير معروف'
@@ -1978,7 +2102,7 @@ export function Users() {
                             {isExpanded && (
                               <div className="border-t border-gray-200 p-2 space-y-1">
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-1">
-                                  {pieces.map((piece) => {
+                                  {sortedPieces.map((piece) => {
                                     const isSelected = form.allowedPieces?.includes(piece.id) || false
                                     const statusColors: Record<string, string> = {
                                       'Available': 'text-green-600',

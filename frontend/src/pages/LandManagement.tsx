@@ -4139,20 +4139,22 @@ export function LandManagement() {
           const remainingPerPiece = Math.max(0, (piecePrice || 0) - advanceAfterReservation - (companyFeePerPiece || 0))
           
           // Calculate based on what the offer has: monthly_payment or number_of_months
+          // IMPORTANT: Prioritize number_of_months if set - this was the primary input method
+          // Only calculate from monthly_payment if number_of_months is not set
           let monthsPerPiece = 0
           let monthlyAmountPerPiece = 0
           
-          if (offerToUse.monthly_payment && offerToUse.monthly_payment > 0) {
-            // Offer has monthly_payment - calculate number of months
-            monthlyAmountPerPiece = offerToUse.monthly_payment
-            monthsPerPiece = remainingPerPiece > 0
-              ? Math.ceil(remainingPerPiece / offerToUse.monthly_payment)
-              : 0
-          } else if (offerToUse.number_of_months && offerToUse.number_of_months > 0) {
-            // Offer has number_of_months - calculate monthly payment
+          if (offerToUse.number_of_months && offerToUse.number_of_months > 0) {
+            // Use number_of_months directly - this is the primary input
             monthsPerPiece = offerToUse.number_of_months
             monthlyAmountPerPiece = remainingPerPiece > 0
               ? remainingPerPiece / offerToUse.number_of_months
+              : 0
+          } else if (offerToUse.monthly_payment && offerToUse.monthly_payment > 0) {
+            // Calculate number of months from monthly payment only if number_of_months is not set
+            monthlyAmountPerPiece = offerToUse.monthly_payment
+            monthsPerPiece = remainingPerPiece > 0
+              ? Math.ceil(remainingPerPiece / offerToUse.monthly_payment)
               : 0
           }
           
