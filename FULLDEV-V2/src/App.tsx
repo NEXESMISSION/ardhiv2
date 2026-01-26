@@ -172,11 +172,13 @@ function AppContent() {
     // The useEffect in AuthContext will ensure loading is false
   } else if (loading) {
     // Show loading state only if we don't have user yet
+    // Add a timeout to prevent infinite loading
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center">
           <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mb-4"></div>
-          <p className="text-gray-600">جاري التحميل...</p>
+          <p className="text-gray-600 mb-2">جاري التحميل...</p>
+          <p className="text-sm text-gray-500">جاري تحميل بيانات المستخدم...</p>
         </div>
       </div>
     )

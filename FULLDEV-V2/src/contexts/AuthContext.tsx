@@ -284,14 +284,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setLoading(true)
         console.log('Loading system user for auth_user_id:', authUserId, retryCount > 0 ? `(retry ${retryCount}/${MAX_RETRIES})` : '')
       
-        // Query immediately - only select columns that exist
+        // Query immediately - only select columns that definitely exist
+        // Using minimal required columns first, then expand if needed
         // FIXED: Removed status, page_order, sidebar_order - they don't exist in the database
         // FIXED: Using auth_user_id=eq. instead of id=eq.
+        // Using only essential columns that are guaranteed to exist
+        // IMPORTANT: Always use auth_user_id for querying, never use id
         const queryPromise = supabase
           .from('users')
           .select('id, name, email, phone, place, title, notes, role, image_url, allowed_pages, allowed_batches, allowed_pieces, display_order, created_at, updated_at, auth_user_id')
-          .eq('auth_user_id', authUserId)
+          .eq('auth_user_id', authUserId) // CRITICAL: Use auth_user_id, not id
           .maybeSingle()
+        
+        // Log the query for debugging
+        console.log('Querying users table with auth_user_id:', authUserId)
 
         // Add query timeout with abort tracking
         // Only set timeout if query takes longer than expected
@@ -401,6 +407,69 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           hint: error.hint
         })
           
+          // Handle 400 Bad Request (usually means column doesn't exist or query syntax error)
+          if (error.status === 400) {
+            console.error('Bad Request - likely column doesn\'t exist or query syntax error')
+            console.error('Attempting fallback query with minimal columns...')
+            
+            // Try a minimal query with only essential columns
+            try {
+              const fallbackQuery = supabase
+                .from('users')
+                .select('id, email, role, auth_user_id')
+                .eq('auth_user_id', authUserId)
+                .maybeSingle()
+              
+              const fallbackResult = await fallbackQuery
+              
+              if (fallbackResult.error) {
+                console.error('Fallback query also failed:', fallbackResult.error)
+                // If fallback also fails, treat as user not found
+                setSystemUser(null)
+                systemUserRef.current = null
+                setLoading(false)
+                loadingSystemUserRef.current = false
+                return { userNotFound: true, error: fallbackResult.error }
+              }
+              
+              if (fallbackResult.data) {
+                // Use minimal data - set defaults for missing fields
+                const minimalUser: SystemUser = {
+                  id: fallbackResult.data.id,
+                  email: fallbackResult.data.email,
+                  name: null,
+                  phone: null,
+                  place: null,
+                  title: null,
+                  notes: null,
+                  role: fallbackResult.data.role,
+                  image_url: null,
+                  allowed_pages: null,
+                  allowed_batches: null,
+                  allowed_pieces: null,
+                  display_order: null,
+                  created_at: new Date().toISOString(),
+                  updated_at: new Date().toISOString(),
+                }
+                console.log('Fallback query succeeded with minimal data')
+                setSystemUser(minimalUser)
+                systemUserRef.current = minimalUser
+                setLoading(false)
+                loadingSystemUserRef.current = false
+                return { success: true, usedFallback: true }
+              }
+            } catch (fallbackError: any) {
+              console.error('Fallback query exception:', fallbackError)
+            }
+            
+            // If fallback also failed, continue with normal error handling
+            setSystemUser(null)
+            systemUserRef.current = null
+            setLoading(false)
+            loadingSystemUserRef.current = false
+            return { userNotFound: true, error }
+          }
+          
           // Check if it's a network error
           if (isNetworkError(error)) {
             console.error('Network error detected')
@@ -433,6 +502,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           console.error('1. Did you run fix_rls_recursion.sql?')
           console.error('2. Does the user exist in users table?')
           console.error('3. Does auth_user_id match?')
+        }
+        
+        // 404 error - table or RPC function doesn't exist
+        if (error.status === 404) {
+          console.error('404 Not Found - table or RPC function may not exist')
+          console.error('This might be a deployment issue - check database schema')
         }
         
         setSystemUser(null)
@@ -624,6 +699,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         
         // Check if user was found in system
         if (result?.userNotFound) {
+          // Check if it's a database schema error (400 Bad Request)
+          if (result?.error?.status === 400) {
+            console.error('=== DATABASE SCHEMA ERROR ===')
+            console.error('The database schema may be out of sync with the application')
+            console.error('Error:', result.error.message)
+            console.error('This usually means a column is missing or the query syntax is wrong')
+            
+            await supabase.auth.signOut()
+            setLoading(false)
+            return { 
+              error: { 
+                message: `خطأ في قاعدة البيانات: ${result.error.message || 'خطأ غير معروف'}\n\nيرجى التحقق من أن جميع الجداول والأعمدة موجودة في قاعدة البيانات.`,
+                code: 'DATABASE_SCHEMA_ERROR',
+                originalError: result.error
+              } 
+            }
+          }
+          
           // User authenticated but not in system users table OR auth_user_id mismatch
           if (result?.authUserIdMismatch) {
             // User exists but auth_user_id doesn't match
@@ -726,6 +819,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     }
   }, [user, systemUser, loading])
+
+  // Safety mechanism: Force loading to false after maximum timeout
+  // This prevents infinite loading state even if all other mechanisms fail
+  useEffect(() => {
+    const MAX_LOADING_TIME = 10000 // 10 seconds maximum
+    const safetyTimeout = setTimeout(() => {
+      if (loading && user) {
+        console.warn('Safety timeout: Force setting loading to false after 10 seconds')
+        setLoading(false)
+        loadingSystemUserRef.current = false
+        // If we have user but no systemUser, try one more time with minimal query
+        if (user && !systemUser) {
+          console.warn('Attempting emergency fallback query...')
+          loadSystemUser(user.id).catch((err) => {
+            console.error('Emergency fallback query failed:', err)
+          })
+        }
+      }
+    }, MAX_LOADING_TIME)
+
+    return () => {
+      clearTimeout(safetyTimeout)
+    }
+  }, [loading, user, systemUser])
 
   return (
     <AuthContext.Provider
