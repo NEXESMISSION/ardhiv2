@@ -284,10 +284,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setLoading(true)
         console.log('Loading system user for auth_user_id:', authUserId, retryCount > 0 ? `(retry ${retryCount}/${MAX_RETRIES})` : '')
       
-        // Query immediately - no network check delay
+        // Query immediately - only select columns that exist
+        // Don't select page_order, sidebar_order as they don't exist in the database
         const queryPromise = supabase
           .from('users')
-          .select('*')
+          .select('id, name, email, phone, place, title, notes, role, image_url, allowed_pages, allowed_batches, allowed_pieces, display_order, created_at, updated_at, auth_user_id')
           .eq('auth_user_id', authUserId)
           .maybeSingle()
 
@@ -478,8 +479,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
         console.log('System user loaded successfully:', data.email, data.role)
-        setSystemUser(data)
-        systemUserRef.current = data // Update ref
+        // Ensure all fields are properly set, even if null
+        const formattedUser: SystemUser = {
+          id: data.id,
+          email: data.email,
+          name: data.name || null,
+          phone: data.phone || null,
+          place: data.place || null,
+          title: data.title || null,
+          notes: data.notes || null,
+          role: data.role,
+          image_url: data.image_url || null,
+          allowed_pages: data.allowed_pages || null,
+          allowed_batches: data.allowed_batches || null,
+          allowed_pieces: data.allowed_pieces || null,
+          display_order: data.display_order || null,
+          created_at: data.created_at,
+          updated_at: data.updated_at,
+        }
+        setSystemUser(formattedUser)
+        systemUserRef.current = formattedUser // Update ref
         
         // CRITICAL: Always set loading to false when we have system user
         // Do this synchronously to prevent race conditions
