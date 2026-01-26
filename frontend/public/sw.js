@@ -1,6 +1,8 @@
 // Service Worker for PWA
-const CACHE_NAME = 'land-management-v1'
-const STATIC_CACHE_NAME = 'land-management-static-v1'
+// Bump cache versions to ensure clients always get the latest frontend bundle
+// When you deploy a new version, increment these strings to bust old cached assets
+const CACHE_NAME = 'land-management-v2'
+const STATIC_CACHE_NAME = 'land-management-static-v2'
 
 // Assets to cache on install
 const STATIC_ASSETS = [

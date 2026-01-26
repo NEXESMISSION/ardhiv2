@@ -247,84 +247,84 @@ export function Homes() {
     
     // Use functional update to get latest form state and avoid stale closures
     setOfferForm(prev => {
-      // Calculate advance amount (for display and calculation of remaining amount)
+    // Calculate advance amount (for display and calculation of remaining amount)
       const advanceAmount = prev.advance_amount 
         ? (prev.advance_is_percentage 
             ? (priceFull * parseFloat(prev.advance_amount)) / 100
             : parseFloat(prev.advance_amount))
-        : 0
-      
-      // Remaining amount for installments = Installment price - Advance
-      // This is what will be paid in monthly installments
-      const remainingForInstallments = installmentPrice - advanceAmount
-      
-      // Removed excessive logging - only log when calculation method is set
+      : 0
+    
+    // Remaining amount for installments = Installment price - Advance
+    // This is what will be paid in monthly installments
+    const remainingForInstallments = installmentPrice - advanceAmount
+    
+    // Removed excessive logging - only log when calculation method is set
       if (prev.calculation_method) {
-        console.log('[calculateInstallmentPrice] Calculation:', {
-          installmentPrice,
-          advanceAmount,
-          remainingForInstallments,
+      console.log('[calculateInstallmentPrice] Calculation:', {
+        installmentPrice,
+        advanceAmount,
+        remainingForInstallments,
           calculationMethod: prev.calculation_method,
           monthlyPayment: prev.monthly_payment,
           numberOfMonths: prev.number_of_months
-        })
-      }
+      })
+    }
       
       const updates: Partial<typeof prev> = {}
-      
-      // Calculate monthly payment or number of months based on remaining amount
+    
+    // Calculate monthly payment or number of months based on remaining amount
       // CRITICAL: Only calculate based on the selected calculation_method - never change it
       if (prev.calculation_method === 'monthly' && prev.monthly_payment) {
         const monthlyPayment = parseFloat(prev.monthly_payment)
         if (!isNaN(monthlyPayment) && monthlyPayment > 0 && remainingForInstallments > 0) {
-          // Calculate number of months needed based on remaining amount (after advance)
-          const numberOfMonths = Math.ceil(remainingForInstallments / monthlyPayment)
-          
-          console.log('[calculateInstallmentPrice] Monthly calculation:', {
-            monthlyPayment,
-            numberOfMonths,
-            remainingForInstallments,
+        // Calculate number of months needed based on remaining amount (after advance)
+        const numberOfMonths = Math.ceil(remainingForInstallments / monthlyPayment)
+        
+        console.log('[calculateInstallmentPrice] Monthly calculation:', {
+          monthlyPayment,
+          numberOfMonths,
+          remainingForInstallments,
             calculationMethod: prev.calculation_method, // Log to verify it's not changing
-            breakdown: {
-              installmentPrice: installmentPrice,
-              advance: advanceAmount,
-              remaining: remainingForInstallments,
-              monthlyPayment: monthlyPayment,
-              numberOfMonths: numberOfMonths
-            }
-          })
-          
+          breakdown: {
+            installmentPrice: installmentPrice,
+            advance: advanceAmount,
+            remaining: remainingForInstallments,
+            monthlyPayment: monthlyPayment,
+            numberOfMonths: numberOfMonths
+          }
+        })
+        
           updates.number_of_months = numberOfMonths.toString()
         } else if (!isNaN(monthlyPayment) && monthlyPayment > 0 && remainingForInstallments <= 0) {
-          // If advance covers everything, no installments needed
+        // If advance covers everything, no installments needed
           updates.number_of_months = '0'
-        }
+      }
       } else if (prev.calculation_method === 'months' && prev.number_of_months) {
         const numberOfMonths = parseFloat(prev.number_of_months)
         if (!isNaN(numberOfMonths) && numberOfMonths > 0 && remainingForInstallments > 0) {
-          // Calculate monthly payment from remaining amount (after advance)
-          const monthlyPayment = remainingForInstallments / numberOfMonths
-          
-          console.log('[calculateInstallmentPrice] Months calculation:', {
-            numberOfMonths,
-            monthlyPayment,
-            remainingForInstallments,
+        // Calculate monthly payment from remaining amount (after advance)
+        const monthlyPayment = remainingForInstallments / numberOfMonths
+        
+        console.log('[calculateInstallmentPrice] Months calculation:', {
+          numberOfMonths,
+          monthlyPayment,
+          remainingForInstallments,
             calculationMethod: prev.calculation_method, // Log to verify it's not changing
-            breakdown: {
-              installmentPrice: installmentPrice,
-              advance: advanceAmount,
-              remaining: remainingForInstallments,
-              monthlyPayment: monthlyPayment,
-              numberOfMonths: numberOfMonths
-            }
-          })
-          
+          breakdown: {
+            installmentPrice: installmentPrice,
+            advance: advanceAmount,
+            remaining: remainingForInstallments,
+            monthlyPayment: monthlyPayment,
+            numberOfMonths: numberOfMonths
+          }
+        })
+        
           updates.monthly_payment = monthlyPayment.toFixed(2)
         } else if (!isNaN(numberOfMonths) && numberOfMonths > 0 && remainingForInstallments <= 0) {
-          // If advance covers everything, no monthly payment needed
+        // If advance covers everything, no monthly payment needed
           updates.monthly_payment = '0'
-        }
       }
+    }
       
       // Only update if there are changes to avoid infinite loops
       // IMPORTANT: Always preserve the calculation_method - never change it during calculation
@@ -357,8 +357,8 @@ export function Homes() {
       
       if (shouldCalculate) {
         console.log('[useEffect] Triggering calculation with method:', offerForm.calculation_method)
-        calculateInstallmentPrice()
-      }
+      calculateInstallmentPrice()
+    }
     }
   }, [
     houseForm.price_installment,
@@ -655,19 +655,15 @@ export function Homes() {
             throw new Error('جدول المنازل غير موجود. يرجى تنفيذ ملف SQL لإنشاء الجدول أولاً.')
           }
           
-          // If we found the house, use it
+          // If we found the house, use it and fall through to save offer + close dialog
           if (foundHouse && foundHouse.id) {
             console.log('[saveHouse] Found house after insert, using it:', foundHouse.id)
             houseId = foundHouse.id
             showNotification(t('homes.houseAddedSuccess'), 'success')
-            setHouseDialogOpen(false)
-            await fetchHouses()
-            return
+          } else {
+            throw new Error('فشل في إضافة المنزل: لم يتم إرجاع بيانات من قاعدة البيانات. قد تكون هناك مشكلة في صلاحيات قاعدة البيانات (RLS). يرجى تنفيذ ملف fix_houses_rls_v2.sql في Supabase.')
           }
-          
-          throw new Error('فشل في إضافة المنزل: لم يتم إرجاع بيانات من قاعدة البيانات. قد تكون هناك مشكلة في صلاحيات قاعدة البيانات (RLS). يرجى تنفيذ ملف fix_houses_rls_v2.sql في Supabase.')
-        }
-        
+        } else {
         const data = insertData[0]
         if (!data || !data.id) {
           console.error('[saveHouse] Insert failed - data exists but no ID:', data)
@@ -675,8 +671,9 @@ export function Homes() {
         }
         
         houseId = data.id
-        console.log('[saveHouse] House created successfully, ID:', houseId)
+        console.log('[saveHouse] House created successfully, ID:', houseId)     
         showNotification(t('homes.houseAddedSuccess'), 'success')
+        }
       }
 
       // Save payment offer if offer form is filled

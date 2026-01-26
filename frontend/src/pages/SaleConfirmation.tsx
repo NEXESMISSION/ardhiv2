@@ -371,7 +371,7 @@ export function SaleConfirmation() {
     const pricePerPiece = currentSale.total_selling_price / pieceCount
     
     // Load available payment offers for this piece first (needed for fallback values)
-    const offers: PaymentOffer[] = []
+      const offers: PaymentOffer[] = []
     try {
       // Get piece-specific offers
       const { data: pieceOffers } = await supabase
@@ -404,7 +404,7 @@ export function SaleConfirmation() {
     } catch (error) {
       console.error('Error loading offers:', error)
       setAvailableOffersForEdit([])
-    }
+      }
     
     // Get selected offer for fallback values
     const selectedOffer = currentSale.selected_offer_id 
@@ -5621,8 +5621,8 @@ export function SaleConfirmation() {
                           // Show sale value if available, otherwise show offer value
                           if (editingSale.monthly_installment_amount) {
                             const amount = editingHouse 
-                              ? editingSale.monthly_installment_amount
-                              : (editingSale.monthly_installment_amount / (editingSale.land_piece_ids?.length || 1))
+                            ? editingSale.monthly_installment_amount
+                            : (editingSale.monthly_installment_amount / (editingSale.land_piece_ids?.length || 1))
                             return formatCurrency(amount)
                           }
                           const selectedOffer = availableOffersForEdit.find(o => o.id === editForm.selected_offer_id)

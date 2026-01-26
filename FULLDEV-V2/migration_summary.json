@@ -1,0 +1,26 @@
+{
+  "totalBatches": 9,
+  "totalPieces": 2178,
+  "batchIds": [
+    "23443c03-1b6d-44cb-b0a8-9a84f4cbc4ea",
+    "39e337c6-5a9c-43d3-909e-6a543ff8535e",
+    "576bb486-b06e-46ec-b27e-7c243ac16d09",
+    "5891b0dc-4cb3-41ee-aae5-c53235229cbc",
+    "61491c78-cc7a-46f3-a8ea-3ff8b70b7a54",
+    "720588fb-ee0c-4fe9-becd-2cac716626da",
+    "ac30a8e3-4c0b-4f0b-930e-4ee9ff696f2d",
+    "f147a1b2-61b0-46ac-9b64-8569750eae81",
+    "feaeafab-1f6a-45a6-8d28-29ae3c51d64d"
+  ],
+  "piecesByBatch": {
+    "23443c03-1b6d-44cb-b0a8-9a84f4cbc4ea": 371,
+    "39e337c6-5a9c-43d3-909e-6a543ff8535e": 103,
+    "576bb486-b06e-46ec-b27e-7c243ac16d09": 388,
+    "5891b0dc-4cb3-41ee-aae5-c53235229cbc": 142,
+    "61491c78-cc7a-46f3-a8ea-3ff8b70b7a54": 51,
+    "720588fb-ee0c-4fe9-becd-2cac716626da": 384,
+    "ac30a8e3-4c0b-4f0b-930e-4ee9ff696f2d": 447,
+    "f147a1b2-61b0-46ac-9b64-8569750eae81": 253,
+    "feaeafab-1f6a-45a6-8d28-29ae3c51d64d": 39
+  }
+}

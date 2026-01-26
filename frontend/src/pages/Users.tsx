@@ -177,12 +177,12 @@ export function Users() {
       let hasMore = true
       
       while (hasMore) {
-        const { data, error } = await supabase
-          .from('land_pieces')
-          .select('id, piece_number, surface_area, land_batch_id, status, land_batches(name)')
+      const { data, error } = await supabase
+        .from('land_pieces')
+        .select('id, piece_number, surface_area, land_batch_id, status, land_batches(name)')
           .range(from, from + chunkSize - 1)
-        
-        if (error) throw error
+      
+      if (error) throw error
         
         if (data && data.length > 0) {
           allPieces = [...allPieces, ...data]
