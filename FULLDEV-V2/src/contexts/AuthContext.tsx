@@ -285,7 +285,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         console.log('Loading system user for auth_user_id:', authUserId, retryCount > 0 ? `(retry ${retryCount}/${MAX_RETRIES})` : '')
       
         // Query immediately - only select columns that exist
-        // Don't select page_order, sidebar_order as they don't exist in the database
+        // FIXED: Removed status, page_order, sidebar_order - they don't exist in the database
+        // FIXED: Using auth_user_id=eq. instead of id=eq.
         const queryPromise = supabase
           .from('users')
           .select('id, name, email, phone, place, title, notes, role, image_url, allowed_pages, allowed_batches, allowed_pieces, display_order, created_at, updated_at, auth_user_id')
