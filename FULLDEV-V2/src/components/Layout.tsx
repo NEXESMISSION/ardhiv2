@@ -34,7 +34,9 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
   const [notifications, setNotifications] = useState<Notification[]>([])
   const [unreadCount, setUnreadCount] = useState(0)
   const [loadingNotifications, setLoadingNotifications] = useState(false)
+  const [newNotificationReceived, setNewNotificationReceived] = useState(false)
   const subscriptionRef = useRef<any>(null)
+  const notificationIdsRef = useRef<Set<string>>(new Set())
 
   // Track page history
   useEffect(() => {
@@ -45,97 +47,186 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
     sessionStorage.setItem('previousPage', currentPage)
   }, [currentPage])
 
-  // Load notifications and set up real-time subscription (only for owners)
+  // Load notifications and set up real-time subscription (for all users)
   useEffect(() => {
-    if (!isOwner || !systemUser?.id) return
+    if (!systemUser?.id) {
+      return
+    }
 
     let mounted = true
+    let reconnectTimeout: NodeJS.Timeout | null = null
+    const userId = systemUser.id
 
-    // Load initial notifications
-    const loadNotifications = async () => {
-      setLoadingNotifications(true)
+    // Load initial notifications with debouncing
+    let loadTimeout: NodeJS.Timeout | null = null
+    const loadNotifications = async (silent = false) => {
+      if (!userId || !mounted) return
+
+      if (!silent) {
+        setLoadingNotifications(true)
+      }
+
       try {
         const [notifs, count] = await Promise.all([
-          getNotifications(50),
-          getUnreadCount(),
+          getNotifications(userId, 50),
+          getUnreadCount(userId),
         ])
+
         if (mounted) {
+          // Track existing notification IDs
+          notificationIdsRef.current = new Set(notifs.map((n) => n.id))
           setNotifications(notifs)
           setUnreadCount(count)
         }
       } catch (error) {
         console.error('Error loading notifications:', error)
       } finally {
-        if (mounted) {
+        if (mounted && !silent) {
           setLoadingNotifications(false)
         }
       }
     }
 
+    // Initial load
     loadNotifications()
 
-    // Set up real-time subscription for new notifications
-    const channel = supabase
-      .channel('notifications')
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'notifications',
-          filter: `user_id=eq.${systemUser.id}`,
-        },
-        async (payload) => {
-          // New notification received
-          const newNotification = payload.new as Notification
-          if (mounted) {
-            setNotifications((prev) => [newNotification, ...prev])
-            setUnreadCount((prev) => prev + 1)
-          }
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'notifications',
-          filter: `user_id=eq.${systemUser.id}`,
-        },
-        async (payload) => {
-          // Notification updated (e.g., marked as read)
-          const updatedNotification = payload.new as Notification
-          if (mounted) {
-            setNotifications((prev) =>
-              prev.map((n) => (n.id === updatedNotification.id ? updatedNotification : n))
-            )
-            // Recalculate unread count
-            const count = await getUnreadCount()
-            if (mounted) {
-              setUnreadCount(count)
-            }
-          }
-        }
-      )
-      .subscribe()
-
-    subscriptionRef.current = channel
-
-    // Refresh notifications periodically (every 30 seconds) as backup
-    const refreshInterval = setInterval(() => {
-      if (mounted) {
-        loadNotifications()
-      }
-    }, 30000)
-
-    return () => {
-      mounted = false
+    // Set up real-time subscription with proper error handling and reconnection
+    const setupSubscription = () => {
+      // Remove existing channel if any
       if (subscriptionRef.current) {
         supabase.removeChannel(subscriptionRef.current)
       }
+
+      const channelName = `notifications-${userId}-${Date.now()}`
+      const channel = supabase
+        .channel(channelName)
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'notifications',
+            filter: `user_id=eq.${userId}`,
+          },
+          (payload) => {
+            if (!mounted) return
+
+            const newNotification = payload.new as Notification
+            // Prevent duplicates
+            if (notificationIdsRef.current.has(newNotification.id)) {
+              return
+            }
+
+            notificationIdsRef.current.add(newNotification.id)
+            
+            setNotifications((prev) => {
+              const exists = prev.some((n) => n.id === newNotification.id)
+              if (exists) return prev
+              return [newNotification, ...prev]
+            })
+            setUnreadCount((prev) => prev + 1)
+            
+            // Show visual feedback
+            setNewNotificationReceived(true)
+            setTimeout(() => {
+              if (mounted) {
+                setNewNotificationReceived(false)
+              }
+            }, 2000)
+          }
+        )
+        .on(
+          'postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'notifications',
+            filter: `user_id=eq.${userId}`,
+          },
+          (payload) => {
+            if (!mounted) return
+
+            const updatedNotification = payload.new as Notification
+            setNotifications((prev) =>
+              prev.map((n) => (n.id === updatedNotification.id ? updatedNotification : n))
+            )
+            // Optimistically update count
+            if (updatedNotification.read) {
+              setUnreadCount((prev) => Math.max(0, prev - 1))
+            }
+          }
+        )
+        .on(
+          'postgres_changes',
+          {
+            event: 'DELETE',
+            schema: 'public',
+            table: 'notifications',
+            filter: `user_id=eq.${userId}`,
+          },
+          (payload) => {
+            if (!mounted) return
+
+            const deletedId = payload.old.id
+            setNotifications((prev) => {
+              const notification = prev.find((n) => n.id === deletedId)
+              const newList = prev.filter((n) => n.id !== deletedId)
+              // Update unread count if deleted notification was unread
+              if (notification && !notification.read) {
+                setUnreadCount((prev) => Math.max(0, prev - 1))
+              }
+              return newList
+            })
+          }
+        )
+        .subscribe((status) => {
+          if (status === 'SUBSCRIBED') {
+            console.log('Notification subscription active')
+            // Clear any pending reconnection
+            if (reconnectTimeout) {
+              clearTimeout(reconnectTimeout)
+              reconnectTimeout = null
+            }
+          } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+            console.warn('Notification subscription error:', status)
+            // Attempt reconnection after delay
+            if (mounted && !reconnectTimeout) {
+              reconnectTimeout = setTimeout(() => {
+                if (mounted) {
+                  setupSubscription()
+                }
+              }, 5000)
+            }
+          }
+        })
+
+      subscriptionRef.current = channel
+    }
+
+    setupSubscription()
+
+    // Periodic refresh as backup (reduced frequency - every 60 seconds)
+    const refreshInterval = setInterval(() => {
+      if (mounted) {
+        loadNotifications(true) // Silent refresh
+      }
+    }, 60000)
+
+    return () => {
+      mounted = false
+      if (loadTimeout) {
+        clearTimeout(loadTimeout)
+      }
+      if (reconnectTimeout) {
+        clearTimeout(reconnectTimeout)
+      }
+      if (subscriptionRef.current) {
+        supabase.removeChannel(subscriptionRef.current)
+        subscriptionRef.current = null
+      }
       clearInterval(refreshInterval)
     }
-  }, [isOwner, systemUser?.id])
+  }, [systemUser?.id])
 
   const handleGoBack = () => {
     if (previousPage) {
@@ -147,30 +238,74 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
   }
 
   const handleMarkAsRead = async (notificationId: string) => {
-    const success = await markAsRead(notificationId)
-    if (success) {
+    if (!systemUser?.id) return
+
+    // Optimistic update
+    const notification = notifications.find((n) => n.id === notificationId)
+    if (notification && !notification.read) {
       setNotifications((prev) =>
         prev.map((n) => (n.id === notificationId ? { ...n, read: true } : n))
       )
       setUnreadCount((prev) => Math.max(0, prev - 1))
     }
+
+    // Perform actual update
+    const success = await markAsRead(notificationId, systemUser.id)
+    if (!success) {
+      // Revert on failure
+      if (notification) {
+        setNotifications((prev) =>
+          prev.map((n) => (n.id === notificationId ? notification : n))
+        )
+        setUnreadCount((prev) => prev + 1)
+      }
+    }
   }
 
   const handleMarkAllAsRead = async () => {
-    const success = await markAllAsRead()
-    if (success) {
+    if (!systemUser?.id) return
+
+    // Optimistic update
+    const unreadNotifications = notifications.filter((n) => !n.read)
+    if (unreadNotifications.length > 0) {
       setNotifications((prev) => prev.map((n) => ({ ...n, read: true })))
       setUnreadCount(0)
+    }
+
+    // Perform actual update
+    const success = await markAllAsRead(systemUser.id)
+    if (!success) {
+      // Revert on failure - reload from server
+      const [notifs, count] = await Promise.all([
+        getNotifications(systemUser.id, 50),
+        getUnreadCount(systemUser.id),
+      ])
+      setNotifications(notifs)
+      setUnreadCount(count)
     }
   }
 
   const handleDeleteNotification = async (notificationId: string) => {
-    const success = await deleteNotification(notificationId)
-    if (success) {
-      const notification = notifications.find((n) => n.id === notificationId)
-      setNotifications((prev) => prev.filter((n) => n.id !== notificationId))
-      if (notification && !notification.read) {
-        setUnreadCount((prev) => Math.max(0, prev - 1))
+    if (!systemUser?.id) return
+
+    // Optimistic update
+    const notification = notifications.find((n) => n.id === notificationId)
+    setNotifications((prev) => prev.filter((n) => n.id !== notificationId))
+    if (notification && !notification.read) {
+      setUnreadCount((prev) => Math.max(0, prev - 1))
+    }
+
+    // Perform actual delete
+    const success = await deleteNotification(notificationId, systemUser.id)
+    if (!success) {
+      // Revert on failure
+      if (notification) {
+        setNotifications((prev) => [...prev, notification].sort((a, b) => 
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        ))
+        if (!notification.read) {
+          setUnreadCount((prev) => prev + 1)
+        }
       }
     }
   }
@@ -239,21 +374,28 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
               </div>
             </div>
             <div className="flex items-center gap-2 sm:gap-3">
-              {/* Notification Icon - Only show for owners */}
-              {isOwner && (
+              {/* Notification Icon - Show for all authenticated users */}
+              {systemUser && (
               <div className="relative" ref={notificationRef}>
                 <IconButton
                   variant="ghost"
                   size="sm"
-                  onClick={() => setNotificationsOpen(!notificationsOpen)}
-                  className="p-1.5 sm:p-2 flex-shrink-0 relative"
+                  onClick={() => {
+                    setNotificationsOpen(!notificationsOpen)
+                    setNewNotificationReceived(false)
+                  }}
+                  className={`p-1.5 sm:p-2 flex-shrink-0 relative transition-all ${
+                    newNotificationReceived ? 'animate-bounce' : ''
+                  }`}
                   title="الإشعارات"
                 >
                   <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
                   </svg>
                   {unreadCount > 0 && (
-                      <span className="absolute top-0 right-0 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white animate-pulse">
+                    <span className={`absolute top-0 right-0 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white ${
+                      newNotificationReceived ? 'animate-pulse scale-125' : 'animate-pulse'
+                    }`}>
                       {unreadCount > 9 ? '9+' : unreadCount}
                     </span>
                   )}

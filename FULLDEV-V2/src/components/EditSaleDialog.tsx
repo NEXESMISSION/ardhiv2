@@ -228,13 +228,41 @@ export function EditSaleDialog({ open, onClose, sale, onSave }: EditSaleDialogPr
         updateData.remaining_payment_amount = null
       }
 
+      // Ensure ID is a valid UUID string
+      const saleId = typeof sale.id === 'string' ? sale.id : String(sale.id)
+      
+      // Validate UUID format
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+      if (!uuidRegex.test(saleId)) {
+        throw new Error('معرف البيع غير صحيح')
+      }
+
+      // First verify the sale exists and is pending
+      const { data: existingSale, error: checkError } = await supabase
+        .from('sales')
+        .select('id, status')
+        .eq('id', saleId)
+        .single()
+
+      if (checkError || !existingSale) {
+        throw new Error('البيع غير موجود')
+      }
+
+      if (existingSale.status !== 'pending') {
+        throw new Error(`لا يمكن تحديث البيع. الحالة الحالية: ${existingSale.status}`)
+      }
+
+      // Now update only by ID (status already verified)
+      // Use match() with single field to ensure proper UUID type handling
       const { error: updateError } = await supabase
         .from('sales')
         .update(updateData)
-        .eq('id', sale.id)
-        .eq('status', 'pending')
+        .match({ id: saleId })
 
-      if (updateError) throw updateError
+      if (updateError) {
+        console.error('Error updating sale:', updateError)
+        throw updateError
+      }
 
       onSave()
       onClose()

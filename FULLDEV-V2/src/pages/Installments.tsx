@@ -396,7 +396,7 @@ function SaleRow({ sale, onClick }: { sale: Sale; onClick: () => void }) {
     overdueCount: number
   } | null>(null)
   const [loadingStats, setLoadingStats] = useState(true)
-  const [touchStart, setTouchStart] = useState<{ x: number; y: number; time: number } | null>(null)
+  const [touchStart, setTouchStart] = useState<{ x: number; y: number; time: number; isScrolling?: boolean } | null>(null)
 
   useEffect(() => {
     async function loadStats() {
@@ -523,7 +523,20 @@ function SaleRow({ sale, onClick }: { sale: Sale; onClick: () => void }) {
       x: touch.clientX,
       y: touch.clientY,
       time: Date.now(),
+      isScrolling: false,
     })
+  }
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (!touchStart) return
+    const touch = e.touches[0]
+    const deltaX = Math.abs(touch.clientX - touchStart.x)
+    const deltaY = Math.abs(touch.clientY - touchStart.y)
+    
+    // If moved more than 5px, it's definitely a scroll
+    if (deltaX > 5 || deltaY > 5) {
+      setTouchStart({ ...touchStart, isScrolling: true })
+    }
   }
 
   const handleTouchEnd = (e: React.TouchEvent) => {
@@ -536,18 +549,24 @@ function SaleRow({ sale, onClick }: { sale: Sale; onClick: () => void }) {
       return
     }
     
+    // If we detected scrolling, don't treat as click
+    if (touchStart.isScrolling) {
+      setTouchStart(null)
+      return
+    }
+    
     const touch = e.changedTouches[0]
     const deltaX = Math.abs(touch.clientX - touchStart.x)
     const deltaY = Math.abs(touch.clientY - touchStart.y)
     const deltaTime = Date.now() - touchStart.time
     
-    // If moved more than 10px or took more than 300ms, it's a scroll, not a click
-    if (deltaX > 10 || deltaY > 10 || deltaTime > 300) {
+    // Increased threshold to 20px and 250ms
+    if (deltaX > 20 || deltaY > 20 || deltaTime > 250) {
       setTouchStart(null)
       return
     }
     
-    // It's a click - prevent default and stop propagation
+    // It's a click - only prevent default at the very end
     e.preventDefault()
     e.stopPropagation()
     onClick()
@@ -567,8 +586,9 @@ function SaleRow({ sale, onClick }: { sale: Sale; onClick: () => void }) {
 
             return (
     <tr 
-      className="border-b border-gray-200 hover:bg-gray-50 cursor-pointer touch-none" 
+      className="border-b border-gray-200 hover:bg-gray-50 cursor-pointer" 
       onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
       onClick={handleClick}
                   >
@@ -764,7 +784,20 @@ function SaleCard({ sale, onClick }: { sale: Sale; onClick: () => void }) {
       x: touch.clientX,
       y: touch.clientY,
       time: Date.now(),
+      isScrolling: false,
     })
+  }
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (!touchStart) return
+    const touch = e.touches[0]
+    const deltaX = Math.abs(touch.clientX - touchStart.x)
+    const deltaY = Math.abs(touch.clientY - touchStart.y)
+    
+    // If moved more than 5px, it's definitely a scroll
+    if (deltaX > 5 || deltaY > 5) {
+      setTouchStart({ ...touchStart, isScrolling: true })
+    }
   }
 
   const handleTouchEnd = (e: React.TouchEvent) => {
@@ -777,18 +810,24 @@ function SaleCard({ sale, onClick }: { sale: Sale; onClick: () => void }) {
       return
     }
     
+    // If we detected scrolling, don't treat as click
+    if (touchStart.isScrolling) {
+      setTouchStart(null)
+      return
+    }
+    
     const touch = e.changedTouches[0]
     const deltaX = Math.abs(touch.clientX - touchStart.x)
     const deltaY = Math.abs(touch.clientY - touchStart.y)
     const deltaTime = Date.now() - touchStart.time
     
-    // If moved more than 10px or took more than 300ms, it's a scroll, not a click
-    if (deltaX > 10 || deltaY > 10 || deltaTime > 300) {
+    // Increased threshold to 20px and 250ms
+    if (deltaX > 20 || deltaY > 20 || deltaTime > 250) {
       setTouchStart(null)
       return
     }
     
-    // It's a click - prevent default and stop propagation
+    // It's a click - only prevent default at the very end
     e.preventDefault()
     e.stopPropagation()
     onClick()
@@ -808,8 +847,9 @@ function SaleCard({ sale, onClick }: { sale: Sale; onClick: () => void }) {
 
               return (
     <Card 
-      className="p-2 hover:shadow-md transition-shadow cursor-pointer touch-none" 
+      className="p-2 hover:shadow-md transition-shadow cursor-pointer" 
       onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
       onClick={handleClick}
     >

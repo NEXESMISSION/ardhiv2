@@ -15,6 +15,8 @@ export function translateAuthError(error: any): string {
     'invalid_credentials': 'البريد الإلكتروني أو كلمة المرور غير صحيحة',
     'Invalid login credentials': 'البريد الإلكتروني أو كلمة المرور غير صحيحة',
     'Invalid email or password': 'البريد الإلكتروني أو كلمة المرور غير صحيحة',
+    'invalid_grant': 'البريد الإلكتروني أو كلمة المرور غير صحيحة',
+    '400': 'البريد الإلكتروني أو كلمة المرور غير صحيحة',
     
     // Email confirmation
     'Email not confirmed': 'يرجى تأكيد بريدك الإلكتروني قبل تسجيل الدخول',

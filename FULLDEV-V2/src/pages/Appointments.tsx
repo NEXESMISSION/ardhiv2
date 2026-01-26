@@ -44,10 +44,10 @@ interface Appointment {
   }
 }
 
-const arabicDays = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت']
-const arabicMonths = [
-  'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
-  'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'
+const englishDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+const englishMonths = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'
 ]
 
 export function AppointmentsPage() {
@@ -414,7 +414,7 @@ export function AppointmentsPage() {
               </svg>
             </IconButton>
             <h2 className="text-base sm:text-lg font-bold text-gray-900">
-              {arabicMonths[currentMonth]} {currentYear}
+              {englishMonths[currentMonth]} {currentYear}
             </h2>
             <IconButton
               variant="ghost"
@@ -440,7 +440,7 @@ export function AppointmentsPage() {
         {/* Calendar Grid */}
         <div className="grid grid-cols-7 gap-1 sm:gap-2">
           {/* Day Headers */}
-          {arabicDays.map((day) => (
+          {englishDays.map((day) => (
             <div key={day} className="text-center text-xs sm:text-sm font-semibold text-gray-700 py-1 sm:py-2">
               {day}
             </div>
@@ -929,7 +929,7 @@ export function AppointmentsPage() {
                             </p>
                           </div>
                           <p className="text-gray-500 text-[10px] whitespace-nowrap">
-                            {new Date(log.created_at).toLocaleString('ar-SA', {
+                            {new Date(log.created_at).toLocaleString('en-US', {
                               day: 'numeric',
                               month: 'short',
                               year: 'numeric',

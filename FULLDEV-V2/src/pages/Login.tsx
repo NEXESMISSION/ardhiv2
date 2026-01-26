@@ -23,6 +23,17 @@ export function LoginPage() {
     emailInputRef.current?.focus()
   }, [])
 
+  // Scroll to error when it appears
+  const errorRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (error && errorRef.current) {
+      // Small delay to ensure the element is rendered
+      setTimeout(() => {
+        errorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }, 100)
+    }
+  }, [error])
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
@@ -34,11 +45,14 @@ export function LoginPage() {
       return
     }
 
-    if (!email.includes('@')) {
-      setError('يرجى إدخال بريد إلكتروني صحيح')
-      emailInputRef.current?.focus()
-      return
+    // Auto-append @gmail.com if no @ is present
+    let finalEmail = email.trim()
+    if (!finalEmail.includes('@')) {
+      finalEmail = finalEmail + '@gmail.com'
     }
+
+    // Normalize email (lowercase)
+    finalEmail = finalEmail.toLowerCase()
 
     if (!password.trim()) {
       setError('كلمة المرور إجبارية')
@@ -53,9 +67,20 @@ export function LoginPage() {
     setLoading(true)
 
     try {
-      const { error: signInError } = await signIn(email.trim(), password)
+      const { error: signInError } = await signIn(finalEmail, password)
       
       if (signInError) {
+        // Log error for debugging
+        console.error('Sign in error:', signInError)
+        console.error('Error details:', {
+          message: signInError.message,
+          code: signInError.code,
+          status: signInError.status
+        })
+        
+        // Set loading to false FIRST so error can be displayed
+        setLoading(false)
+        
         // Special handling for auth_user_id mismatch
         if (signInError.code === 'AUTH_USER_ID_MISMATCH') {
           let errorMsg = signInError.message || 'معرف المصادقة غير متطابق.'
@@ -78,17 +103,27 @@ export function LoginPage() {
         } else if (signInError.code === 'USER_LOAD_FAILED') {
           setError(signInError.message || 'فشل تحميل بيانات المستخدم. يرجى المحاولة مرة أخرى.')
         } else {
+          // Check for invalid credentials error
+          const errorMessage = signInError.message || ''
+          const errorCode = signInError.code || ''
+          
+          if (errorMessage.includes('Invalid login credentials') || 
+              errorMessage.includes('invalid_credentials') ||
+              errorCode === 'invalid_grant') {
+            setError(`❌ فشل تسجيل الدخول\n\nالبريد الإلكتروني أو كلمة المرور غير صحيحة.\n\n📧 البريد المستخدم: ${finalEmail}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🔍 خطوات الحل:\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n1️⃣ تحقق من وجود المستخدم في Supabase:\n   • اذهب إلى: Supabase Dashboard\n   • القائمة: Authentication → Users\n   • ابحث عن: ${finalEmail}\n   • إذا لم تجده، المستخدم غير موجود!\n\n2️⃣ إنشاء المستخدم (إذا لم يكن موجوداً):\n   • في Supabase Dashboard:\n     - Authentication → Users → Add User\n     - Email: ${finalEmail}\n     - Password: (أدخل كلمة مرور قوية)\n     - Auto Confirm User: ✓\n\n3️⃣ إضافة المستخدم إلى جدول users:\n   • بعد إنشاء المستخدم في Auth\n   • احصل على auth_user_id من Supabase\n   • استخدم SQL Editor في Supabase:\n\n   INSERT INTO users (email, role, auth_user_id, name)\n   VALUES (\n     '${finalEmail}',\n     'worker',\n     '(auth_user_id من Supabase)',\n     'اسم المستخدم'\n   );\n\n4️⃣ تحقق من كلمة المرور:\n   • تأكد من كتابة كلمة المرور بشكل صحيح\n   • كلمات المرور حساسة لحالة الأحرف (A ≠ a)\n   • تأكد من عدم وجود مسافات إضافية\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n💡 ملاحظة: إذا كنت المسؤول، تأكد من إنشاء\n   المستخدم في Supabase Auth أولاً قبل المحاولة.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`)
+        } else {
           const translatedError = translateAuthError(signInError)
           setError(translatedError)
+          }
         }
         
         // Clear password on error for security
         setPassword('')
         
-        // Focus back on email field
+        // Focus back on email field after a delay to ensure error is visible
         setTimeout(() => {
           emailInputRef.current?.focus()
-        }, 100)
+        }, 300)
       } else {
         // Success - redirect will happen automatically via useEffect
         // Clear form
@@ -131,16 +166,29 @@ export function LoginPage() {
             </p>
           </div>
 
-          {/* Error Alert */}
+          {/* Error Alert - More Prominent */}
           {error && (
-            <Alert variant="error" className="mb-4 animate-in slide-in-from-top-2">
-              <div className="flex items-start gap-2">
-                <svg className="w-5 h-5 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <div ref={errorRef}>
+              <Alert variant="error" className="mb-4 animate-in slide-in-from-top-2 border-2 border-red-300 shadow-lg">
+                <div className="flex items-start gap-3">
+                  <svg className="w-6 h-6 flex-shrink-0 mt-0.5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
-                <span>{error}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="whitespace-pre-line text-sm leading-relaxed font-medium max-h-[60vh] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-red-300 scrollbar-track-red-50">
+                      {error}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setError(null)}
+                      className="mt-2 text-xs text-red-700 hover:text-red-900 underline"
+                    >
+                      إغلاق
+                    </button>
+                  </div>
               </div>
             </Alert>
+            </div>
           )}
 
           {/* Login Form */}
@@ -148,22 +196,22 @@ export function LoginPage() {
             {/* Email Field */}
             <div>
               <Label htmlFor="email" className="text-sm font-medium text-gray-700">
-                البريد الإلكتروني
+                البريد الإلكتروني <span className="text-xs text-gray-500">(أو اسم المستخدم)</span>
               </Label>
               <div className="mt-1 relative">
                 <Input
                   ref={emailInputRef}
                   id="email"
-                  type="email"
+                  type="text"
                   value={email}
                   onChange={(e) => {
                     setEmail(e.target.value)
-                    setError(null) // Clear error when user types
+                    // Don't clear error automatically - let user dismiss it manually
                   }}
                   required
                   autoComplete="email"
                   className="w-full pr-10"
-                  placeholder="example@email.com"
+                  placeholder="example@gmail.com أو example"
                   disabled={loading}
                   dir="ltr"
                 />
@@ -187,7 +235,7 @@ export function LoginPage() {
                   value={password}
                   onChange={(e) => {
                     setPassword(e.target.value)
-                    setError(null) // Clear error when user types
+                    // Don't clear error automatically - let user dismiss it manually
                   }}
                   required
                   autoComplete="current-password"

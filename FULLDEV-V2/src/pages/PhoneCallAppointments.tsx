@@ -36,10 +36,10 @@ interface LandBatch {
   name: string
 }
 
-const arabicDays = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت']
-const arabicMonths = [
-  'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
-  'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'
+const englishDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+const englishMonths = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'
 ]
 
 export function PhoneCallAppointmentsPage() {
@@ -396,7 +396,7 @@ export function PhoneCallAppointmentsPage() {
               </svg>
             </IconButton>
             <h2 className="text-base sm:text-lg font-bold text-gray-900">
-              {arabicMonths[currentMonth]} {currentYear}
+              {englishMonths[currentMonth]} {currentYear}
             </h2>
             <IconButton
               variant="ghost"
@@ -422,7 +422,7 @@ export function PhoneCallAppointmentsPage() {
         {/* Calendar Grid */}
         <div className="grid grid-cols-7 gap-1 sm:gap-2">
           {/* Day Headers */}
-          {arabicDays.map((day) => (
+          {englishDays.map((day) => (
             <div key={day} className="text-center text-xs sm:text-sm font-semibold text-gray-700 py-1 sm:py-2">
               {day}
             </div>
@@ -458,20 +458,15 @@ export function PhoneCallAppointmentsPage() {
                       className={`
                         text-[8px] sm:text-[10px] px-1 py-0.5 rounded truncate
                         ${getStatusColor(apt.status)}
-                        cursor-pointer
+                        pointer-events-none
                       `}
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        setSelectedAppointment(apt)
-                        setAppointmentDetailsDialogOpen(true)
-                      }}
                       title={`${apt.name} - ${formatDateTime(apt.appointment_datetime)}`}
                     >
                       {formatDateTime(apt.appointment_datetime)} - {apt.name}
                     </div>
                   ))}
                   {dateAppointments.length > 2 && (
-                    <div className="text-[8px] sm:text-[10px] text-gray-500 px-1">
+                    <div className="text-[8px] sm:text-[10px] text-gray-500 px-1 pointer-events-none">
                       +{dateAppointments.length - 2} أكثر
                     </div>
                   )}
@@ -490,7 +485,7 @@ export function PhoneCallAppointmentsPage() {
             setDateAppointmentsDialogOpen(false)
             setDialogSelectedDate(null)
           }}
-          title={`مواعيد ${dialogSelectedDate.getDate()} ${arabicMonths[dialogSelectedDate.getMonth()]} ${dialogSelectedDate.getFullYear()}`}
+          title={`مواعيد ${dialogSelectedDate.getDate()} ${englishMonths[dialogSelectedDate.getMonth()]} ${dialogSelectedDate.getFullYear()}`}
           size="md"
           footer={
             <div className="flex justify-end">
@@ -893,7 +888,7 @@ export function PhoneCallAppointmentsPage() {
             ) : (
               <div className="space-y-1.5 text-xs sm:text-sm">
                 <p><span className="font-medium text-gray-700">التاريخ والوقت:</span> {
-                  new Date(selectedAppointment.appointment_datetime).toLocaleString('ar-SA', {
+                  new Date(selectedAppointment.appointment_datetime).toLocaleString('en-US', {
                     day: 'numeric',
                     month: 'long',
                     year: 'numeric',
@@ -947,7 +942,7 @@ export function PhoneCallAppointmentsPage() {
                             </p>
                           </div>
                           <p className="text-gray-500 text-[10px] whitespace-nowrap">
-                            {new Date(log.created_at).toLocaleString('ar-SA', {
+                            {new Date(log.created_at).toLocaleString('en-US', {
                               day: 'numeric',
                               month: 'short',
                               year: 'numeric',
@@ -962,7 +957,7 @@ export function PhoneCallAppointmentsPage() {
                               <div key={key} className="text-[10px] text-gray-600 mb-1">
                                 <span className="font-medium">{key === 'appointment_datetime' ? 'التاريخ والوقت' : key}:</span>{' '}
                                 <span className="line-through text-red-500">
-                                  {new Date(value.old).toLocaleString('ar-SA', {
+                                  {new Date(value.old).toLocaleString('en-US', {
                                     day: 'numeric',
                                     month: 'short',
                                     hour: '2-digit',
@@ -970,7 +965,7 @@ export function PhoneCallAppointmentsPage() {
                                   })}
                                 </span>{' '}
                                 → <span className="text-green-600">
-                                  {new Date(value.new).toLocaleString('ar-SA', {
+                                  {new Date(value.new).toLocaleString('en-US', {
                                     day: 'numeric',
                                     month: 'short',
                                     hour: '2-digit',

@@ -465,101 +465,133 @@ export function ConfirmationPage() {
               
               const deadlineStatus = getDeadlineStatus(sale)
               
+              // Determine card color scheme based on sale type
+              const cardColorScheme = isInstallment 
+                ? 'from-blue-500 to-blue-600' 
+                : isPromise 
+                ? 'from-purple-500 to-purple-600'
+                : 'from-green-500 to-green-600'
+              
               return (
-                <Card key={`sale-${sale.id}`} className="overflow-hidden hover:shadow-md transition-shadow border border-gray-200 mb-3">
-                  {/* Header Section - Compact */}
-                  <div className="bg-blue-50 border-b border-blue-200 p-2 sm:p-2.5">
-                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
-                      {/* Right Side - Client and Sale Info */}
-                      <div className="flex-1 space-y-0.5 min-w-0">
-                        <div className="text-xs sm:text-sm font-semibold text-gray-900 truncate">
-                          ({sale.client?.id_number || ''}) #{sale.id.substring(0, 8)} - {sale.client?.name || 'غير محدد'}
+                <Card key={`sale-${sale.id}`} className="overflow-hidden hover:shadow-xl transition-all duration-300 border-0 shadow-lg mb-4 bg-gradient-to-br from-white to-gray-50">
+                  {/* Modern Header with Gradient */}
+                  <div className={`bg-gradient-to-r ${cardColorScheme} p-4 text-white relative overflow-hidden`}>
+                    {/* Decorative Pattern */}
+                    <div className="absolute inset-0 opacity-10">
+                      <div className="absolute top-0 right-0 w-32 h-32 bg-white rounded-full -mr-16 -mt-16"></div>
+                      <div className="absolute bottom-0 left-0 w-24 h-24 bg-white rounded-full -ml-12 -mb-12"></div>
                         </div>
-                        <div className="text-xs text-gray-600">
-                          {formatSaleDateTime(sale.sale_date)} باعه {sale.seller?.name || 'غير محدد'}
-                          {sale.seller?.place && ` (${sale.seller.place})`}
-                          {sale.confirmedBy?.name && ` • أكده ${sale.confirmedBy.name}${sale.confirmedBy.place ? ` (${sale.confirmedBy.place})` : ''}`}
+                    
+                    <div className="relative z-10">
+                      {/* Top Row - Client Info */}
+                      <div className="flex items-start justify-between mb-3">
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-bold mb-1 truncate">
+                            {sale.client?.name || 'غير محدد'}
+                          </div>
+                          <div className="text-xs opacity-90 flex items-center gap-2 flex-wrap">
+                            <span>#{sale.id.substring(0, 8)}</span>
+                            <span className="opacity-60">•</span>
+                            <span>{sale.client?.id_number || ''}</span>
                 </div>
               </div>
 
-                      {/* Left Side - Status Badges and Remaining */}
+                        {/* Status Badges */}
                       <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
-                        <div className="flex items-center gap-1 flex-wrap justify-end">
                           {deadlineStatus?.overdue && (
-                            <Badge className="bg-red-600 text-white border-0 text-xs px-2 py-0.5 font-medium">
+                            <Badge className="bg-red-500 text-white border-0 text-xs px-2.5 py-1 font-semibold shadow-md">
                               ⚠️ تجاوز {deadlineStatus.days} يوم
                             </Badge>
                           )}
+                          <div className="flex items-center gap-1 flex-wrap justify-end">
                           {isPromise && (
-                            <Badge className="bg-purple-600 text-white border-0 text-xs px-2 py-0.5 font-medium">
+                              <Badge className="bg-purple-400/30 text-white border border-white/30 text-xs px-2 py-0.5 font-medium">
                               وعد بالبيع
                             </Badge>
                           )}
                           {isInstallment && (
-                            <Badge className="bg-blue-600 text-white border-0 text-xs px-2 py-0.5 font-medium">
+                              <Badge className="bg-blue-400/30 text-white border border-white/30 text-xs px-2 py-0.5 font-medium">
                               تقسيط
                             </Badge>
                           )}
                           {sale.status === 'pending' && (
-                            <Badge className="bg-orange-500 text-white border-0 text-xs px-2 py-0.5 font-medium">
+                              <Badge className="bg-orange-400/30 text-white border border-white/30 text-xs px-2 py-0.5 font-medium">
                               محجوز
                             </Badge>
                           )}
                         </div>
-                        <div className="text-xs sm:text-sm font-bold text-gray-900">
-                          متبقي: {formatPrice(remaining)} DT
                         </div>
+                      </div>
+                      
+                      {/* Bottom Row - Sale Info */}
+                      <div className="text-xs opacity-90 border-t border-white/20 pt-2">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span>📅 {formatSaleDateTime(sale.sale_date)}</span>
+                          <span className="opacity-60">•</span>
+                          <span>👤 باعه {sale.seller?.name || 'غير محدد'}</span>
+                          {sale.seller?.place && <span className="opacity-75">({sale.seller.place})</span>}
+                        </div>
+                        {sale.confirmedBy?.name && (
+                          <div className="mt-1 text-xs opacity-80">
+                            ✓ أكده {sale.confirmedBy.name}{sale.confirmedBy.place ? ` (${sale.confirmedBy.place})` : ''}
+                          </div>
+                        )}
                       </div>
                   </div>
                 </div>
 
-                  {/* Content Section - Compact */}
-                  <div className="p-2 sm:p-2.5 bg-white">
-                    {/* Piece Info - Compact */}
-                    <div className="mb-2">
-                      <h4 className="text-sm sm:text-base font-bold text-gray-900">
-                        {sale.batch?.name || '-'} - {sale.piece?.piece_number || '-'}
+                  {/* Content Section - Modern Design */}
+                  <div className="p-4 bg-white">
+                    {/* Piece Info - Prominent */}
+                    <div className="mb-4 pb-4 border-b border-gray-200">
+                      <div className="flex items-center justify-between mb-2">
+                        <h4 className="text-base sm:text-lg font-bold text-gray-900">
+                          {sale.batch?.name || '-'}
                       </h4>
-                      <p className="text-xs text-gray-600">
-                        {sale.piece?.surface_m2.toLocaleString('en-US')} م²
-                    </p>
+                        <div className="text-sm font-semibold text-gray-600 bg-gray-100 px-3 py-1 rounded-full">
+                          #{sale.piece?.piece_number || '-'}
                   </div>
-                    
-                    {/* Financial Table - Compact 2 columns */}
-                    <div className="grid grid-cols-2 gap-3 sm:gap-4 mb-2">
-                      {/* Right Column */}
-                      <div className="space-y-1.5">
-                        <div className="flex justify-between items-center">
-                          <span className="text-xs text-gray-600">السعر:</span>
-                          <span className="text-xs sm:text-sm font-bold text-red-600">{formatPrice(sale.sale_price)} DT</span>
                 </div>
-                        <div className="flex justify-between items-center">
-                          <span className="text-xs text-gray-600">المستلم:</span>
-                          <span className="text-xs sm:text-sm font-bold text-gray-900">{formatPrice(received)} DT</span>
+                      <div className="flex items-center gap-2 text-sm text-gray-600">
+                        <span className="font-medium">المساحة:</span>
+                        <span className="text-gray-900 font-semibold">{sale.piece?.surface_m2.toLocaleString('en-US')} م²</span>
                   </div>
                   </div>
                       
-                      {/* Left Column */}
-                      <div className="space-y-1.5">
-                        <div className="flex justify-between items-center">
-                          <span className="text-xs text-gray-600">العربون:</span>
-                          <span className="text-xs sm:text-sm font-bold text-blue-600">{formatPrice(sale.deposit_amount || 0)} DT</span>
+                    {/* Financial Info - Modern Cards */}
+                    <div className="grid grid-cols-2 gap-3 mb-4">
+                      {/* Price Card */}
+                      <div className="bg-gradient-to-br from-red-50 to-red-100 rounded-lg p-3 border border-red-200">
+                        <div className="text-xs text-red-700 font-medium mb-1">السعر الكلي</div>
+                        <div className="text-lg font-bold text-red-700">{formatPrice(sale.sale_price)} DT</div>
                     </div>
-                        <div className="flex justify-between items-center">
-                          <span className="text-xs text-gray-600">المتبقي:</span>
-                          <span className="text-xs sm:text-sm font-bold text-red-600">{formatPrice(remaining)} DT</span>
+                      
+                      {/* Received Card */}
+                      <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-lg p-3 border border-green-200">
+                        <div className="text-xs text-green-700 font-medium mb-1">المستلم</div>
+                        <div className="text-lg font-bold text-green-700">{formatPrice(received)} DT</div>
                 </div>
+                      
+                      {/* Deposit Card */}
+                      <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg p-3 border border-blue-200">
+                        <div className="text-xs text-blue-700 font-medium mb-1">العربون</div>
+                        <div className="text-lg font-bold text-blue-700">{formatPrice(sale.deposit_amount || 0)} DT</div>
+                      </div>
+                      
+                      {/* Remaining Card - Highlighted */}
+                      <div className="bg-gradient-to-br from-orange-50 to-orange-100 rounded-lg p-3 border-2 border-orange-300 shadow-sm">
+                        <div className="text-xs text-orange-700 font-medium mb-1">المتبقي</div>
+                        <div className="text-lg font-bold text-orange-700">{formatPrice(remaining)} DT</div>
                   </div>
                     </div>
               </div>
 
-                  {/* Action Buttons Section - Compact */}
-                  <div className="border-t border-gray-200 p-2 sm:p-2.5 bg-gray-50">
-                    <div className="text-xs font-medium text-gray-700 mb-2">إجراء</div>
-              <div className="flex flex-wrap gap-1.5">
+                  {/* Action Buttons - Modern Design */}
+                  <div className="bg-gray-50 p-4 border-t border-gray-200">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                 <Button
                   size="sm"
-                  className={`flex-1 sm:flex-initial ${getConfirmButtonColor(sale)} text-white text-xs px-3 py-1.5 font-medium`}
+                        className={`${getConfirmButtonColor(sale)} text-white text-xs px-3 py-2.5 font-semibold shadow-md hover:shadow-lg transition-all`}
                         onClick={() => {
                           setSelectedSale(sale)
                           setConfirmDialogOpen(true)
@@ -570,7 +602,7 @@ export function ConfirmationPage() {
                 <Button
                   variant="secondary"
                   size="sm"
-                  className="text-xs px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white font-medium"
+                        className="text-xs px-3 py-2.5 bg-red-600 hover:bg-red-700 text-white font-semibold shadow-md hover:shadow-lg transition-all"
                         onClick={async () => {
                           setSaleToCancel(sale)
                           setCancelDialogOpen(true)
@@ -581,7 +613,7 @@ export function ConfirmationPage() {
                 <Button
                         variant="secondary"
                   size="sm"
-                  className="text-xs px-3 py-1.5 bg-white hover:bg-gray-50 border border-gray-300 text-gray-700 font-medium"
+                        className="text-xs px-3 py-2.5 bg-white hover:bg-gray-100 border-2 border-gray-300 text-gray-700 font-semibold shadow-sm hover:shadow-md transition-all"
                   onClick={() => {
                     setSelectedSale(sale)
                           const tomorrow = new Date()
@@ -597,7 +629,7 @@ export function ConfirmationPage() {
                 <Button
                         variant="secondary"
                   size="sm"
-                  className="text-xs px-3 py-1.5 bg-white hover:bg-gray-50 border border-gray-300 text-gray-700 font-medium"
+                        className="text-xs px-3 py-2.5 bg-white hover:bg-gray-100 border-2 border-gray-300 text-gray-700 font-semibold shadow-sm hover:shadow-md transition-all"
                         onClick={() => {
                           setSelectedSale(sale)
                           setEditDialogOpen(true)

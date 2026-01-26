@@ -52,7 +52,7 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
   const [success, setSuccess] = useState<string | null>(null)
   const [showAddForm, setShowAddForm] = useState(false)
   const [selectedPieces, setSelectedPieces] = useState<Set<string>>(new Set())
-  const [touchStart, setTouchStart] = useState<{ x: number; y: number; time: number } | null>(null)
+  const [touchStart, setTouchStart] = useState<{ x: number; y: number; time: number; isScrolling?: boolean } | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
 
   // Form state
@@ -395,13 +395,6 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
       onClose={onClose}
       title={`قطع الدفعة: ${batchName}`}
       size="xl"
-      footer={
-        <div className="flex justify-end">
-          <Button variant="secondary" onClick={onClose}>
-            إغلاق
-          </Button>
-        </div>
-      }
     >
       <div className="space-y-3 sm:space-y-4 lg:space-y-6 flex flex-col h-full">
         {/* Batch Image - Compact */}
@@ -690,29 +683,50 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
                 const canSelect = isAvailable && onSellPieces && !isReserved && !isSold
 
                 const handleTouchStart = (e: React.TouchEvent) => {
+                  if (!canSelect) return
                   const touch = e.touches[0]
                   setTouchStart({
                     x: touch.clientX,
                     y: touch.clientY,
                     time: Date.now(),
+                    isScrolling: false,
                   })
+                }
+
+                const handleTouchMove = (e: React.TouchEvent) => {
+                  if (!touchStart || !canSelect) return
+                  const touch = e.touches[0]
+                  const deltaX = Math.abs(touch.clientX - touchStart.x)
+                  const deltaY = Math.abs(touch.clientY - touchStart.y)
+                  
+                  // If moved more than 5px, it's definitely a scroll
+                  if (deltaX > 5 || deltaY > 5) {
+                    setTouchStart({ ...touchStart, isScrolling: true })
+                  }
                 }
 
                 const handleTouchEnd = (e: React.TouchEvent) => {
                   if (!touchStart || !canSelect) return
+                  
+                  // If we detected scrolling, don't treat as click
+                  if (touchStart.isScrolling) {
+                    setTouchStart(null)
+                    return
+                  }
                   
                   const touch = e.changedTouches[0]
                   const deltaX = Math.abs(touch.clientX - touchStart.x)
                   const deltaY = Math.abs(touch.clientY - touchStart.y)
                   const deltaTime = Date.now() - touchStart.time
                   
-                  // If moved more than 10px or took more than 300ms, it's a scroll, not a click
-                  if (deltaX > 10 || deltaY > 10 || deltaTime > 300) {
+                  // Increased threshold to 20px and 250ms
+                  if (deltaX > 20 || deltaY > 20 || deltaTime > 250) {
                     setTouchStart(null)
                     return
                   }
                   
-                  // It's a click, toggle selection
+                  // It's a click, toggle selection - only prevent default at the end
+                  e.preventDefault()
                   const newSelected = new Set(selectedPieces)
                   if (isSelected) {
                     newSelected.delete(piece.id)
@@ -741,7 +755,7 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
                 return (
                   <Card 
                     key={piece.id} 
-                    className={`p-2 sm:p-2.5 lg:p-3 cursor-pointer transition-all touch-none ${
+                    className={`p-2 sm:p-2.5 lg:p-3 cursor-pointer transition-all ${
                       isReserved 
                         ? 'bg-orange-50 border-orange-200 hover:bg-orange-100' 
                         : isSold
@@ -753,6 +767,7 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
                               : ''
                     }`}
                     onTouchStart={handleTouchStart}
+                    onTouchMove={handleTouchMove}
                     onTouchEnd={handleTouchEnd}
                     onClick={handleClick}
                   >

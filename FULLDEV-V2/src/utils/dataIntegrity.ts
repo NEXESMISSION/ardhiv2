@@ -642,7 +642,7 @@ export async function cancelStalePendingSales(
         const { error: cancelError } = await supabase
           .from('sales')
           .update({ status: 'cancelled' })
-          .eq('id', sale.id)
+          .eq('id', sale.id.toString())
           .eq('status', 'pending')
 
         if (!cancelError) {
@@ -715,7 +715,7 @@ export async function cleanupAllStalePendingSales(
       const { error: cancelError } = await supabase
         .from('sales')
         .update({ status: 'cancelled' })
-        .eq('id', sale.id)
+        .eq('id', sale.id.toString())
         .eq('status', 'pending')
 
       if (!cancelError) {

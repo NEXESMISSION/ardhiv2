@@ -15,6 +15,8 @@ import { ClientSelectionDialog } from '@/components/ClientSelectionDialog'
 import { MultiPieceSaleDialog } from '@/components/MultiPieceSaleDialog'
 import { PaymentTerms } from '@/utils/paymentTerms'
 import { useAuth } from '@/contexts/AuthContext'
+import { notifyOwners, notifyCurrentUser } from '@/utils/notifications'
+import { formatPrice } from '@/utils/priceCalculator'
 
 // ============================================================================
 // TYPES
@@ -154,6 +156,7 @@ export function LandPage() {
   const [imagePosition, setImagePosition] = useState({ x: 0, y: 0 })
   const [isDragging, setIsDragging] = useState(false)
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 })
+  const imageContainerRef = useRef<HTMLDivElement>(null)
 
   // ============================================================================
   // STATE: Form Data
@@ -207,6 +210,26 @@ export function LandPage() {
     }
     window.addEventListener('keydown', handleEsc)
     return () => window.removeEventListener('keydown', handleEsc)
+  }, [imageViewerOpen])
+
+  // Handle wheel event for image zoom (non-passive to allow preventDefault)
+  useEffect(() => {
+    const container = imageContainerRef.current
+    if (!container || !imageViewerOpen) return
+
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      const delta = e.deltaY > 0 ? -0.1 : 0.1
+      setImageZoom((prev) => Math.max(0.5, Math.min(5, prev + delta)))
+    }
+
+    // Add non-passive event listener
+    container.addEventListener('wheel', handleWheel, { passive: false })
+    
+    return () => {
+      container.removeEventListener('wheel', handleWheel)
+    }
   }, [imageViewerOpen])
 
   useEffect(() => {
@@ -1797,6 +1820,75 @@ export function LandPage() {
       setSelectedPiecesForSale([])
       
       // Trigger refresh events (debounced in useEffect)
+      // Notify owners about new sales (if notifications weren't created by trigger)
+      if (createdSaleIds.length > 0) {
+        try {
+          // Wait a bit to see if trigger created notifications
+          await new Promise(resolve => setTimeout(resolve, 1000))
+          
+          // Check if notifications were created by trigger
+          const { data: existingNotifs } = await supabase
+            .from('notifications')
+            .select('id')
+            .eq('entity_type', 'sale')
+            .in('entity_id', createdSaleIds)
+            .eq('type', 'sale_created')
+            .limit(1)
+          
+          // If no notifications exist, create them manually
+          if (!existingNotifs || existingNotifs.length === 0) {
+            const clientName = saleData.client.name || 'عميل غير معروف'
+            const piecesCount = pieceCalculations.length
+            const totalPrice = pieceCalculations.reduce((sum, { calc }) => sum + calc.totalPrice, 0)
+            const paymentMethodLabel = saleData.saleType === 'full' ? 'دفع كامل' : 
+                                       saleData.saleType === 'installment' ? 'تقسيط' : 
+                                       saleData.saleType === 'promise' ? 'وعد بالبيع' : 'غير محدد'
+            
+            const notificationMessage = `تم إنشاء ${piecesCount} بيع جديد للعميل ${clientName} • طريقة الدفع: ${paymentMethodLabel} • السعر الإجمالي: ${formatPrice(totalPrice)} DT`
+            
+            // Notify owners
+            await notifyOwners(
+              'sale_created',
+              `بيع جديد: ${piecesCount} قطعة`,
+              notificationMessage,
+              'sale',
+              createdSaleIds[0], // Use first sale ID as entity_id
+              {
+                client_name: clientName,
+                pieces_count: piecesCount,
+                total_price: totalPrice,
+                payment_method: saleData.saleType,
+                sale_ids: createdSaleIds,
+                seller_name: systemUser?.name || 'غير معروف',
+                seller_place: systemUser?.place || null,
+              }
+            )
+            
+            // Also notify current user
+            if (systemUser?.id) {
+              await notifyCurrentUser(
+                'sale_created',
+                `بيع جديد: ${piecesCount} قطعة`,
+                notificationMessage,
+                systemUser.id,
+                'sale',
+                createdSaleIds[0],
+                {
+                  client_name: clientName,
+                  pieces_count: piecesCount,
+                  total_price: totalPrice,
+                  payment_method: saleData.saleType,
+                  sale_ids: createdSaleIds,
+                }
+              )
+            }
+          }
+        } catch (notifErr) {
+          console.error('Failed to create notifications (non-critical):', notifErr)
+          // Non-critical, continue anyway
+        }
+      }
+      
       window.dispatchEvent(new CustomEvent('saleCreated'))
       
       // Only refresh if piece dialog is still open
@@ -2878,14 +2970,9 @@ export function LandPage() {
 
             {/* Image Container */}
             <div
+              ref={imageContainerRef}
               className="absolute inset-0 flex items-center justify-center overflow-hidden"
               style={{ paddingTop: '60px' }}
-              onWheel={(e) => {
-                e.preventDefault()
-                e.stopPropagation()
-                const delta = e.deltaY > 0 ? -0.1 : 0.1
-                setImageZoom((prev) => Math.max(0.5, Math.min(5, prev + delta)))
-              }}
               onMouseDown={(e) => {
                 if (imageZoom > 1) {
                   e.preventDefault()

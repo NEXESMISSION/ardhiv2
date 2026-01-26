@@ -13,6 +13,7 @@ import { formatPrice, formatDateShort, formatDate } from '@/utils/priceCalculato
 import { calculateInstallmentWithDeposit } from '@/utils/installmentCalculator'
 import { generateInstallmentSchedule } from '@/utils/installmentSchedule'
 import { useAuth } from '@/contexts/AuthContext'
+import { notifyOwners, notifyCurrentUser } from '@/utils/notifications'
 
 interface Sale {
   id: string
@@ -216,8 +217,13 @@ export function ConfirmGroupSaleDialog({
           endDate = schedule.length > 0 ? schedule[schedule.length - 1].dueDate : null
         }
         
+        // Calculate number of months based on remaining amount divided by monthly payment
+        const calculatedMonths = calc.recalculatedMonthlyPayment > 0 
+          ? Math.ceil(totalRemainingForInstallments / calc.recalculatedMonthlyPayment)
+          : calc.recalculatedNumberOfMonths
+        
         installmentDetails = {
-          numberOfMonths: calc.recalculatedNumberOfMonths,
+          numberOfMonths: calculatedMonths,
           monthlyPayment: calc.recalculatedMonthlyPayment,
           startDate,
           endDate,
@@ -326,11 +332,32 @@ export function ConfirmGroupSaleDialog({
             }
             // If commission already exists, don't include it in update (preserve existing value)
 
+            // Ensure ID is a valid UUID string
+            const saleId = typeof sale.id === 'string' ? sale.id : String(sale.id)
+            
+            // Validate UUID format
+            const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+            if (!uuidRegex.test(saleId)) {
+              throw new Error(`معرف البيع غير صحيح: ${saleId}`)
+            }
+
+            // First verify the sale exists and is pending
+            const { data: existingSale, error: checkError } = await supabase
+              .from('sales')
+              .select('id, status')
+              .eq('id', saleId)
+              .single()
+
+            if (checkError || !existingSale || existingSale.status !== 'pending') {
+              throw new Error(`البيع ${saleId} غير موجود أو غير معلق`)
+            }
+
+            // Now update only by ID (status already verified)
+            // Use match() with single field to ensure proper UUID type handling
             return supabase
               .from('sales')
               .update(updateData)
-              .eq('id', sale.id)
-              .eq('status', 'pending')
+              .match({ id: saleId })
           })
 
           await Promise.all(updatePromises)
@@ -344,7 +371,8 @@ export function ConfirmGroupSaleDialog({
       }
 
       // Full completion - update all sales
-      const saleIds = sales.map(s => s.id)
+      // Ensure all IDs are valid UUID strings
+      const saleIds = sales.map(s => typeof s.id === 'string' ? s.id : String(s.id))
       const baseUpdateData: any = {
         status: 'completed',
         contract_writer_id: contractWriterId || null,
@@ -375,11 +403,32 @@ export function ConfirmGroupSaleDialog({
           }
           // If commission already exists, don't update it (preserve existing value)
           
+          // Ensure ID is a valid UUID string
+          const saleId = typeof sale.id === 'string' ? sale.id : String(sale.id)
+          
+          // Validate UUID format
+          const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+          if (!uuidRegex.test(saleId)) {
+            throw new Error(`معرف البيع غير صحيح: ${saleId}`)
+          }
+          
+          // First verify the sale exists and is pending
+          const { data: existingSale, error: checkError } = await supabase
+            .from('sales')
+            .select('id, status')
+            .eq('id', saleId)
+            .single()
+
+          if (checkError || !existingSale || existingSale.status !== 'pending') {
+            throw new Error(`البيع ${saleId} غير موجود أو غير معلق`)
+          }
+
+          // Now update only by ID (status already verified)
+          // Use match() with single field to ensure proper UUID type handling
           return supabase
             .from('sales')
             .update(saleUpdateData)
-            .eq('id', sale.id)
-            .eq('status', 'pending')
+            .match({ id: saleId })
         })
         
         await Promise.all(updatePromises)
@@ -390,11 +439,13 @@ export function ConfirmGroupSaleDialog({
           updateData.company_fee_amount = parseFloat(companyFee) / sales.length
         }
         
-        // Update all sales at once
+        // Update all sales at once - use filter to avoid UUID type mismatch
+        // Ensure all IDs are strings
+        const stringSaleIds = saleIds.map(id => typeof id === 'string' ? id : String(id))
         await supabase
           .from('sales')
           .update(updateData)
-          .in('id', saleIds)
+          .in('id', stringSaleIds)
           .eq('status', 'pending')
       }
 
@@ -441,6 +492,124 @@ export function ConfirmGroupSaleDialog({
             .from('installment_payments')
             .insert(installmentPayments)
         }
+      }
+
+      // Notify owners and current user about group sale confirmation
+      try {
+        const clientName = firstSale.client?.name || 'عميل غير معروف'
+        const confirmedByName = systemUser?.name || 'غير معروف'
+        const confirmedByPlace = systemUser?.place || null
+        const totalPrice = sales.reduce((sum, s) => sum + s.sale_price, 0)
+        const totalDeposit = sales.reduce((sum, s) => sum + (s.deposit_amount || 0), 0)
+        
+        // Build notification message based on payment method
+        let notificationMessage = ''
+        let notificationTitle = ''
+        
+        if (firstSale.payment_method === 'full') {
+          // Full payment notification
+          notificationTitle = `تم تأكيد ${sales.length} بيع - دفع كامل`
+          notificationMessage = `تم تأكيد ${sales.length} بيع للعميل ${clientName}\n\n`
+          notificationMessage += `📋 تفاصيل البيع:\n`
+          notificationMessage += `• عدد القطع: ${sales.length} قطعة\n`
+          notificationMessage += `• السعر الإجمالي: ${formatPrice(totalPrice)} DT\n`
+          notificationMessage += `• العربون الإجمالي (مدفوع مسبقاً): ${formatPrice(totalDeposit)} DT\n`
+          notificationMessage += `• المبلغ المستلم عند التأكيد: ${formatPrice(calculations.confirmationAmount)} DT\n\n`
+          notificationMessage += `✅ تم التأكيد بواسطة: ${confirmedByName}${confirmedByPlace ? ` (${confirmedByPlace})` : ''}`
+        } else if (firstSale.payment_method === 'installment') {
+          // Installment notification
+          notificationTitle = `تم تأكيد ${sales.length} بيع - تقسيط`
+          notificationMessage = `تم تأكيد ${sales.length} بيع للعميل ${clientName}\n\n`
+          notificationMessage += `📋 تفاصيل البيع:\n`
+          notificationMessage += `• عدد القطع: ${sales.length} قطعة\n`
+          notificationMessage += `• السعر الإجمالي: ${formatPrice(totalPrice)} DT\n`
+          notificationMessage += `• العربون الإجمالي (مدفوع مسبقاً): ${formatPrice(totalDeposit)} DT\n`
+          notificationMessage += `• التسبقة الإجمالية (المستلم عند التأكيد): ${formatPrice(calculations.confirmationAmount)} DT\n`
+          
+          if (calculations.installmentDetails) {
+            notificationMessage += `\n📅 تفاصيل الأقساط:\n`
+            notificationMessage += `• عدد الأشهر: ${calculations.installmentDetails.numberOfMonths} شهر\n`
+            notificationMessage += `• المبلغ الشهري: ${formatPrice(calculations.installmentDetails.monthlyPayment)} DT\n`
+            if (calculations.installmentDetails.startDate && calculations.installmentDetails.endDate) {
+              notificationMessage += `• من: ${formatDate(calculations.installmentDetails.startDate, { year: 'numeric', month: 'long', day: 'numeric' })}\n`
+              notificationMessage += `• إلى: ${formatDate(calculations.installmentDetails.endDate, { year: 'numeric', month: 'long', day: 'numeric' })}\n`
+            }
+          }
+          
+          notificationMessage += `\n✅ تم التأكيد بواسطة: ${confirmedByName}${confirmedByPlace ? ` (${confirmedByPlace})` : ''}`
+        } else if (firstSale.payment_method === 'promise') {
+          // Promise of sale notification
+          notificationTitle = `تم تأكيد ${sales.length} بيع - وعد بالبيع`
+          notificationMessage = `تم تأكيد ${sales.length} بيع للعميل ${clientName}\n\n`
+          notificationMessage += `📋 تفاصيل البيع:\n`
+          notificationMessage += `• عدد القطع: ${sales.length} قطعة\n`
+          notificationMessage += `• السعر الإجمالي: ${formatPrice(totalPrice)} DT\n`
+          notificationMessage += `• العربون الإجمالي (مدفوع مسبقاً): ${formatPrice(totalDeposit)} DT\n`
+          notificationMessage += `• المبلغ المستلم عند التأكيد: ${formatPrice(calculations.confirmationAmount)} DT\n\n`
+          notificationMessage += `✅ تم التأكيد بواسطة: ${confirmedByName}${confirmedByPlace ? ` (${confirmedByPlace})` : ''}`
+        } else {
+          // Fallback for unknown payment method
+          notificationTitle = `تم تأكيد ${sales.length} بيع`
+          notificationMessage = `تم تأكيد ${sales.length} بيع للعميل ${clientName}\n\n`
+          notificationMessage += `• السعر الإجمالي: ${formatPrice(totalPrice)} DT\n`
+          notificationMessage += `\n✅ تم التأكيد بواسطة: ${confirmedByName}${confirmedByPlace ? ` (${confirmedByPlace})` : ''}`
+        }
+        
+        // Notify owners
+        const notifyOwnersResult = await notifyOwners(
+          'sale_confirmed',
+          notificationTitle,
+          notificationMessage,
+          'sale',
+          firstSale.id,
+          {
+            client_name: clientName,
+            sales_count: sales.length,
+            total_price: totalPrice,
+            total_deposit: totalDeposit,
+            total_confirmation: calculations.confirmationAmount,
+            payment_method: firstSale.payment_method,
+            confirmed_by_name: confirmedByName,
+            confirmed_by_place: confirmedByPlace,
+            installment_details: calculations.installmentDetails,
+            sale_ids: sales.map(s => s.id),
+          }
+        )
+        
+        if (!notifyOwnersResult) {
+          console.warn('Failed to notify owners about group sale confirmation')
+        }
+        
+        // Also notify current user if they're not an owner
+        if (systemUser?.id) {
+          const notifyUserResult = await notifyCurrentUser(
+            'sale_confirmed',
+            notificationTitle,
+            notificationMessage,
+            systemUser.id,
+            'sale',
+            firstSale.id,
+            {
+              client_name: clientName,
+              sales_count: sales.length,
+              total_price: totalPrice,
+              total_deposit: totalDeposit,
+              total_confirmation: calculations.confirmationAmount,
+              payment_method: firstSale.payment_method,
+              confirmed_by_name: confirmedByName,
+              confirmed_by_place: confirmedByPlace,
+              installment_details: calculations.installmentDetails,
+              sale_ids: sales.map(s => s.id),
+            }
+          )
+          
+          if (!notifyUserResult) {
+            console.warn('Failed to notify current user about group sale confirmation')
+          }
+        }
+      } catch (notifError: any) {
+        // Don't fail the confirmation if notification fails
+        console.error('Error creating notifications (non-critical):', notifError)
       }
 
       setSuccessMessage(`تم تأكيد ${sales.length} بيع بنجاح!`)

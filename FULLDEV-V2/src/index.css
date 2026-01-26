@@ -37,6 +37,14 @@ body {
   .scrollbar-thin::-webkit-scrollbar-thumb:hover {
     @apply bg-gray-400;
   }
+
+  /* Improve touch scrolling performance */
+  .scrollbar-thin,
+  [class*="overflow-y-auto"],
+  [class*="overflow-x-auto"] {
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y pan-x;
+  }
 }
 
 @layer utilities {

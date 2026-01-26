@@ -324,7 +324,7 @@ export function SalesRecordsPage() {
   }
 
   async function handleCancelSale(salesToCancel?: Sale[]) {
-    const sales = salesToCancel || (selectedSale ? [selectedSale] : [])
+    const sales = salesToCancel || (selectedSale ? [selectedSale] : getSelectedSalesArray())
     if (sales.length === 0) return
 
     setProcessing(true)
@@ -478,7 +478,7 @@ export function SalesRecordsPage() {
   function formatDate(dateString: string | null): string {
     if (!dateString) return '-'
     const date = new Date(dateString)
-    return date.toLocaleDateString('ar-SA', {
+    return date.toLocaleDateString('en-US', {
       year: 'numeric',
       month: 'long',
       day: 'numeric',

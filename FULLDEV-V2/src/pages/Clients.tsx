@@ -1164,13 +1164,13 @@ export function ClientsPage() {
                 <div>
                   <Label className="text-xs text-gray-500">تاريخ الإضافة</Label>
                   <p className="text-sm font-medium">
-                    {new Date(selectedClient.created_at).toLocaleDateString('ar-SA')}
+                    {new Date(selectedClient.created_at).toLocaleDateString('en-US')}
                   </p>
                 </div>
                 <div>
                   <Label className="text-xs text-gray-500">آخر تحديث</Label>
                   <p className="text-sm font-medium">
-                    {new Date(selectedClient.updated_at).toLocaleDateString('ar-SA')}
+                    {new Date(selectedClient.updated_at).toLocaleDateString('en-US')}
                   </p>
                 </div>
               </div>

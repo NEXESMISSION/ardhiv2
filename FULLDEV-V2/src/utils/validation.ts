@@ -93,11 +93,11 @@ export function validateDate(
   }
 
   if (minDate && checkDate < minDate) {
-    return { valid: false, error: `التاريخ يجب أن يكون بعد ${minDate.toLocaleDateString('ar-SA')}` }
+    return { valid: false, error: `التاريخ يجب أن يكون بعد ${minDate.toLocaleDateString('en-US')}` }
   }
 
   if (maxDate && checkDate > maxDate) {
-    return { valid: false, error: `التاريخ يجب أن يكون قبل ${maxDate.toLocaleDateString('ar-SA')}` }
+    return { valid: false, error: `التاريخ يجب أن يكون قبل ${maxDate.toLocaleDateString('en-US')}` }
   }
 
   return { valid: true, value: date }

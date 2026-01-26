@@ -84,7 +84,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } = supabase.auth.onAuthStateChange(async (event: string, session: any) => {
       if (!mounted) return
       
-      console.log('Auth state changed:', event, session?.user?.email)
+      // Only log important auth events, not every SIGNED_IN
+      if (event !== 'SIGNED_IN' || !systemUserRef.current) {
+        console.log('Auth state changed:', event, session?.user?.email)
+      }
       
       // Handle sign out
       if (event === 'SIGNED_OUT') {
@@ -282,7 +285,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         loadingSystemUserRef.current = true
         setLoading(true)
-        console.log('Loading system user for auth_user_id:', authUserId, retryCount > 0 ? `(retry ${retryCount}/${MAX_RETRIES})` : '')
+        // Only log on first attempt or retries
+        if (retryCount === 0) {
+          console.log('Loading system user for auth_user_id:', authUserId)
+        }
       
         // Query immediately - only select columns that definitely exist
         // Using minimal required columns first, then expand if needed
@@ -295,9 +301,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           .select('id, name, email, phone, place, title, notes, role, image_url, allowed_pages, allowed_batches, allowed_pieces, display_order, created_at, updated_at, auth_user_id')
           .eq('auth_user_id', authUserId) // CRITICAL: Use auth_user_id, not id
           .maybeSingle()
-        
-        // Log the query for debugging
-        console.log('Querying users table with auth_user_id:', authUserId)
 
         // Add query timeout with abort tracking
         // Only set timeout if query takes longer than expected
@@ -379,8 +382,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
         
         const { data, error } = result as any
+        // Only log if query took longer than expected or on error
         const queryTime = Date.now() - startTime
-        console.log(`Query completed in ${queryTime}ms`)
+        if (queryTime > 500 || error) {
+          console.log(`Query completed in ${queryTime}ms`, error ? '(with error)' : '')
+        }
 
         // Clear the fallback timeout (in case it wasn't cleared above)
         if (loadTimeoutRef.current) {
@@ -554,7 +560,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return { userNotFound: true, authUserIdMismatch: true }
       }
 
-        console.log('System user loaded successfully:', data.email, data.role)
+        // Only log on first successful load
+        if (!systemUserRef.current) {
+          console.log('System user loaded successfully:', data.email, data.role)
+        }
         // Ensure all fields are properly set, even if null
         const formattedUser: SystemUser = {
           id: data.id,
@@ -683,18 +692,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Clear any previous errors
       setLoading(true)
 
-      // Normalize email: trim, lowercase, and ensure proper format
-      let normalizedEmail = email.trim().toLowerCase()
-      
-      // If email doesn't contain @, append @gmail.com
-      if (!normalizedEmail.includes('@')) {
-        normalizedEmail = normalizedEmail + '@gmail.com'
-      }
-
-      console.log('Attempting to sign in with email:', normalizedEmail)
-
       const { data, error } = await supabase.auth.signInWithPassword({
-        email: normalizedEmail,
+        email: email.trim().toLowerCase(),
         password,
       })
 
