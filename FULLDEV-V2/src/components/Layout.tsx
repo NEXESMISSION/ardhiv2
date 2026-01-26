@@ -98,20 +98,20 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
       }
 
       const channelName = `notifications-${userId}-${Date.now()}`
-      const channel = supabase
+    const channel = supabase
         .channel(channelName)
-        .on(
-          'postgres_changes',
-          {
-            event: 'INSERT',
-            schema: 'public',
-            table: 'notifications',
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'notifications',
             filter: `user_id=eq.${userId}`,
-          },
+        },
           (payload) => {
             if (!mounted) return
 
-            const newNotification = payload.new as Notification
+          const newNotification = payload.new as Notification
             // Prevent duplicates
             if (notificationIdsRef.current.has(newNotification.id)) {
               return
@@ -133,20 +133,20 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
                 setNewNotificationReceived(false)
               }
             }, 2000)
-          }
-        )
-        .on(
-          'postgres_changes',
-          {
-            event: 'UPDATE',
-            schema: 'public',
-            table: 'notifications',
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'notifications',
             filter: `user_id=eq.${userId}`,
-          },
+        },
           (payload) => {
             if (!mounted) return
 
-            const updatedNotification = payload.new as Notification
+          const updatedNotification = payload.new as Notification
             setNotifications((prev) =>
               prev.map((n) => (n.id === updatedNotification.id ? updatedNotification : n))
             )
@@ -200,7 +200,7 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
           }
         })
 
-      subscriptionRef.current = channel
+    subscriptionRef.current = channel
     }
 
     setupSubscription()
@@ -289,10 +289,10 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
     if (!systemUser?.id) return
 
     // Optimistic update
-    const notification = notifications.find((n) => n.id === notificationId)
-    setNotifications((prev) => prev.filter((n) => n.id !== notificationId))
-    if (notification && !notification.read) {
-      setUnreadCount((prev) => Math.max(0, prev - 1))
+      const notification = notifications.find((n) => n.id === notificationId)
+      setNotifications((prev) => prev.filter((n) => n.id !== notificationId))
+      if (notification && !notification.read) {
+        setUnreadCount((prev) => Math.max(0, prev - 1))
     }
 
     // Perform actual delete

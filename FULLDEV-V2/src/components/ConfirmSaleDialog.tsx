@@ -298,7 +298,7 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
 
           // Ensure ID is a valid UUID string
           const saleId = typeof sale.id === 'string' ? sale.id : String(sale.id)
-          
+
           // Validate UUID format
           const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
           if (!uuidRegex.test(saleId)) {
@@ -329,8 +329,8 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
       // Try direct update first
       let updateErr: any = null
       const updateResult = await supabase
-        .from('sales')
-        .update(updateData)
+            .from('sales')
+            .update(updateData)
         .match({ id: saleId })
       
       updateErr = updateResult.error
@@ -425,7 +425,7 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
 
       // Ensure ID is a valid UUID string
       const saleId = typeof sale.id === 'string' ? sale.id : String(sale.id)
-      
+
       // Validate UUID format
       const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
       if (!uuidRegex.test(saleId)) {
@@ -458,8 +458,8 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
       
       try {
         const result = await supabase
-          .from('sales')
-          .update(updateData)
+        .from('sales')
+        .update(updateData)
           .match({ id: saleId })
         
         updateErr = result.error
@@ -553,9 +553,9 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
 
       // Notify owners and current user about sale confirmation
       try {
-        const clientName = sale.client?.name || 'عميل غير معروف'
-        const pieceNumber = sale.piece?.piece_number || 'غير معروف'
-        const batchName = sale.batch?.name || 'غير معروف'
+      const clientName = sale.client?.name || 'عميل غير معروف'
+      const pieceNumber = sale.piece?.piece_number || 'غير معروف'
+      const batchName = sale.batch?.name || 'غير معروف'
         const confirmedByName = systemUser?.name || 'غير معروف'
         const confirmedByPlace = systemUser?.place || null
         
@@ -628,12 +628,40 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
           notificationMessage += `• السعر: ${formatPrice(sale.sale_price)} DT\n`
           notificationMessage += `\n✅ تم التأكيد بواسطة: ${confirmedByName}${confirmedByPlace ? ` (${confirmedByPlace})` : ''}`
         }
-        
-        // Notify owners
+      
+      // Notify owners
         const notifyOwnersResult = await notifyOwners(
-          'sale_confirmed',
+        'sale_confirmed',
           notificationTitle,
+        notificationMessage,
+        'sale',
+        sale.id,
+        {
+          client_name: clientName,
+          piece_number: pieceNumber,
+          batch_name: batchName,
+          sale_price: sale.sale_price,
+            deposit_amount: sale.deposit_amount || 0,
+            confirmation_amount: calculations.confirmationAmount,
+          payment_method: sale.payment_method,
+            confirmed_by_name: confirmedByName,
+            confirmed_by_place: confirmedByPlace,
+            installment_details: calculations.installmentDetails,
+            promise_payment_amount: sale.payment_method === 'promise' && promisePaymentAmount ? (parseFloat(promisePaymentAmount.trim().replace(/,/g, '')) || 0) : null,
+        }
+      )
+        
+        if (!notifyOwnersResult) {
+          console.warn('Failed to notify owners about sale confirmation')
+        }
+      
+      // Also notify current user if they're not an owner
+      if (systemUser?.id) {
+          const notifyUserResult = await notifyCurrentUser(
+          'sale_confirmed',
+            notificationTitle,
           notificationMessage,
+          systemUser.id,
           'sale',
           sale.id,
           {
@@ -641,42 +669,14 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
             piece_number: pieceNumber,
             batch_name: batchName,
             sale_price: sale.sale_price,
-            deposit_amount: sale.deposit_amount || 0,
-            confirmation_amount: calculations.confirmationAmount,
-            payment_method: sale.payment_method,
-            confirmed_by_name: confirmedByName,
-            confirmed_by_place: confirmedByPlace,
-            installment_details: calculations.installmentDetails,
-            promise_payment_amount: sale.payment_method === 'promise' && promisePaymentAmount ? (parseFloat(promisePaymentAmount.trim().replace(/,/g, '')) || 0) : null,
-          }
-        )
-        
-        if (!notifyOwnersResult) {
-          console.warn('Failed to notify owners about sale confirmation')
-        }
-        
-        // Also notify current user if they're not an owner
-        if (systemUser?.id) {
-          const notifyUserResult = await notifyCurrentUser(
-            'sale_confirmed',
-            notificationTitle,
-            notificationMessage,
-            systemUser.id,
-            'sale',
-            sale.id,
-            {
-              client_name: clientName,
-              piece_number: pieceNumber,
-              batch_name: batchName,
-              sale_price: sale.sale_price,
               deposit_amount: sale.deposit_amount || 0,
               confirmation_amount: calculations.confirmationAmount,
-              payment_method: sale.payment_method,
+            payment_method: sale.payment_method,
               confirmed_by_name: confirmedByName,
               confirmed_by_place: confirmedByPlace,
               installment_details: calculations.installmentDetails,
-            }
-          )
+          }
+        )
           
           if (!notifyUserResult) {
             console.warn('Failed to notify current user about sale confirmation')

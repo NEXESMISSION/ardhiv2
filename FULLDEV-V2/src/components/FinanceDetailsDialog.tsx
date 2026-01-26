@@ -11,10 +11,12 @@ interface Detail {
     batch?: {
       id: string
       name: string
+      location?: string | null
     }
     piece?: {
       id: string
       piece_number: string
+      surface_m2?: number
     }
     client?: {
       id: string
@@ -228,14 +230,27 @@ export function FinanceDetailsDialog({
                                       هوية: {detail.sale.client.id_number}
                                     </p>
                                   )}
+                                  <div className="flex items-center gap-2 flex-wrap text-[10px] sm:text-xs text-gray-600 mb-1">
+                                    <span className="font-medium">{detail.sale.batch?.name || '-'}</span>
+                                    {detail.sale.batch?.location && (
+                                      <>
+                                        <span>•</span>
+                                        <span className="text-gray-500">📍 {detail.sale.batch.location}</span>
+                                      </>
+                                    )}
+                                  </div>
                                   <div className="flex items-center gap-2 flex-wrap text-[10px] sm:text-xs text-gray-600">
-                                    <span>{detail.sale.batch?.name || '-'}</span>
-                                    <span>•</span>
                                     <Badge variant="secondary" size="sm" className="text-[10px] sm:text-xs">
-                                      {detail.sale.piece?.piece_number || '-'}
+                                      قطعة: {detail.sale.piece?.piece_number || '-'}
                                     </Badge>
+                                    {detail.sale.piece?.surface_m2 && (
+                                      <>
+                                        <span>•</span>
+                                        <span className="text-gray-500">المساحة: {detail.sale.piece.surface_m2.toLocaleString('en-US')} م²</span>
+                                      </>
+                                    )}
                                     <span>•</span>
-                                    <span>{formatDateShort(detail.date)}</span>
+                                    <span className="text-gray-500">{formatDateShort(detail.date)}</span>
                                   </div>
                                   {(detail.sale.seller || detail.sale.confirmedBy) && (
                                     <div className="mt-1.5 space-y-0.5 text-[10px] sm:text-xs text-gray-500">

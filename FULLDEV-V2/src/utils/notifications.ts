@@ -75,13 +75,13 @@ async function notifyOwnersFallback(
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      // Get all owner user IDs
-      const { data: owners, error: ownersError } = await supabase
-        .from('users')
-        .select('id')
-        .eq('role', 'owner')
+    // Get all owner user IDs
+    const { data: owners, error: ownersError } = await supabase
+      .from('users')
+      .select('id')
+      .eq('role', 'owner')
 
-      if (ownersError) {
+    if (ownersError) {
         lastError = ownersError
         console.error(`Attempt ${attempt}: Error fetching owners:`, ownersError)
         if (attempt < maxRetries) {
@@ -89,26 +89,26 @@ async function notifyOwnersFallback(
           continue
         }
         return false
-      }
+    }
 
-      if (!owners || owners.length === 0) {
+    if (!owners || owners.length === 0) {
         console.warn('[notifyOwnersFallback] No owners found for notifications')
         return true // Not an error, just no owners to notify
-      }
+    }
 
       console.log(`[notifyOwnersFallback] Found ${owners.length} owner(s) to notify`)
 
-      // Create notifications for each owner
-      const notifications = owners.map(owner => ({
-        user_id: owner.id,
-        type,
-        title,
-        message,
-        entity_type: entityType || null,
-        entity_id: entityId || null,
-        metadata: metadata || null,
-        read: false,
-      }))
+    // Create notifications for each owner
+    const notifications = owners.map(owner => ({
+      user_id: owner.id,
+      type,
+      title,
+      message,
+      entity_type: entityType || null,
+      entity_id: entityId || null,
+      metadata: metadata || null,
+      read: false,
+    }))
 
       // Insert notifications in batches to avoid payload size issues
       const batchSize = 50
@@ -117,15 +117,15 @@ async function notifyOwnersFallback(
       for (let i = 0; i < notifications.length; i += batchSize) {
         const batch = notifications.slice(i, i + batchSize)
         const { error: insertError } = await supabase
-          .from('notifications')
+      .from('notifications')
           .insert(batch)
-          .select()
+      .select()
 
-        if (insertError) {
+    if (insertError) {
           lastError = insertError
           console.error(`Attempt ${attempt}, Batch ${Math.floor(i / batchSize) + 1}: Error inserting notifications:`, insertError)
           if (attempt < maxRetries) break // Retry outer loop
-        } else {
+    } else {
           successCount += batch.length
         }
       }
@@ -141,8 +141,8 @@ async function notifyOwnersFallback(
       if (attempt < maxRetries) {
         await new Promise(resolve => setTimeout(resolve, 1000 * attempt))
         continue
-      }
-    } catch (error) {
+    }
+  } catch (error) {
       lastError = error
       console.error(`Attempt ${attempt}: Exception in notifyOwnersFallback:`, error)
       if (attempt < maxRetries) {
@@ -180,18 +180,18 @@ export async function notifyCurrentUser(
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       const { error: insertError } = await supabase
-        .from('notifications')
-        .insert({
-          user_id: userId,
-          type,
-          title,
-          message,
-          entity_type: entityType || null,
-          entity_id: entityId || null,
-          metadata: metadata || null,
-          read: false,
-        })
-        .select()
+      .from('notifications')
+      .insert({
+        user_id: userId,
+        type,
+        title,
+        message,
+        entity_type: entityType || null,
+        entity_id: entityId || null,
+        metadata: metadata || null,
+        read: false,
+      })
+      .select()
 
       if (!insertError) {
         return true
@@ -202,8 +202,8 @@ export async function notifyCurrentUser(
       
       if (attempt < maxRetries) {
         await new Promise(resolve => setTimeout(resolve, 1000 * attempt))
-      }
-    } catch (error) {
+    }
+  } catch (error) {
       lastError = error
       console.error(`Attempt ${attempt}: Exception in notifyCurrentUser:`, error)
       if (attempt < maxRetries) {

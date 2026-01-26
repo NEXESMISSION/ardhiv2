@@ -28,6 +28,7 @@ export const SALE_QUERY_FIELDS = `
   land_batches:batch_id (
     id,
     name,
+    location,
     price_per_m2_cash
   ),
   payment_offers:payment_offer_id (

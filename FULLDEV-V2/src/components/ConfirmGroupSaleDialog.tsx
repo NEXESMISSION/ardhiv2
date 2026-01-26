@@ -334,7 +334,7 @@ export function ConfirmGroupSaleDialog({
 
             // Ensure ID is a valid UUID string
             const saleId = typeof sale.id === 'string' ? sale.id : String(sale.id)
-            
+
             // Validate UUID format
             const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
             if (!uuidRegex.test(saleId)) {
@@ -496,10 +496,10 @@ export function ConfirmGroupSaleDialog({
 
       // Notify owners and current user about group sale confirmation
       try {
-        const clientName = firstSale.client?.name || 'عميل غير معروف'
+      const clientName = firstSale.client?.name || 'عميل غير معروف'
         const confirmedByName = systemUser?.name || 'غير معروف'
         const confirmedByPlace = systemUser?.place || null
-        const totalPrice = sales.reduce((sum, s) => sum + s.sale_price, 0)
+      const totalPrice = sales.reduce((sum, s) => sum + s.sale_price, 0)
         const totalDeposit = sales.reduce((sum, s) => sum + (s.deposit_amount || 0), 0)
         
         // Build notification message based on payment method
@@ -554,54 +554,54 @@ export function ConfirmGroupSaleDialog({
           notificationMessage += `• السعر الإجمالي: ${formatPrice(totalPrice)} DT\n`
           notificationMessage += `\n✅ تم التأكيد بواسطة: ${confirmedByName}${confirmedByPlace ? ` (${confirmedByPlace})` : ''}`
         }
-        
-        // Notify owners
+      
+      // Notify owners
         const notifyOwnersResult = await notifyOwners(
-          'sale_confirmed',
+        'sale_confirmed',
           notificationTitle,
+        notificationMessage,
+        'sale',
+        firstSale.id,
+        {
+          client_name: clientName,
+          sales_count: sales.length,
+          total_price: totalPrice,
+            total_deposit: totalDeposit,
+            total_confirmation: calculations.confirmationAmount,
+          payment_method: firstSale.payment_method,
+            confirmed_by_name: confirmedByName,
+            confirmed_by_place: confirmedByPlace,
+            installment_details: calculations.installmentDetails,
+          sale_ids: sales.map(s => s.id),
+        }
+      )
+        
+        if (!notifyOwnersResult) {
+          console.warn('Failed to notify owners about group sale confirmation')
+        }
+      
+      // Also notify current user if they're not an owner
+      if (systemUser?.id) {
+          const notifyUserResult = await notifyCurrentUser(
+          'sale_confirmed',
+            notificationTitle,
           notificationMessage,
+          systemUser.id,
           'sale',
           firstSale.id,
           {
             client_name: clientName,
             sales_count: sales.length,
             total_price: totalPrice,
-            total_deposit: totalDeposit,
-            total_confirmation: calculations.confirmationAmount,
-            payment_method: firstSale.payment_method,
-            confirmed_by_name: confirmedByName,
-            confirmed_by_place: confirmedByPlace,
-            installment_details: calculations.installmentDetails,
-            sale_ids: sales.map(s => s.id),
-          }
-        )
-        
-        if (!notifyOwnersResult) {
-          console.warn('Failed to notify owners about group sale confirmation')
-        }
-        
-        // Also notify current user if they're not an owner
-        if (systemUser?.id) {
-          const notifyUserResult = await notifyCurrentUser(
-            'sale_confirmed',
-            notificationTitle,
-            notificationMessage,
-            systemUser.id,
-            'sale',
-            firstSale.id,
-            {
-              client_name: clientName,
-              sales_count: sales.length,
-              total_price: totalPrice,
               total_deposit: totalDeposit,
               total_confirmation: calculations.confirmationAmount,
-              payment_method: firstSale.payment_method,
+            payment_method: firstSale.payment_method,
               confirmed_by_name: confirmedByName,
               confirmed_by_place: confirmedByPlace,
               installment_details: calculations.installmentDetails,
-              sale_ids: sales.map(s => s.id),
-            }
-          )
+            sale_ids: sales.map(s => s.id),
+          }
+        )
           
           if (!notifyUserResult) {
             console.warn('Failed to notify current user about group sale confirmation')

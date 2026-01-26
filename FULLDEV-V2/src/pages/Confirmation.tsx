@@ -102,9 +102,11 @@ export function ConfirmationPage() {
   const [cancelling, setCancelling] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [batchFilter, setBatchFilter] = useState<string>('all')
+  const [allBatches, setAllBatches] = useState<Array<{ id: string; name: string }>>([])
 
   useEffect(() => {
     loadPendingSales()
+    loadAllBatches()
     
     const handleSaleCreated = () => {
       loadPendingSales()
@@ -122,6 +124,20 @@ export function ConfirmationPage() {
       window.removeEventListener('saleUpdated', handleSaleUpdated)
     }
   }, [])
+
+  async function loadAllBatches() {
+    try {
+      const { data, error } = await supabase
+        .from('land_batches')
+        .select('id, name')
+        .order('name', { ascending: true })
+
+      if (error) throw error
+      setAllBatches(data || [])
+    } catch (e: any) {
+      console.error('Error loading batches:', e)
+    }
+  }
 
   async function loadPendingSales() {
     setLoading(true)
@@ -232,16 +248,10 @@ export function ConfirmationPage() {
         }
       }
 
-  // Get unique batches for filter
+  // Get unique batches for filter - use all batches from database
   const batches = useMemo(() => {
-    const batchSet = new Set<string>()
-    sales.forEach(sale => {
-      if (sale.batch?.name) {
-        batchSet.add(sale.batch.name)
-      }
-    })
-    return Array.from(batchSet).sort()
-  }, [sales])
+    return allBatches.map(b => b.name).sort()
+  }, [allBatches])
 
   // Filter grouped sales
   const filteredGroupedSales = useMemo(() => {
@@ -388,11 +398,11 @@ export function ConfirmationPage() {
             <Select
               value={batchFilter}
               onChange={(e) => setBatchFilter(e.target.value)}
-              className="text-xs sm:text-sm"
+              className="text-xs sm:text-sm text-gray-900 bg-white"
             >
-              <option value="all">جميع الدفعات</option>
+              <option value="all" className="text-gray-900">جميع الدفعات</option>
               {batches.map(batch => (
-                <option key={batch} value={batch}>{batch}</option>
+                <option key={batch} value={batch} className="text-gray-900">{batch}</option>
               ))}
             </Select>
           </div>
@@ -505,17 +515,17 @@ export function ConfirmationPage() {
                           )}
                           <div className="flex items-center gap-1 flex-wrap justify-end">
                           {isPromise && (
-                              <Badge className="bg-purple-400/30 text-white border border-white/30 text-xs px-2 py-0.5 font-medium">
+                              <Badge className="bg-purple-400/40 text-white border border-white/50 text-xs px-2 py-0.5 font-medium shadow-sm">
                               وعد بالبيع
                             </Badge>
                           )}
                           {isInstallment && (
-                              <Badge className="bg-blue-400/30 text-white border border-white/30 text-xs px-2 py-0.5 font-medium">
+                              <Badge className="bg-blue-400/40 text-white border border-white/50 text-xs px-2 py-0.5 font-medium shadow-sm">
                               تقسيط
                             </Badge>
                           )}
                           {sale.status === 'pending' && (
-                              <Badge className="bg-orange-400/30 text-white border border-white/30 text-xs px-2 py-0.5 font-medium">
+                              <Badge className="bg-orange-400/40 text-white border border-white/50 text-xs px-2 py-0.5 font-medium shadow-sm">
                               محجوز
                             </Badge>
                           )}

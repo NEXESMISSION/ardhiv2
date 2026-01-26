@@ -3,9 +3,9 @@ import { supabase } from '@/lib/supabase'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Dialog } from '@/components/ui/dialog'
-import { formatPrice, formatDateShort } from '@/utils/priceCalculator'
+import { formatPrice } from '@/utils/priceCalculator'
 import { Input } from '@/components/ui/input'
+import { Select } from '@/components/ui/select'
 import { calculateInstallmentWithDeposit } from '@/utils/installmentCalculator'
 import { buildSaleQuery, formatSalesWithSellers } from '@/utils/salesQueries'
 import { FinanceDetailsDialog } from '@/components/FinanceDetailsDialog'
@@ -28,6 +28,7 @@ interface Sale {
   company_fee_amount: number | null
   sold_by: string | null
   confirmed_by: string | null
+  created_at: string
   client?: {
     id: string
     name: string
@@ -41,6 +42,7 @@ interface Sale {
   batch?: {
     id: string
     name: string
+    location?: string | null
   }
   payment_offer?: {
     id: string
@@ -67,6 +69,7 @@ interface Sale {
 interface InstallmentPayment {
   id: string
   sale_id: string
+  installment_number: number | null
   amount_due: number
   amount_paid: number
   due_date: string
@@ -95,6 +98,10 @@ export function FinancePage() {
   const [selectedType, setSelectedType] = useState<string | null>(null)
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false)
   const [selectedStatType, setSelectedStatType] = useState<'unpaid' | 'paid' | 'expected' | 'total' | null>(null)
+  const [filterBy, setFilterBy] = useState<'all' | 'batch' | 'place' | 'seller'>('all')
+  const [selectedBatchFilter, setSelectedBatchFilter] = useState<string>('all')
+  const [selectedPlaceFilter, setSelectedPlaceFilter] = useState<string>('all')
+  const [selectedSellerFilter, setSelectedSellerFilter] = useState<string>('all')
 
   useEffect(() => {
     loadData()
@@ -232,9 +239,9 @@ export function FinancePage() {
       })
       .reduce((sum, i) => sum + (i.amount_due - i.amount_paid), 0)
 
-    // Total - Only installment sales (completed, non-cancelled ones with installment payment method)
+    // Total - Only installment sales (completed ones with installment payment method)
     const total = filteredData.sales
-      .filter((s) => s.status === 'completed' && s.payment_method === 'installment' && s.status !== 'cancelled')
+      .filter((s) => s.status === 'completed' && s.payment_method === 'installment')
       .reduce((sum, s) => sum + s.sale_price, 0)
 
     return {
@@ -297,7 +304,7 @@ export function FinancePage() {
 
     // Process full payments - Only completed, non-cancelled sales
     filteredData.sales
-      .filter((s) => s.status === 'completed' && s.payment_method === 'full' && s.status !== 'cancelled')
+      .filter((s) => s.status === 'completed' && s.payment_method === 'full')
       .forEach((sale) => {
         const fullPayment = sale.sale_price - (sale.deposit_amount || 0)
         if (fullPayment > 0) {
@@ -315,7 +322,7 @@ export function FinancePage() {
 
     // Process advances - Only completed, non-cancelled installment sales
     filteredData.sales
-      .filter((s) => s.status === 'completed' && s.payment_method === 'installment' && s.payment_offer && s.piece && s.status !== 'cancelled')
+      .filter((s) => s.status === 'completed' && s.payment_method === 'installment' && s.payment_offer && s.piece)
       .forEach((sale) => {
         const calc = calculateInstallmentWithDeposit(
           sale.piece!.surface_m2,
@@ -379,50 +386,102 @@ export function FinancePage() {
     return types
   }, [filteredData, sales])
 
-  // Calculate totals by batch
-  const batchTotals = useMemo(() => {
-    const batches: Record<string, {
-      name: string
-      installments: number
-      deposits: number
-      full: number
-      advance: number
-      promise: number
-      commission: number
-      total: number
-    }> = {}
-
-    Object.entries(paymentTypes).forEach(([type, data]) => {
+  // Get unique batches and places for filters
+  const availableBatches = useMemo(() => {
+    const batchSet = new Set<string>()
+    const batchMap = new Map<string, { id: string; name: string; location: string | null }>()
+    
+    Object.entries(paymentTypes).forEach(([, data]) => {
       data.details.forEach((detail) => {
-        const batchId = detail.sale.batch?.id || 'unknown'
-        const batchName = detail.sale.batch?.name || 'غير محدد'
-        
-        if (!batches[batchId]) {
-          batches[batchId] = {
-            name: batchName,
-            installments: 0,
-            deposits: 0,
-          full: 0,
-          advance: 0,
-          promise: 0,
-          commission: 0,
-          total: 0,
+        if (detail.sale.batch) {
+          batchSet.add(detail.sale.batch.id)
+          batchMap.set(detail.sale.batch.id, {
+            id: detail.sale.batch.id,
+            name: detail.sale.batch.name,
+            location: detail.sale.batch.location || null
+          })
         }
-      }
-
-        if (type === 'installments') batches[batchId].installments += detail.amount
-        if (type === 'deposits') batches[batchId].deposits += detail.amount
-        if (type === 'full') batches[batchId].full += detail.amount
-        if (type === 'advance') batches[batchId].advance += detail.amount
-        if (type === 'promise') batches[batchId].promise += detail.amount
-        if (type === 'commission') batches[batchId].commission += detail.amount
-        
-        batches[batchId].total += detail.amount
       })
     })
-
-    return Object.values(batches).sort((a, b) => b.total - a.total)
+    
+    return Array.from(batchMap.values()).sort((a, b) => a.name.localeCompare(b.name))
   }, [paymentTypes])
+
+  const availablePlaces = useMemo(() => {
+    const placeSet = new Set<string>()
+    
+    availableBatches.forEach(batch => {
+      if (batch.location) {
+        placeSet.add(batch.location)
+      }
+    })
+    
+    return Array.from(placeSet).sort()
+  }, [availableBatches])
+
+  // Calculate seller performance
+  const sellerPerformance = useMemo(() => {
+    const sellers: Record<string, { id: string; name: string; place: string | null; count: number; total: number }> = {}
+    
+    Object.entries(paymentTypes).forEach(([, data]) => {
+      data.details.forEach((detail) => {
+        if (detail.sale.seller) {
+          const sellerId = detail.sale.seller.id
+          if (!sellers[sellerId]) {
+            sellers[sellerId] = {
+              id: sellerId,
+              name: detail.sale.seller.name,
+              place: detail.sale.seller.place,
+              count: 0,
+              total: 0
+            }
+          }
+          sellers[sellerId].count += 1
+          sellers[sellerId].total += detail.amount
+        }
+      })
+    })
+    
+    return Object.values(sellers).sort((a, b) => b.total - a.total)
+  }, [paymentTypes])
+
+  // Filter payment types based on selected filters
+  const filteredPaymentTypes = useMemo(() => {
+    if (filterBy === 'all') return paymentTypes
+    
+    const filtered: Record<string, PaymentTypeData> = {
+      installments: { amount: 0, count: 0, pieces: 0, batches: new Set(), details: [] },
+      deposits: { amount: 0, count: 0, pieces: 0, batches: new Set(), details: [] },
+      full: { amount: 0, count: 0, pieces: 0, batches: new Set(), details: [] },
+      advance: { amount: 0, count: 0, pieces: 0, batches: new Set(), details: [] },
+      promise: { amount: 0, count: 0, pieces: 0, batches: new Set(), details: [] },
+      commission: { amount: 0, count: 0, pieces: 0, batches: new Set(), details: [] },
+    }
+    
+    Object.entries(paymentTypes).forEach(([type, data]) => {
+      data.details.forEach((detail) => {
+        let shouldInclude = true
+        
+        if (filterBy === 'batch' && selectedBatchFilter !== 'all') {
+          shouldInclude = detail.sale.batch?.id === selectedBatchFilter
+        } else if (filterBy === 'place' && selectedPlaceFilter !== 'all') {
+          shouldInclude = detail.sale.batch?.location === selectedPlaceFilter
+        } else if (filterBy === 'seller' && selectedSellerFilter !== 'all') {
+          shouldInclude = detail.sale.seller?.id === selectedSellerFilter
+        }
+        
+        if (shouldInclude) {
+          filtered[type].amount += detail.amount
+          filtered[type].count += 1
+          filtered[type].pieces += 1
+          if (detail.sale.batch?.id) filtered[type].batches.add(detail.sale.batch.id)
+          filtered[type].details.push(detail)
+        }
+      })
+    })
+    
+    return filtered
+  }, [paymentTypes, filterBy, selectedBatchFilter, selectedPlaceFilter, selectedSellerFilter])
 
   const typeLabels: Record<string, string> = {
     installments: 'بالتقسيط',
@@ -571,7 +630,7 @@ export function FinancePage() {
       <div>
         <h2 className="text-sm sm:text-base lg:text-lg font-semibold text-gray-900 mb-2 sm:mb-3 lg:mb-4">المدفوعات والعمولة</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3">
-          {Object.entries(paymentTypes).map(([type, data]) => (
+          {Object.entries(filteredPaymentTypes).map(([type, data]) => (
             <Card
               key={type}
               className={`p-3 sm:p-4 cursor-pointer hover:shadow-md transition-shadow ${
@@ -601,108 +660,140 @@ export function FinancePage() {
         </div>
       </div>
 
-      {/* Batch Totals - Mobile-Friendly Cards */}
-      {batchTotals.length > 0 && (
-        <div>
-          <h2 className="text-sm sm:text-base lg:text-lg font-semibold text-gray-900 mb-2 sm:mb-3 lg:mb-4">الإجمالي حسب الدفعة</h2>
-          <div className="space-y-2 sm:space-y-3">
-            {batchTotals.map((batch) => (
-              <Card key={batch.name} className="p-3 sm:p-4">
-                <div className="space-y-2">
-                  <h3 className="text-sm sm:text-base font-semibold text-gray-900 border-b border-gray-200 pb-2">
-                    {batch.name}
-                  </h3>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
-                    <div>
-                      <p className="text-xs text-gray-500 mb-0.5">الأقساط</p>
-                      <p className="text-sm sm:text-base font-semibold text-gray-900">{formatPrice(batch.installments)} DT</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-gray-500 mb-0.5">العربون</p>
-                      <p className="text-sm sm:text-base font-semibold text-blue-600">{formatPrice(batch.deposits)} DT</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-gray-500 mb-0.5">بالحاضر</p>
-                      <p className="text-sm sm:text-base font-semibold text-gray-900">{formatPrice(batch.full)} DT</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-gray-500 mb-0.5">التسبقة</p>
-                      <p className="text-sm sm:text-base font-semibold text-orange-600">{formatPrice(batch.advance)} DT</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-gray-500 mb-0.5">وعد بالبيع</p>
-                      <p className="text-sm sm:text-base font-semibold text-gray-900">{formatPrice(batch.promise)} DT</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-gray-500 mb-0.5">العمولة</p>
-                      <p className="text-sm sm:text-base font-semibold text-purple-600">{formatPrice(batch.commission)} DT</p>
-                    </div>
-                    <div className="col-span-2 sm:col-span-4 pt-2 border-t border-gray-200">
-                      <div className="flex justify-between items-center">
-                        <p className="text-xs sm:text-sm text-gray-600">الإجمالي</p>
-                        <p className="text-base sm:text-lg font-bold text-gray-900">{formatPrice(batch.total)} DT</p>
-                      </div>
-                    </div>
+      {/* Filters Section */}
+      <div>
+        <h2 className="text-sm sm:text-base lg:text-lg font-semibold text-gray-900 mb-2 sm:mb-3 lg:mb-4">التصفية والتحليل</h2>
+        <Card className="p-3 sm:p-4 bg-gray-50 border-gray-200">
+          <div className="space-y-3">
+            {/* Filter Type Selection */}
+            <div>
+              <label className="text-xs sm:text-sm font-medium text-gray-700 mb-1.5 block">نوع التصفية</label>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant={filterBy === 'all' ? 'primary' : 'secondary'}
+                  size="sm"
+                  onClick={() => {
+                    setFilterBy('all')
+                    setSelectedBatchFilter('all')
+                    setSelectedPlaceFilter('all')
+                    setSelectedSellerFilter('all')
+                  }}
+                  className="text-xs sm:text-sm"
+                >
+                  الكل
+                </Button>
+                <Button
+                  variant={filterBy === 'batch' ? 'primary' : 'secondary'}
+                  size="sm"
+                  onClick={() => setFilterBy('batch')}
+                  className="text-xs sm:text-sm"
+                >
+                  حسب الدفعة
+                </Button>
+                <Button
+                  variant={filterBy === 'place' ? 'primary' : 'secondary'}
+                  size="sm"
+                  onClick={() => setFilterBy('place')}
+                  className="text-xs sm:text-sm"
+                >
+                  حسب الموقع
+                </Button>
+                <Button
+                  variant={filterBy === 'seller' ? 'primary' : 'secondary'}
+                  size="sm"
+                  onClick={() => setFilterBy('seller')}
+                  className="text-xs sm:text-sm"
+                >
+                  حسب البائع
+                </Button>
+              </div>
+            </div>
+
+            {/* Batch Filter */}
+            {filterBy === 'batch' && (
+              <div>
+                <label className="text-xs sm:text-sm font-medium text-gray-700 mb-1.5 block">اختر الدفعة</label>
+                <Select
+                  value={selectedBatchFilter}
+                  onChange={(e) => setSelectedBatchFilter(e.target.value)}
+                  className="text-xs sm:text-sm text-gray-900 bg-white"
+                >
+                  <option value="all" className="text-gray-900">جميع الدفعات</option>
+                  {availableBatches.map(batch => (
+                    <option key={batch.id} value={batch.id} className="text-gray-900">
+                      {batch.name}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            )}
+
+            {/* Place Filter */}
+            {filterBy === 'place' && (
+              <div>
+                <label className="text-xs sm:text-sm font-medium text-gray-700 mb-1.5 block">اختر الموقع</label>
+                <Select
+                  value={selectedPlaceFilter}
+                  onChange={(e) => setSelectedPlaceFilter(e.target.value)}
+                  className="text-xs sm:text-sm text-gray-900 bg-white"
+                >
+                  <option value="all" className="text-gray-900">جميع المواقع</option>
+                  {availablePlaces.map(place => (
+                    <option key={place} value={place} className="text-gray-900">
+                      {place}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            )}
+
+            {/* Seller Filter */}
+            {filterBy === 'seller' && (
+              <div>
+                <label className="text-xs sm:text-sm font-medium text-gray-700 mb-1.5 block">اختر البائع</label>
+                <Select
+                  value={selectedSellerFilter}
+                  onChange={(e) => setSelectedSellerFilter(e.target.value)}
+                  className="text-xs sm:text-sm text-gray-900 bg-white"
+                >
+                  <option value="all" className="text-gray-900">جميع البائعين</option>
+                  {sellerPerformance.map(seller => (
+                    <option key={seller.id} value={seller.id} className="text-gray-900">
+                      {seller.name}{seller.place ? ` (${seller.place})` : ''} - {formatPrice(seller.total)} DT ({seller.count} عملية)
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            )}
+
+            {/* Summary Card */}
+            {filterBy !== 'all' && (
+              <Card className="p-3 sm:p-4 bg-blue-50 border-blue-200">
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3 text-xs sm:text-sm">
+                  <div>
+                    <span className="text-gray-600">الإجمالي:</span>{' '}
+                    <span className="font-bold text-gray-900">
+                      {formatPrice(Object.values(filteredPaymentTypes).reduce((sum, type) => sum + type.amount, 0))} DT
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">عدد العمليات:</span>{' '}
+                    <span className="font-semibold text-gray-900">
+                      {Object.values(filteredPaymentTypes).reduce((sum, type) => sum + type.count, 0)}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-gray-600">عدد القطع:</span>{' '}
+                    <span className="font-semibold text-gray-900">
+                      {Object.values(filteredPaymentTypes).reduce((sum, type) => sum + type.pieces, 0)}
+                    </span>
                   </div>
                 </div>
               </Card>
-              ))}
-            
-            {/* Total Summary Card */}
-            <Card className="p-3 sm:p-4 bg-gray-50 border-2 border-gray-300">
-              <h3 className="text-sm sm:text-base font-bold text-gray-900 mb-3 border-b border-gray-300 pb-2">
-                الإجمالي الكلي
-              </h3>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
-                <div>
-                  <p className="text-xs text-gray-600 mb-0.5">الأقساط</p>
-                  <p className="text-sm sm:text-base font-semibold text-gray-900">
-                    {formatPrice(batchTotals.reduce((sum, b) => sum + b.installments, 0))} DT
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs text-gray-600 mb-0.5">العربون</p>
-                  <p className="text-sm sm:text-base font-semibold text-blue-600">
-                    {formatPrice(batchTotals.reduce((sum, b) => sum + b.deposits, 0))} DT
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs text-gray-600 mb-0.5">بالحاضر</p>
-                  <p className="text-sm sm:text-base font-semibold text-gray-900">
-                    {formatPrice(batchTotals.reduce((sum, b) => sum + b.full, 0))} DT
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs text-gray-600 mb-0.5">التسبقة</p>
-                  <p className="text-sm sm:text-base font-semibold text-orange-600">
-                    {formatPrice(batchTotals.reduce((sum, b) => sum + b.advance, 0))} DT
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs text-gray-600 mb-0.5">وعد بالبيع</p>
-                  <p className="text-sm sm:text-base font-semibold text-gray-900">
-                    {formatPrice(batchTotals.reduce((sum, b) => sum + b.promise, 0))} DT
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs text-gray-600 mb-0.5">العمولة</p>
-                  <p className="text-sm sm:text-base font-semibold text-purple-600">
-                    {formatPrice(batchTotals.reduce((sum, b) => sum + b.commission, 0))} DT
-                  </p>
-                </div>
-                <div className="col-span-2 sm:col-span-4 pt-2 border-t border-gray-300">
-                  <div className="flex justify-between items-center">
-                    <p className="text-sm sm:text-base font-semibold text-gray-700">الإجمالي الكلي</p>
-                    <p className="text-lg sm:text-xl font-bold text-gray-900">
-                      {formatPrice(batchTotals.reduce((sum, b) => sum + b.total, 0))} DT
-                    </p>
-                  </div>
-                </div>
-        </div>
-      </Card>
+            )}
           </div>
-        </div>
-      )}
+        </Card>
+      </div>
 
       {/* Payment Types Details Dialog */}
       {selectedType && (
@@ -714,8 +805,8 @@ export function FinancePage() {
           }}
           type={selectedType}
           typeLabel={typeLabels[selectedType]}
-          details={paymentTypes[selectedType].details}
-          totalAmount={paymentTypes[selectedType].amount}
+          details={filteredPaymentTypes[selectedType].details}
+          totalAmount={filteredPaymentTypes[selectedType].amount}
         />
       )}
     </div>

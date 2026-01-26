@@ -222,8 +222,7 @@ export function InstallmentDetailsDialog({
     setSelectedInstallment(installment)
     const remaining = installment.amount_due - installment.amount_paid
     setPaymentAmount(remaining.toFixed(2))
-    // Set payment date to today by default
-    setPaymentDate(new Date().toISOString().split('T')[0])
+    // Payment date is now automatically set to current date when payment is confirmed
   }
 
   async function handlePaymentConfirm() {
@@ -255,7 +254,8 @@ export function InstallmentDetailsDialog({
       }
 
       if (newStatus === 'paid') {
-        updateData.paid_date = paymentDate
+        // Use current date/time by default
+        updateData.paid_date = new Date().toISOString().split('T')[0]
       }
 
       const { error } = await supabase
@@ -605,15 +605,6 @@ export function InstallmentDetailsDialog({
                 value={paymentAmount}
                 onChange={(e) => setPaymentAmount(e.target.value)}
                 placeholder="0.00"
-                size="sm"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs sm:text-sm">تاريخ الدفع</Label>
-              <Input
-                type="date"
-                value={paymentDate}
-                onChange={(e) => setPaymentDate(e.target.value)}
                 size="sm"
               />
             </div>

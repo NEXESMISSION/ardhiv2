@@ -148,6 +148,11 @@ export function LandPage() {
   const [selectedClient, setSelectedClient] = useState<any>(null)
 
   // ============================================================================
+  // STATE: Search
+  // ============================================================================
+  const [searchQuery, setSearchQuery] = useState('')
+
+  // ============================================================================
   // STATE: Image Viewer
   // ============================================================================
   const [imageViewerOpen, setImageViewerOpen] = useState(false)
@@ -2003,6 +2008,20 @@ export function LandPage() {
           </div>
         )}
 
+        {/* Search Bar */}
+        {!loading && batches.length > 0 && (
+          <div className="mb-3 sm:mb-4">
+            <Input
+              type="text"
+              placeholder="🔍 بحث (اسم الدفعة، الموقع)..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              size="sm"
+              className="text-xs sm:text-sm"
+            />
+          </div>
+        )}
+
         {/* Total Stats for All Batches */}
         {!loading && batches.length > 0 && (
           <Card className="mb-3 sm:mb-4 lg:mb-5 p-3 sm:p-4 bg-gradient-to-r from-blue-50 to-indigo-50 border-blue-200">
@@ -2052,7 +2071,17 @@ export function LandPage() {
           </Card>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 lg:gap-5">
-            {batches.map((batch) => (
+            {batches
+              .filter((batch) => {
+                if (!searchQuery.trim()) return true
+                const query = searchQuery.toLowerCase()
+                return (
+                  batch.name.toLowerCase().includes(query) ||
+                  (batch.location && batch.location.toLowerCase().includes(query)) ||
+                  (batch.title_reference && batch.title_reference.toLowerCase().includes(query))
+                )
+              })
+              .map((batch) => (
               <Card 
                 key={batch.id} 
                 className="hover:shadow-lg transition-all duration-200 cursor-pointer overflow-hidden border-2 hover:border-blue-300 bg-gradient-to-br from-white to-gray-50"

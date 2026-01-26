@@ -837,9 +837,18 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
                         <IconButton
                           variant="danger"
                           size="sm"
-                          onClick={() => handleDeletePiece(piece.id)}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleDeletePiece(piece.id)
+                          }}
+                          onTouchEnd={(e) => {
+                            e.stopPropagation()
+                            e.preventDefault()
+                            handleDeletePiece(piece.id)
+                          }}
                           title="حذف"
-                          className="p-1 sm:p-1.5 flex-shrink-0"
+                          className="p-1 sm:p-1.5 flex-shrink-0 touch-manipulation"
+                          style={{ touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent' }}
                         >
                           <svg className="w-3.5 h-3.5 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path
