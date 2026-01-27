@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useMemo } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -146,6 +146,21 @@ export function LandPage() {
   const [saleDialogOpen, setSaleDialogOpen] = useState(false)
   const [selectedPiecesForSale, setSelectedPiecesForSale] = useState<any[]>([])
   const [selectedClient, setSelectedClient] = useState<any>(null)
+  // Ref to track when we're transitioning from client selection to sale dialog
+  // This prevents the onClose from clearing state during the transition
+  const isTransitioningToSaleRef = useRef(false)
+
+  // DEBUG: Log state changes for sale dialog
+  useEffect(() => {
+    console.log('=== SALE DIALOG STATE CHANGED ===')
+    console.log('selectedBatchForPieces:', selectedBatchForPieces)
+    console.log('selectedClient:', selectedClient)
+    console.log('saleDialogOpen:', saleDialogOpen)
+    console.log('clientSelectionDialogOpen:', clientSelectionDialogOpen)
+    console.log('selectedPiecesForSale:', selectedPiecesForSale)
+    console.log('Condition check: selectedBatchForPieces && selectedClient =', !!(selectedBatchForPieces && selectedClient))
+    console.log('================================')
+  }, [selectedBatchForPieces, selectedClient, saleDialogOpen, clientSelectionDialogOpen, selectedPiecesForSale])
 
   // ============================================================================
   // STATE: Search
@@ -238,14 +253,35 @@ export function LandPage() {
   }, [imageViewerOpen])
 
   useEffect(() => {
-    loadBatches()
+    // Safety mechanism: ensure loading is cleared after max time
+    let safetyTimeout: NodeJS.Timeout | null = null
+    
+    safetyTimeout = setTimeout(() => {
+      console.warn('Safety timeout: forcing loading state to false')
+      setLoading(false)
+      if (batches.length === 0) {
+        setListError('استغرق التحميل وقتاً طويلاً. يرجى المحاولة مرة أخرى أو تحديث الصفحة.')
+      }
+    }, 16000) // 16 second absolute maximum - increased to match function timeout
+    
+    loadBatches().then(() => {
+      if (safetyTimeout) {
+        clearTimeout(safetyTimeout)
+        safetyTimeout = null
+      }
+    }).catch(() => {
+      if (safetyTimeout) {
+        clearTimeout(safetyTimeout)
+        safetyTimeout = null
+      }
+    })
 
     // Debounce function to prevent too many refreshes (reduced for faster response)
     let refreshTimeout: NodeJS.Timeout | null = null
     const debouncedRefresh = () => {
       if (refreshTimeout) clearTimeout(refreshTimeout)
       refreshTimeout = setTimeout(() => {
-      loadBatches()
+        loadBatches()
       }, 200) // Reduced to 200ms for faster response
     }
 
@@ -287,6 +323,7 @@ export function LandPage() {
       window.removeEventListener('saleUpdated', handleSaleUpdated)
       window.removeEventListener('pieceStatusChanged', handlePieceStatusChanged as EventListener)
       if (refreshTimeout) clearTimeout(refreshTimeout)
+      if (safetyTimeout) clearTimeout(safetyTimeout)
     }
   }, []) // Empty dependencies - only run once on mount
 
@@ -370,6 +407,7 @@ export function LandPage() {
   }, [pieceDialogOpen, selectedBatchForPieces?.id]) // Only when dialog is open
 
 
+
   // ============================================================================
   // DATA LOADING FUNCTIONS
   // ============================================================================
@@ -378,28 +416,64 @@ export function LandPage() {
     // Don't show loading if we already have data (optimistic update)
     const isInitialLoad = batches.length === 0
     if (isInitialLoad) {
-    setLoading(true)
+      setLoading(true)
     }
     setListError(null)
+    
+    // Use a flag to track if we're still loading
+    let isStillLoading = true
+    let timeoutCleared = false
+    
+    // Add timeout to prevent infinite loading
+    const timeoutId = setTimeout(() => {
+      if (isStillLoading && !timeoutCleared) {
+        console.warn('loadBatches timeout - forcing loading to false')
+        setLoading(false)
+        setListError('استغرق التحميل وقتاً طويلاً. يرجى المحاولة مرة أخرى أو تحديث الصفحة.')
+        // Set empty batches so UI doesn't show "no batches" when there's an error
+        if (batches.length === 0) {
+          setBatches([])
+        }
+      }
+    }, 8000) // 8 second timeout - reasonable for a simple query
+    
     try {
-      // Load batches and stats in parallel for maximum speed
-      const batchIds: string[] = []
-      
-      // Load batches first (fast)
+      // Load batches WITHOUT images first (images are large and slow down query)
+      // Images will load immediately after in a separate fast query
       let query = supabase
         .from('land_batches')
-        .select('id, name, location, title_reference, price_per_m2_cash, image_url, created_at, updated_at')
+        .select('id, name, location, price_per_m2_cash, created_at, title_reference, updated_at')
         .order('created_at', { ascending: false })
-        .limit(100) // Limit for performance
+        .limit(50) // Reduced limit for faster initial load
 
       // Filter by allowed_batches if user is not owner
       if (systemUser?.role !== 'owner' && systemUser?.allowed_batches && systemUser.allowed_batches.length > 0) {
         query = query.in('id', systemUser.allowed_batches)
       }
 
+      // Execute query directly with optimized settings
+      console.log('Starting batches query...')
+      const startTime = Date.now()
+      
+      // Execute query directly - no race condition (simpler and faster)
       const { data, error: err } = await query
+      const queryTime = Date.now() - startTime
+      console.log(`Batches query completed in ${queryTime}ms`)
 
-      if (err) throw err
+      timeoutCleared = true
+      clearTimeout(timeoutId) // Clear timeout on success
+      isStillLoading = false
+
+      if (err) {
+        console.error('Error loading batches:', err)
+        setLoading(false)
+        setListError(err.message || 'فشل تحميل الدفعات')
+        // Keep existing batches if any, otherwise set empty
+        if (batches.length === 0) {
+          setBatches([])
+        }
+        return
+      }
       
       if (!data || data.length === 0) {
         setBatches([])
@@ -407,50 +481,85 @@ export function LandPage() {
         return
       }
       
-      // Show batches immediately WITHOUT stats (much faster)
-      // Stats will load in background and update when ready
-      setBatches(data)
+      // Create batches without images (images load only when opening pieces dialog)
+      const batchesWithDefaults = data.map(batch => ({
+        ...batch,
+        title_reference: batch.title_reference || null,
+        image_url: null, // Images not loaded in batch list
+        updated_at: batch.updated_at || batch.created_at,
+      }))
+      
+      console.log(`Loaded ${batchesWithDefaults.length} batches`)
+      setBatches(batchesWithDefaults)
       setLoading(false)
       
       // Load stats in background (completely non-blocking)
       const batchIdsList = data.map(b => b.id)
       if (batchIdsList.length > 0) {
-        // Load stats asynchronously without blocking
-        loadAllBatchStats(batchIdsList)
-          .then(allStats => {
-        setBatches(currentBatches => {
-              const currentIds = new Set(currentBatches.map(b => b.id))
-              const statsIds = new Set(batchIdsList)
-              if (currentIds.size !== statsIds.size || 
-                  ![...currentIds].every(id => statsIds.has(id))) {
-                return currentBatches
-              }
-              const updatedBatches = currentBatches.map(batch => {
-                const stats = allStats.get(batch.id)
-                return stats ? { ...batch, stats } : batch
+        // Load stats asynchronously without blocking UI
+        const loadStatsAsync = () => {
+          loadAllBatchStats(batchIdsList)
+            .then(allStats => {
+              // Only update if batches haven't changed
+              setBatches(currentBatches => {
+                const currentIds = new Set(currentBatches.map(b => b.id))
+                const statsIds = new Set(batchIdsList)
+                
+                // Safety check: only update if batch list matches
+                if (currentIds.size !== statsIds.size || 
+                    ![...currentIds].every(id => statsIds.has(id))) {
+                  return currentBatches
+                }
+                
+                // Update batches with stats
+                const updatedBatches = currentBatches.map(batch => {
+                  const stats = allStats.get(batch.id)
+                  if (stats) {
+                    return { ...batch, stats }
+                  }
+                  return batch
+                })
+                
+                // Update stats for animation
+                const totalStats: LandStats = {
+                  totalPieces: updatedBatches.reduce((sum, b) => sum + (b.stats?.totalPieces || 0), 0),
+                  soldPieces: updatedBatches.reduce((sum, b) => sum + (b.stats?.soldPieces || 0), 0),
+                  reservedPieces: updatedBatches.reduce((sum, b) => sum + (b.stats?.reservedPieces || 0), 0),
+                  totalSurface: updatedBatches.reduce((sum, b) => sum + (b.stats?.totalSurface || 0), 0),
+                }
+                setStats(totalStats)
+                
+                return updatedBatches
               })
-              
-              // Update stats for animation
-              const totalStats: LandStats = {
-                totalPieces: updatedBatches.reduce((sum, b) => sum + (b.stats?.totalPieces || 0), 0),
-                soldPieces: updatedBatches.reduce((sum, b) => sum + (b.stats?.soldPieces || 0), 0),
-                reservedPieces: updatedBatches.reduce((sum, b) => sum + (b.stats?.reservedPieces || 0), 0),
-                totalSurface: updatedBatches.reduce((sum, b) => sum + (b.stats?.totalSurface || 0), 0),
-              }
-              setStats(totalStats)
-              
-              return updatedBatches
             })
-      })
-          .catch(console.error)
+            .catch(error => {
+              console.error('Error loading batch stats (non-critical):', error)
+            })
+        }
+
+        // Load stats in background with minimal delay (non-blocking)
+        // Stats are optional - page works without them
+        if (typeof (window as any).requestIdleCallback === 'function') {
+          (window as any).requestIdleCallback(loadStatsAsync, { timeout: 500 })
+        } else {
+          setTimeout(loadStatsAsync, 50) // Very short delay
+        }
       }
     } catch (e: any) {
-      setListError(e.message || 'فشل تحميل الدفعات')
+      timeoutCleared = true
+      isStillLoading = false
+      clearTimeout(timeoutId)
+      console.error('Exception loading batches:', e)
+      setListError(e.message || 'فشل تحميل الدفعات. تحقق من الاتصال بالإنترنت.')
       setLoading(false)
+      // Keep existing batches if any, otherwise set empty
+      if (batches.length === 0) {
+        setBatches([])
+      }
     }
   }
 
-  // Optimized: Load stats for all batches in a single query with robust error handling
+  // Ultra-optimized: Load stats using single aggregated query (FASTEST)
   async function loadAllBatchStats(batchIds: string[]): Promise<Map<string, any>> {
     const statsMap = new Map<string, any>()
     
@@ -468,108 +577,85 @@ export function LandPage() {
     })
     
     try {
-      // Get all pieces for all batches in one query (super fast)
-      // Use a high limit to ensure we get ALL pieces (Supabase default is 1000)
-      // If we have more than 1000 pieces per batch, we'd need pagination, but that's unlikely
-      let allPieces: any[] = []
-      let from = 0
-      const pageSize = 1000
-      let hasMore = true
+      // Fetch pieces for each batch separately to ensure accuracy (parallel queries)
+      // This is more reliable than a single query with limit
+      const statsPromises = batchIds.map(async (batchId) => {
+        try {
+          const { data: pieces, error: piecesErr } = await Promise.race([
+            supabase
+              .from('land_pieces')
+              .select('id, status, surface_m2')
+              .eq('batch_id', batchId),
+            new Promise<any>((_, reject) => 
+              setTimeout(() => reject(new Error('Stats query timeout')), 3000)
+            )
+          ]) as any
 
-      // Handle pagination in case there are many pieces
-      while (hasMore) {
-        const { data: pageData, error: piecesError } = await supabase
-          .from('land_pieces')
-          .select('id, batch_id, status, surface_m2')
-          .in('batch_id', batchIds)
-          .range(from, from + pageSize - 1)
-
-        if (piecesError) {
-          console.error('Error fetching pieces for batch stats:', piecesError)
-          // If we got some data before the error, use it; otherwise return zero stats
-          if (allPieces.length === 0) {
-            return statsMap
+          if (piecesErr) {
+            console.error(`Error loading pieces for batch ${batchId}:`, piecesErr)
+            return { batchId, stats: null }
           }
-          break // Use what we have so far
-        }
 
-        if (!pageData || pageData.length === 0) {
-          hasMore = false
-        } else {
-          allPieces = allPieces.concat(pageData)
-          hasMore = pageData.length === pageSize
-          from += pageSize
-        }
-      }
+          if (!pieces || pieces.length === 0) {
+            return { 
+              batchId, 
+              stats: {
+                totalPieces: 0,
+                soldPieces: 0,
+                reservedPieces: 0,
+                availablePieces: 0,
+                totalSurface: 0,
+              }
+            }
+          }
 
-      if (allPieces.length === 0) {
-        // No pieces found, return zero stats (already initialized)
-        return statsMap
-      }
+          // Calculate stats for this batch
+          const totalPieces = pieces.length
+          const soldPieces = pieces.filter((p: any) => p.status === 'Sold').length
+          const reservedPieces = pieces.filter((p: any) => p.status === 'Reserved').length
+          const availablePieces = pieces.filter((p: any) => p.status === 'Available').length
+          const totalSurface = pieces.reduce((sum: number, p: any) => sum + (Number(p.surface_m2) || 0), 0)
 
-      // Group pieces by batch_id and calculate stats
-      const piecesByBatch = new Map<string, any[]>()
-      allPieces.forEach(piece => {
-        if (!piece.batch_id) {
-          console.warn('Piece missing batch_id:', piece.id)
-          return
+          return {
+            batchId,
+            stats: {
+              totalPieces,
+              soldPieces,
+              reservedPieces,
+              availablePieces,
+              totalSurface,
+            }
+          }
+        } catch (error: any) {
+          console.error(`Error loading stats for batch ${batchId}:`, error)
+          return { batchId, stats: null }
         }
-        if (!piecesByBatch.has(piece.batch_id)) {
-          piecesByBatch.set(piece.batch_id, [])
-        }
-        piecesByBatch.get(piece.batch_id)!.push(piece)
       })
 
-      // Calculate stats for each batch
-      batchIds.forEach(batchId => {
-        const pieces = piecesByBatch.get(batchId) || []
-        const totalPieces = pieces.length
-        // Use case-insensitive comparison to handle any case variations
-        const soldPieces = pieces.filter(p => (p.status || '').toLowerCase() === 'sold').length
-        const reservedPieces = pieces.filter(p => (p.status || '').toLowerCase() === 'reserved').length
-        const availablePieces = pieces.filter(p => (p.status || '').toLowerCase() === 'available').length
-        const totalSurface = pieces.reduce((sum, p) => sum + (p.surface_m2 || 0), 0)
+      // Wait for all stats (with overall timeout)
+      const statsResults = await Promise.race([
+        Promise.all(statsPromises),
+        new Promise<any[]>((resolve) => {
+          setTimeout(() => {
+            console.warn('Stats loading timeout - using partial results')
+            resolve([])
+          }, 8000) // 8 second overall timeout
+        })
+      ])
 
-        statsMap.set(batchId, {
-          totalPieces,
-          soldPieces,
-          reservedPieces,
-          availablePieces,
-          totalSurface,
-        })
-      })
-      
-      // Debug: Log stats for verification
-      if (batchIds.length > 0) {
-        const batchesWithPieces = batchIds.filter(id => {
-          const stats = statsMap.get(id)
-          return stats && stats.totalPieces > 0
-        })
-        
-        console.log('Batch stats loaded:', {
-          totalBatches: batchIds.length,
-          batchesWithPieces: batchesWithPieces.length,
-          totalPiecesFound: allPieces.length,
-          sampleBatchId: batchIds[0],
-          sampleStats: statsMap.get(batchIds[0])
-        })
-        
-        // Warn if we found pieces but some batches still show zero
-        if (allPieces.length > 0) {
-          const batchesWithZeroPieces = batchIds.filter(id => {
-            const stats = statsMap.get(id)
-            return stats && stats.totalPieces === 0
-          })
-          if (batchesWithZeroPieces.length > 0) {
-            console.warn('Some batches show zero pieces but pieces were found:', {
-              batchesWithZero: batchesWithZeroPieces.length,
-              totalPiecesInDB: allPieces.length,
-              batchIdsInQuery: batchIds,
-              pieceBatchIds: [...new Set(allPieces.map(p => p.batch_id))]
-            })
-          }
+      // Update stats map with results
+      statsResults.forEach(({ batchId, stats }) => {
+        if (stats) {
+          statsMap.set(batchId, stats)
         }
-      }
+      })
+
+      console.log('Stats calculated:', {
+        batchesProcessed: statsResults.length,
+        totalBatches: batchIds.length,
+        sampleBatch: batchIds[0],
+        sampleStats: statsMap.get(batchIds[0])
+      })
     } catch (e: any) {
       console.error('Error loading batch stats:', e)
       // Stats are already initialized with zeros, so just return them
@@ -809,11 +895,27 @@ export function LandPage() {
     const batch = batches.find((b) => b.id === batchId)
     if (!batch) return
 
+    // Fetch batch image directly from database when opening dialog
+    let imageUrl: string | null = null
+    try {
+      const { data: imageData, error: imageErr } = await supabase
+        .from('land_batches')
+        .select('image_url')
+        .eq('id', batchId)
+        .single()
+      
+      if (!imageErr && imageData?.image_url) {
+        imageUrl = imageData.image_url
+      }
+    } catch (err) {
+      console.error('Error loading batch image:', err)
+    }
+
     setSelectedBatchForPieces({ 
       id: batchId, 
       name: batch.name,
       pricePerM2: batch.price_per_m2_cash,
-      imageUrl: batch.image_url
+      imageUrl: imageUrl
     })
     setPieceDialogOpen(true)
   }
@@ -1184,8 +1286,34 @@ export function LandPage() {
   }) {
     if (!saleData.client || selectedPiecesForSale.length === 0 || !selectedBatchForPieces) return
 
-    const reservedPieceIds: string[] = []
-    const createdSaleIds: string[] = []
+      const reservedPieceIds: string[] = []
+      const createdSaleIds: string[] = []
+
+      // Helper function to update pieces to Reserved status immediately
+      const reservePiecesImmediately = async (pieceIdsToReserve: string[], saleIdsForRollback: string[]) => {
+        console.log('Reserving pieces IMMEDIATELY:', { pieceIds: pieceIdsToReserve.length, saleIds: saleIdsForRollback.length })
+        const { error: reserveErr } = await supabase
+          .from('land_pieces')
+          .update({ status: 'Reserved', updated_at: new Date().toISOString() })
+          .in('id', pieceIdsToReserve)
+
+        if (reserveErr) {
+          console.error('Error reserving pieces:', reserveErr)
+          // Rollback: delete all created sales
+          if (saleIdsForRollback.length > 0) {
+            await supabase
+              .from('sales')
+              .delete()
+              .in('id', saleIdsForRollback)
+          }
+          throw new Error(`فشل حجز القطع: ${reserveErr.message || 'خطأ غير معروف'}`)
+        }
+        
+        reservedPieceIds.push(...pieceIdsToReserve)
+        // Dispatch event immediately to update UI
+        window.dispatchEvent(new CustomEvent('pieceStatusChanged'))
+        console.log('Pieces reserved successfully and UI updated')
+      }
 
     try {
       // Get payment offer if installment is selected
@@ -1452,6 +1580,8 @@ export function LandPage() {
                 .filter(id => !createdSaleIds.includes(id))
               createdSaleIds.push(...newIds)
               console.log('Sales created successfully after retry (using fallback):', createdSaleIds.length)
+              // Reserve pieces IMMEDIATELY after sales are confirmed
+              await reservePiecesImmediately(pieceIds, createdSaleIds)
               
               // Try to update sold_by after creation (if validSoldBy exists)
               if (validSoldBy && createdSaleIds.length > 0) {
@@ -1612,6 +1742,8 @@ export function LandPage() {
             // Use retry results
             createdSaleIds.push(...retryInsertedSales.map(s => s.id))
             console.log('Sales created successfully after retry (without sold_by):', createdSaleIds.length)
+            // Reserve pieces IMMEDIATELY after sales are confirmed
+            await reservePiecesImmediately(pieceIds, createdSaleIds)
             
             // Try to update sold_by after creation (if validSoldBy exists)
             if (validSoldBy && createdSaleIds.length > 0) {
@@ -1756,6 +1888,8 @@ export function LandPage() {
           if (!fallbackErr1 && fallbackSales1 && fallbackSales1.length > 0) {
             console.log('Found sales with fallback query:', fallbackSales1.length)
             createdSaleIds.push(...fallbackSales1.map(s => s.id))
+            // Reserve pieces IMMEDIATELY after sales are confirmed
+            await reservePiecesImmediately(pieceIds, createdSaleIds)
           } else {
             // Try simpler query - just by client and recent
             console.log('First fallback failed, trying simpler query...')
@@ -1775,6 +1909,8 @@ export function LandPage() {
               if (matchingSales.length > 0) {
                 console.log('Found sales with simpler query:', matchingSales.length)
                 createdSaleIds.push(...matchingSales.map(s => s.id))
+                // Reserve pieces IMMEDIATELY after sales are confirmed
+                await reservePiecesImmediately(pieceIds, createdSaleIds)
               } else {
                 throw new Error('فشل إنشاء المبيعات: لم يتم العثور على المبيعات المنشأة')
               }
@@ -1784,31 +1920,16 @@ export function LandPage() {
           }
         } else {
           createdSaleIds.push(...insertedSales.map(s => s.id))
+          // STEP 4: Reserve pieces IMMEDIATELY after sales are confirmed created
+          // This prevents pieces from showing as available even for a moment
+          await reservePiecesImmediately(pieceIds, createdSaleIds)
         }
       }
 
-      // STEP 4: Reserve all pieces in a single batch update (much faster)
-      // ONLY do this after ALL sales are successfully created
-      console.log('Reserving pieces:', { pieceIds, createdSaleIds: createdSaleIds.length })
-      
-        const { error: reserveErr } = await supabase
-          .from('land_pieces')
-          .update({ status: 'Reserved', updated_at: new Date().toISOString() })
-        .in('id', pieceIds)
-
-        if (reserveErr) {
-        console.error('Error reserving pieces:', reserveErr)
-        // Rollback: delete all created sales
-          if (createdSaleIds.length > 0) {
-            await supabase
-              .from('sales')
-              .delete()
-              .in('id', createdSaleIds)
-          }
-        throw new Error(`فشل حجز القطع: ${reserveErr.message || 'خطأ غير معروف'}`)
+      // If we haven't reserved pieces yet (fallback paths), do it now
+      if (reservedPieceIds.length === 0 && createdSaleIds.length > 0) {
+        await reservePiecesImmediately(pieceIds, createdSaleIds)
       }
-
-      reservedPieceIds.push(...pieceIds)
       console.log('Pieces reserved successfully, showing success message')
 
       // Clear piece selections FIRST (before closing dialogs)
@@ -2004,7 +2125,22 @@ export function LandPage() {
         {/* List Error */}
         {listError && (
           <div className="mb-4">
-            <Alert variant="error">{listError}</Alert>
+            <Alert variant="error">
+              <div className="flex items-center justify-between">
+                <span>{listError}</span>
+                <Button 
+                  onClick={() => {
+                    setListError(null)
+                    loadBatches()
+                  }} 
+                  size="sm" 
+                  variant="secondary"
+                  className="ml-2 text-xs"
+                >
+                  إعادة المحاولة
+                </Button>
+              </div>
+            </Alert>
           </div>
         )}
 
@@ -2060,7 +2196,7 @@ export function LandPage() {
             <div className="inline-block animate-spin rounded-full h-6 w-6 sm:h-8 sm:w-8 border-b-2 border-blue-600"></div>
             <p className="mt-2 text-xs sm:text-sm text-gray-600">جاري التحميل...</p>
           </div>
-        ) : batches.length === 0 ? (
+        ) : batches.length === 0 && !listError ? (
           <Card className="text-center py-8 sm:py-12">
             <CardContent>
               <p className="text-xs sm:text-sm text-gray-500 mb-3 sm:mb-4">لا توجد دفعات حتى الآن</p>
@@ -2088,33 +2224,6 @@ export function LandPage() {
                 onClick={() => openPiecesDialog(batch.id)}
               >
                 <div className="flex flex-col sm:flex-row h-full">
-                  {/* Image Thumbnail */}
-                  <div 
-                    className="w-full sm:w-32 lg:w-40 h-32 sm:h-auto sm:flex-shrink-0 bg-gradient-to-br from-blue-100 to-indigo-100 flex items-center justify-center overflow-hidden cursor-pointer hover:opacity-90 transition-opacity"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      if (batch.image_url) {
-                        setViewingImage({ url: batch.image_url, name: batch.name })
-                        setImageViewerOpen(true)
-                        setImageZoom(1)
-                        setImagePosition({ x: 0, y: 0 })
-                      }
-                    }}
-                  >
-                    {batch.image_url ? (
-                      <img 
-                        src={batch.image_url} 
-                        alt={batch.name}
-                        className="w-full h-full object-cover"
-                        onError={(e) => {
-                          (e.target as HTMLImageElement).style.display = 'none'
-                        }}
-                      />
-                    ) : (
-                      <div className="text-4xl sm:text-5xl">🏞️</div>
-                    )}
-                  </div>
-
                   {/* Content */}
                   <div className="flex-1 p-3 sm:p-4 flex flex-col">
                     {/* Header */}
@@ -2569,8 +2678,12 @@ export function LandPage() {
               }, 500) // Wait 500ms for database to commit
             }}
             onSellPieces={(pieces) => {
+              console.log('=== onSellPieces called ===')
+              console.log('Pieces to sell:', pieces)
+              console.log('Current selectedBatchForPieces:', selectedBatchForPieces)
               setSelectedPiecesForSale(pieces)
               setClientSelectionDialogOpen(true)
+              console.log('Client selection dialog opened')
             }}
           />
         )}
@@ -2578,17 +2691,45 @@ export function LandPage() {
         {/* Client Selection Dialog */}
         <ClientSelectionDialog
           open={clientSelectionDialogOpen}
-              onClose={() => {
-            setClientSelectionDialogOpen(false)
-            setSelectedClient(null)
-            setSelectedPiecesForSale([])
-              }}
-          onClientSelected={(client) => {
-            setSelectedClient(client)
-            setClientSelectionDialogOpen(false)
-            setSaleDialogOpen(true)
+          onClose={() => {
+            // Only clear state if we're NOT transitioning to sale dialog
+            if (!isTransitioningToSaleRef.current) {
+              setClientSelectionDialogOpen(false)
+              setSelectedClient(null)
+              setSelectedPiecesForSale([])
+            }
           }}
-            />
+          onClientSelected={(client) => {
+            console.log('=== Land.tsx onClientSelected CALLED ===')
+            console.log('Received client:', client)
+            console.log('Current state:', { 
+              selectedBatchForPieces: selectedBatchForPieces,
+              selectedPiecesForSale: selectedPiecesForSale,
+              saleDialogOpen: saleDialogOpen,
+              clientSelectionDialogOpen: clientSelectionDialogOpen
+            })
+            
+            // Set flag to prevent onClose from clearing state
+            isTransitioningToSaleRef.current = true
+            console.log('Set isTransitioningToSaleRef to true')
+            
+            // Set client and open sale dialog
+            console.log('Calling setSelectedClient...')
+            setSelectedClient(client)
+            console.log('Calling setSaleDialogOpen(true)...')
+            setSaleDialogOpen(true)
+            
+            console.log('State updates scheduled, setting timeout to close client dialog')
+            
+            // Close client dialog after a delay to ensure sale dialog renders
+            setTimeout(() => {
+              console.log('Timeout fired - closing client selection dialog')
+              setClientSelectionDialogOpen(false)
+              isTransitioningToSaleRef.current = false
+              console.log('Client selection dialog closed, transition flag reset')
+            }, 150)
+          }}
+        />
 
         {/* Multi Piece Sale Dialog */}
         {selectedBatchForPieces && selectedClient && (

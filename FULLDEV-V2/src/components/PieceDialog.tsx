@@ -397,11 +397,11 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
       size="xl"
     >
       <div className="space-y-3 sm:space-y-4 lg:space-y-6 flex flex-col h-full">
-        {/* Batch Image - Compact */}
+        {/* Batch Image - Full Width */}
         {batchImageUrl && (
-          <div className="flex justify-center mb-2">
+          <div className="mb-3 sm:mb-4">
             <div 
-              className={`w-24 h-24 sm:w-28 sm:h-28 rounded-lg overflow-hidden border-2 border-gray-200 shadow-sm bg-gradient-to-br from-blue-100 to-indigo-100 flex items-center justify-center ${onImageClick ? 'cursor-pointer hover:opacity-90 transition-opacity' : ''}`}
+              className={`w-full h-48 sm:h-56 lg:h-64 rounded-lg overflow-hidden border-2 border-gray-200 shadow-sm bg-gradient-to-br from-blue-100 to-indigo-100 flex items-center justify-center ${onImageClick ? 'cursor-pointer hover:opacity-90 transition-opacity' : ''}`}
               onClick={() => {
                 if (onImageClick && batchImageUrl) {
                   onImageClick(batchImageUrl, batchName)
