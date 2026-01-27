@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, type ReactNode } from 'react'
 import { Sidebar } from './Sidebar'
 import { IconButton } from './ui/icon-button'
+import { Button } from './ui/button'
 import { useAuth } from '@/contexts/AuthContext'
 import { supabase } from '@/lib/supabase'
 import { getNotifications, getUnreadCount, markAsRead, markAllAsRead, deleteNotification, formatTimeAgo, type Notification } from '@/utils/notifications'
@@ -32,11 +33,19 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
   const [notificationsOpen, setNotificationsOpen] = useState(false)
   const notificationRef = useRef<HTMLDivElement>(null)
   const [notifications, setNotifications] = useState<Notification[]>([])
+  const [displayedCount, setDisplayedCount] = useState(20) // How many notifications to display
   const [unreadCount, setUnreadCount] = useState(0)
   const [loadingNotifications, setLoadingNotifications] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [hasMore, setHasMore] = useState(true)
   const [newNotificationReceived, setNewNotificationReceived] = useState(false)
   const subscriptionRef = useRef<any>(null)
   const notificationIdsRef = useRef<Set<string>>(new Set())
+  const INITIAL_LIMIT = 20
+  const LOAD_MORE_LIMIT = 10
+  
+  // Computed: displayed notifications are a slice of all notifications
+  const displayedNotifications = notifications.slice(0, displayedCount)
 
   // Track page history
   useEffect(() => {
@@ -59,7 +68,7 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
 
     // Load initial notifications with debouncing
     let loadTimeout: NodeJS.Timeout | null = null
-    const loadNotifications = async (silent = false) => {
+    const loadNotifications = async (silent = false, reset = true) => {
       if (!userId || !mounted) return
 
       if (!silent) {
@@ -67,15 +76,34 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
       }
 
       try {
+        const offset = reset ? 0 : notifications.length
+        const limit = reset ? INITIAL_LIMIT : LOAD_MORE_LIMIT
+        
         const [notifs, count] = await Promise.all([
-          getNotifications(userId, 50),
+          getNotifications(userId, limit, offset),
           getUnreadCount(userId),
         ])
 
         if (mounted) {
           // Track existing notification IDs
           notificationIdsRef.current = new Set(notifs.map((n) => n.id))
-          setNotifications(notifs)
+          
+          if (reset) {
+            // Reset: replace all notifications
+            setNotifications(notifs)
+            setDisplayedCount(INITIAL_LIMIT)
+            setHasMore(notifs.length === INITIAL_LIMIT) // If we got full limit, there might be more
+          } else {
+            // Load more: append to existing (avoid duplicates)
+            setNotifications(prev => {
+              const existingIds = new Set(prev.map(n => n.id))
+              const newNotifs = notifs.filter(n => !existingIds.has(n.id))
+              return [...prev, ...newNotifs]
+            })
+            setDisplayedCount(prev => prev + notifs.length)
+            setHasMore(notifs.length === LOAD_MORE_LIMIT) // If we got full limit, there might be more
+          }
+          
           setUnreadCount(count)
         }
       } catch (error) {
@@ -83,12 +111,13 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
       } finally {
         if (mounted && !silent) {
           setLoadingNotifications(false)
+          setLoadingMore(false)
         }
       }
     }
 
-    // Initial load
-    loadNotifications()
+    // Initial load - only load first 20
+    loadNotifications(false, true)
 
     // Set up real-time subscription with proper error handling and reconnection
     const setupSubscription = () => {
@@ -124,6 +153,8 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
               if (exists) return prev
               return [newNotification, ...prev]
             })
+            // New notifications are automatically added to the top of the list
+            // displayedNotifications will show them if displayedCount allows
             setUnreadCount((prev) => prev + 1)
             
             // Show visual feedback
@@ -208,7 +239,7 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
     // Periodic refresh as backup (reduced frequency - every 60 seconds)
     const refreshInterval = setInterval(() => {
       if (mounted) {
-        loadNotifications(true) // Silent refresh
+        loadNotifications(true, true) // Silent refresh, reset to first 20
       }
     }, 60000)
 
@@ -243,9 +274,9 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
     // Optimistic update
     const notification = notifications.find((n) => n.id === notificationId)
     if (notification && !notification.read) {
-      setNotifications((prev) =>
-        prev.map((n) => (n.id === notificationId ? { ...n, read: true } : n))
-      )
+            setNotifications((prev) =>
+              prev.map((n) => (n.id === notificationId ? { ...n, read: true } : n))
+            )
       setUnreadCount((prev) => Math.max(0, prev - 1))
     }
 
@@ -277,11 +308,13 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
     if (!success) {
       // Revert on failure - reload from server
       const [notifs, count] = await Promise.all([
-        getNotifications(systemUser.id, 50),
+        getNotifications(systemUser.id, INITIAL_LIMIT, 0),
         getUnreadCount(systemUser.id),
       ])
       setNotifications(notifs)
+      setDisplayedCount(INITIAL_LIMIT)
       setUnreadCount(count)
+      setHasMore(notifs.length === INITIAL_LIMIT)
     }
   }
 
@@ -291,6 +324,10 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
     // Optimistic update
       const notification = notifications.find((n) => n.id === notificationId)
       setNotifications((prev) => prev.filter((n) => n.id !== notificationId))
+      // Adjust displayed count if needed
+      if (displayedCount > notifications.length - 1) {
+        setDisplayedCount(prev => Math.max(INITIAL_LIMIT, prev - 1))
+      }
       if (notification && !notification.read) {
         setUnreadCount((prev) => Math.max(0, prev - 1))
     }
@@ -300,13 +337,41 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
     if (!success) {
       // Revert on failure
       if (notification) {
-        setNotifications((prev) => [...prev, notification].sort((a, b) => 
+        const restored = [...notifications, notification].sort((a, b) => 
           new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-        ))
+        )
+        setNotifications(restored)
         if (!notification.read) {
           setUnreadCount((prev) => prev + 1)
         }
       }
+    }
+  }
+
+  const handleLoadMore = async () => {
+    if (!systemUser?.id || loadingMore || !hasMore) return
+    
+    setLoadingMore(true)
+    try {
+      // Load next batch of notifications
+      const offset = notifications.length
+      const notifs = await getNotifications(systemUser.id, LOAD_MORE_LIMIT, offset)
+      
+      if (notifs.length > 0) {
+        // Append new notifications (avoid duplicates)
+        const existingIds = new Set(notifications.map(n => n.id))
+        const newNotifs = notifs.filter(n => !existingIds.has(n.id))
+        
+        setNotifications(prev => [...prev, ...newNotifs])
+        setDisplayedCount(prev => prev + newNotifs.length)
+        setHasMore(notifs.length === LOAD_MORE_LIMIT) // If we got full limit, there might be more
+      } else {
+        setHasMore(false) // No more notifications
+      }
+    } catch (error) {
+      console.error('Error loading more notifications:', error)
+    } finally {
+      setLoadingMore(false)
     }
   }
 
@@ -325,6 +390,15 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
 
     setNotificationsOpen(false)
   }
+
+  // Reset displayed count when dialog opens - show only first 20
+  useEffect(() => {
+    if (notificationsOpen) {
+      // Reset to show only first 20 when dialog opens
+      setDisplayedCount(INITIAL_LIMIT)
+      setHasMore(notifications.length > INITIAL_LIMIT)
+    }
+  }, [notificationsOpen, notifications.length])
 
   // Close notifications when clicking outside
   useEffect(() => {
@@ -437,7 +511,7 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
                             <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
                             <p className="mt-4 text-sm text-gray-500">جاري التحميل...</p>
                           </div>
-                        ) : notifications.length === 0 ? (
+                        ) : displayedNotifications.length === 0 ? (
                           <div className="flex flex-col items-center justify-center h-full text-gray-500">
                             <svg className="w-20 h-20 mb-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
@@ -446,7 +520,7 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
                           </div>
                         ) : (
                           <div className="space-y-4">
-                            {notifications.map((notification) => (
+                            {displayedNotifications.map((notification) => (
                               <div
                                 key={notification.id}
                                 className={`p-4 sm:p-6 rounded-lg border-2 hover:shadow-md cursor-pointer transition-all ${
@@ -495,6 +569,30 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
                                 </div>
                               </div>
                             ))}
+                            
+                            {/* Load More Button */}
+                            {hasMore && (
+                              <div className="flex justify-center pt-4">
+                                <Button
+                                  onClick={handleLoadMore}
+                                  disabled={loadingMore}
+                                  variant="secondary"
+                                  className="w-full"
+                                >
+                                  {loadingMore ? (
+                                    <>
+                                      <svg className="animate-spin -ml-1 mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24">
+                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                      </svg>
+                                      جاري التحميل...
+                                    </>
+                                  ) : (
+                                    'عرض المزيد (10 إشعارات)'
+                                  )}
+                                </Button>
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>

@@ -217,14 +217,22 @@ export function ConfirmGroupSaleDialog({
           endDate = schedule.length > 0 ? schedule[schedule.length - 1].dueDate : null
         }
         
-        // Calculate number of months based on remaining amount divided by monthly payment
-        const calculatedMonths = calc.recalculatedMonthlyPayment > 0 
-          ? Math.ceil(totalRemainingForInstallments / calc.recalculatedMonthlyPayment)
-          : calc.recalculatedNumberOfMonths
+        // Recalculate monthly payment and number of months based on the correct remaining amount
+        // المبلغ المتبقي للأقساط = السعر الإجمالي - المتبقي من التسبقة بعد العربون
+        let finalMonthlyPayment = calc.recalculatedMonthlyPayment
+        let finalNumberOfMonths = calc.recalculatedNumberOfMonths
+        
+        if (firstSale.payment_offer.calc_mode === 'monthlyAmount' && finalMonthlyPayment > 0) {
+          // If monthly amount is specified, recalculate months from the correct remaining amount
+          finalNumberOfMonths = Math.ceil(totalRemainingForInstallments / finalMonthlyPayment)
+        } else if (firstSale.payment_offer.calc_mode === 'months' && finalNumberOfMonths > 0) {
+          // If months is specified, recalculate monthly payment from the correct remaining amount
+          finalMonthlyPayment = totalRemainingForInstallments / finalNumberOfMonths
+        }
         
         installmentDetails = {
-          numberOfMonths: calculatedMonths,
-          monthlyPayment: calc.recalculatedMonthlyPayment,
+          numberOfMonths: finalNumberOfMonths,
+          monthlyPayment: finalMonthlyPayment,
           startDate,
           endDate,
           totalRemaining: totalRemainingForInstallments,
@@ -282,9 +290,42 @@ export function ConfirmGroupSaleDialog({
 
   async function handleFinalConfirm() {
     if (sales.length === 0 || !calculations) return
+    
+    // Prevent multiple simultaneous confirmations
+    if (confirming) {
+      console.warn('Already confirming, ignoring duplicate request')
+      return
+    }
 
     setShowFinalConfirmDialog(false)
     setConfirming(true)
+    
+    // Early check: verify all sales are still pending before proceeding
+    try {
+      const saleIds = sales.map(s => s.id)
+      const { data: preCheckSales, error: preCheckError } = await supabase
+        .from('sales')
+        .select('id, status')
+        .in('id', saleIds)
+      
+      if (preCheckError || !preCheckSales) {
+        throw new Error('فشل التحقق من حالة المبيعات')
+      }
+      
+      const nonPendingSales = preCheckSales.filter(s => s.status !== 'pending')
+      if (nonPendingSales.length > 0) {
+        setConfirming(false)
+        const statuses = nonPendingSales.map(s => s.status).join(', ')
+        setErrorMessage(`لا يمكن تأكيد بعض المبيعات. الحالات: ${statuses}`)
+        setShowErrorDialog(true)
+        return
+      }
+    } catch (earlyError: any) {
+      setConfirming(false)
+      setErrorMessage(earlyError.message || 'فشل التحقق من المبيعات')
+      setShowErrorDialog(true)
+      return
+    }
 
     try {
       const firstSale = sales[0]
@@ -494,9 +535,21 @@ export function ConfirmGroupSaleDialog({
         }
       }
 
-      // Notify owners and current user about group sale confirmation
-      try {
-      const clientName = firstSale.client?.name || 'عميل غير معروف'
+      // Double-check sales status before creating notifications to prevent duplicates
+      // Verify at least one sale is actually completed
+      const { data: verifiedSales, error: verifyError } = await supabase
+        .from('sales')
+        .select('id, status')
+        .in('id', sales.map(s => s.id))
+        .eq('status', 'completed')
+
+      if (verifyError || !verifiedSales || verifiedSales.length === 0) {
+        console.warn('Could not verify sales status before notification, or no sales are completed. Skipping notifications.')
+      } else {
+        // At least one sale is confirmed as completed, proceed with notifications
+        // Notify owners and current user about group sale confirmation
+        try {
+        const clientName = firstSale.client?.name || 'عميل غير معروف'
         const confirmedByName = systemUser?.name || 'غير معروف'
         const confirmedByPlace = systemUser?.place || null
       const totalPrice = sales.reduce((sum, s) => sum + s.sale_price, 0)
@@ -607,9 +660,10 @@ export function ConfirmGroupSaleDialog({
             console.warn('Failed to notify current user about group sale confirmation')
           }
         }
-      } catch (notifError: any) {
-        // Don't fail the confirmation if notification fails
-        console.error('Error creating notifications (non-critical):', notifError)
+        } catch (notifError: any) {
+          // Don't fail the confirmation if notification fails
+          console.error('Error creating notifications (non-critical):', notifError)
+        }
       }
 
       setSuccessMessage(`تم تأكيد ${sales.length} بيع بنجاح!`)

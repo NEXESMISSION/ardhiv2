@@ -6,7 +6,6 @@ import { Input } from './ui/input'
 import { Label } from './ui/label'
 import { Alert } from './ui/alert'
 import { Card } from './ui/card'
-import { Badge } from './ui/badge'
 
 interface Client {
   id: string
@@ -26,9 +25,9 @@ interface ClientSelectionDialogProps {
 
 export function ClientSelectionDialog({ open, onClose, onClientSelected }: ClientSelectionDialogProps) {
   const [cin, setCin] = useState('')
-  const [searching, setSearching] = useState(false)
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [info, setInfo] = useState<string | null>(null)
   const [foundClient, setFoundClient] = useState<Client | null>(null)
   const [searchStatus, setSearchStatus] = useState<'idle' | 'searching' | 'found' | 'not-found'>('idle')
   
@@ -45,6 +44,7 @@ export function ClientSelectionDialog({ open, onClose, onClientSelected }: Clien
       setCin('')
       setFoundClient(null)
       setError(null)
+      setInfo(null)
       setSearchStatus('idle')
       setName('')
       setPhone('')
@@ -76,7 +76,6 @@ export function ClientSelectionDialog({ open, onClose, onClientSelected }: Clien
       return
     }
 
-    setSearching(true)
     setError(null)
     setSearchStatus('searching')
     setFoundClient(null)
@@ -109,29 +108,97 @@ export function ClientSelectionDialog({ open, onClose, onClientSelected }: Clien
     } catch (e: any) {
       setError(e.message || 'فشل البحث عن العميل')
       setSearchStatus('not-found')
-    } finally {
-      setSearching(false)
+    }
+  }
+
+  // Helper function to check if error is a duplicate error
+  function isDuplicateError(error: any): boolean {
+    if (!error) return false
+    
+    const errorMessage = typeof error === 'string' 
+      ? error 
+      : error?.message || error?.details || error?.hint || JSON.stringify(error)
+    
+    return (
+      errorMessage.includes('duplicate key value violates unique constraint') ||
+      errorMessage.includes('clients_id_number_key') ||
+      errorMessage.includes('unique constraint') ||
+      errorMessage.includes('duplicate') ||
+      error?.code === '23505' // PostgreSQL unique violation error code
+    )
+  }
+
+  // Helper function to fetch existing client by CIN
+  async function fetchExistingClient(cinValue: string): Promise<Client | null> {
+    try {
+      const { data, error: fetchError } = await supabase
+        .from('clients')
+        .select('id, id_number, name, phone, email, address, type')
+        .eq('id_number', cinValue.trim())
+        .maybeSingle()
+
+      if (fetchError) {
+        console.error('Error fetching existing client:', fetchError)
+        return null
+      }
+
+      return data
+    } catch (e) {
+      console.error('Exception fetching existing client:', e)
+      return null
     }
   }
 
   async function handleCreateClient() {
+    console.log('=== handleCreateClient START ===')
+    console.log('Form values:', { cin, name, phone, email, address, clientType })
+    
     if (!name.trim()) {
+      console.log('ERROR: Name is required')
       setError('اسم العميل مطلوب')
       return
     }
     if (!phone.trim()) {
+      console.log('ERROR: Phone is required')
       setError('رقم الهاتف مطلوب')
       return
     }
     if (!cin.trim()) {
+      console.log('ERROR: CIN is required')
       setError('رقم الهوية مطلوب')
       return
     }
 
+    console.log('Validation passed, setting creating=true')
     setCreating(true)
     setError(null)
+    setInfo(null)
 
     try {
+      // First, check if client already exists before attempting insert
+      console.log('Checking if client exists with CIN:', cin.trim())
+      const existingClient = await fetchExistingClient(cin.trim())
+      console.log('Existing client check result:', existingClient)
+      
+      if (existingClient) {
+        // Client already exists, use it
+        console.log('Client already exists, using it:', existingClient)
+        setFoundClient(existingClient)
+        setSearchStatus('found')
+        setInfo('تم العثور على عميل موجود بنفس رقم الهوية - سيتم استخدامه')
+        setCreating(false)
+        // CRITICAL: Use setTimeout to call callback in a clean execution context
+        console.log('Calling onClientSelected via setTimeout for existing client')
+        setTimeout(() => {
+          console.log('setTimeout fired - calling onClientSelected with:', existingClient)
+          onClientSelected(existingClient)
+          console.log('onClientSelected completed')
+        }, 0)
+        return
+      }
+
+      // Client doesn't exist, try to create
+      console.log('Client does not exist, creating new client...')
       const { data, error: err } = await supabase
         .from('clients')
         .insert({
@@ -145,31 +212,121 @@ export function ClientSelectionDialog({ open, onClose, onClientSelected }: Clien
         .select()
         .single()
 
-      if (err) throw err
+      console.log('Supabase insert result:', { data, error: err })
+
+      if (err) {
+        console.log('Supabase error:', err)
+        // Check if it's a duplicate error
+        if (isDuplicateError(err)) {
+          console.log('Duplicate error detected, fetching existing client')
+          // Duplicate detected, fetch and use existing client
+          const existing = await fetchExistingClient(cin.trim())
+          console.log('Fetched existing client:', existing)
+          if (existing) {
+            setFoundClient(existing)
+            setSearchStatus('found')
+            setInfo('تم العثور على عميل موجود بنفس رقم الهوية - سيتم استخدامه')
+            setCreating(false)
+            // CRITICAL: Use setTimeout to call callback in a clean execution context
+            console.log('Calling onClientSelected via setTimeout for duplicate-found client')
+            setTimeout(() => {
+              console.log('setTimeout fired - calling onClientSelected with:', existing)
+              onClientSelected(existing)
+              console.log('onClientSelected completed')
+            }, 0)
+            return
+          } else {
+            // Couldn't fetch existing client, show error
+            console.log('Could not fetch existing client after duplicate error')
+            setError('حدث خطأ أثناء البحث عن العميل الموجود')
+            setCreating(false)
+            return
+          }
+        }
+        // Other error, throw it
+        console.log('Non-duplicate error, throwing')
+        throw err
+      }
 
       if (data) {
+        console.log('Client created successfully:', data)
         setFoundClient(data)
         setSearchStatus('found')
-        // Immediately use the created client
-        onClientSelected(data)
+        setCreating(false)
+        // CRITICAL: Use setTimeout to call callback in a clean execution context
+        console.log('Calling onClientSelected via setTimeout for new client')
+        setTimeout(() => {
+          console.log('setTimeout fired - calling onClientSelected with:', data)
+          onClientSelected(data)
+          console.log('onClientSelected completed')
+        }, 0)
+        return
+      } else {
+        // No data returned from insert, but no error either
+        // This can happen due to RLS policies - try to fetch the client we just created
+        console.log('No data returned from insert, fetching the created client...')
+        const createdClient = await fetchExistingClient(cin.trim())
+        console.log('Fetched created client:', createdClient)
+        if (createdClient) {
+          setFoundClient(createdClient)
+          setSearchStatus('found')
+          setCreating(false)
+          console.log('Calling onClientSelected via setTimeout for fetched-after-insert client')
+          setTimeout(() => {
+            console.log('setTimeout fired - calling onClientSelected with:', createdClient)
+            onClientSelected(createdClient)
+            console.log('onClientSelected completed')
+          }, 0)
+          return
+        } else {
+          console.log('Could not fetch client after insert')
+          setError('تم إنشاء العميل لكن حدث خطأ في استرجاع البيانات')
+          setCreating(false)
+          return
+        }
       }
     } catch (e: any) {
+      console.log('Caught exception:', e)
+      // Final fallback: check if it's a duplicate error
+      if (isDuplicateError(e)) {
+        console.log('Exception is duplicate error, trying to fetch existing')
+        // Try to fetch existing client one more time
+        const existing = await fetchExistingClient(cin.trim())
+        console.log('Fetched existing client:', existing)
+        if (existing) {
+          setFoundClient(existing)
+          setSearchStatus('found')
+          setInfo('تم العثور على عميل موجود بنفس رقم الهوية - سيتم استخدامه')
+          setCreating(false)
+          // CRITICAL: Use setTimeout to call callback in a clean execution context
+          console.log('Calling onClientSelected via setTimeout for exception-found client')
+          setTimeout(() => {
+            console.log('setTimeout fired - calling onClientSelected with:', existing)
+            onClientSelected(existing)
+            console.log('onClientSelected completed')
+          }, 0)
+          return
+        }
+      }
+      
+      // If we get here, it's a real error
+      console.log('Setting error:', e.message || 'فشل إنشاء العميل')
       setError(e.message || 'فشل إنشاء العميل')
     } finally {
+      console.log('=== handleCreateClient FINALLY - setting creating=false ===')
       setCreating(false)
     }
   }
 
-  function handleSelectClient() {
-    if (foundClient) {
-      onClientSelected(foundClient)
-      // Don't call onClose here - let the parent handle closing
-    }
-  }
-
   function handleUseClient() {
+    console.log('=== handleUseClient called ===')
+    console.log('foundClient:', foundClient)
     if (foundClient) {
+      console.log('Calling onClientSelected directly (sync) with:', foundClient)
       onClientSelected(foundClient)
+      console.log('onClientSelected completed')
+    } else {
+      console.log('No foundClient to use!')
     }
   }
 
@@ -202,6 +359,9 @@ export function ClientSelectionDialog({ open, onClose, onClientSelected }: Clien
       <div className="space-y-2 sm:space-y-3 lg:space-y-4">
         {error && (
           <Alert variant="error" className="text-xs sm:text-sm">{error}</Alert>
+        )}
+        {info && (
+          <Alert variant="info" className="text-xs sm:text-sm">{info}</Alert>
         )}
 
         {/* Status Messages */}

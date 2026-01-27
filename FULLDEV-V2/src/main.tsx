@@ -1,42 +1,17 @@
-// CRITICAL: Unregister service workers IMMEDIATELY before anything else runs
-// This prevents old cached code from running
-(function() {
-  if ('serviceWorker' in navigator) {
-    // Check if we're on production (not localhost)
-    const isProduction = window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
-    
-    if (isProduction) {
-      // Unregister all service workers immediately
-      navigator.serviceWorker.getRegistrations().then((registrations) => {
-        if (registrations.length > 0) {
-          console.log('Found', registrations.length, 'service worker(s) - unregistering...')
-          Promise.all(registrations.map(r => r.unregister())).then(() => {
-            console.log('All service workers unregistered')
-            // Clear all caches
-            if ('caches' in window) {
-              caches.keys().then((cacheNames) => {
-                Promise.all(cacheNames.map(name => caches.delete(name))).then(() => {
-                  console.log('All caches cleared - reloading...')
-                  // Force reload to get fresh code
-                  setTimeout(() => window.location.reload(), 100)
-                })
-              })
-            } else {
-              setTimeout(() => window.location.reload(), 100)
-            }
-          })
-        }
-      })
-      
-      // Also try to unregister by scope
-      navigator.serviceWorker.getRegistration().then((registration) => {
-        if (registration) {
-          registration.unregister().catch(() => {})
-        }
-      })
-    }
-  }
-})()
+// PWA Service Worker Registration
+// The vite-plugin-pwa handles service worker registration automatically
+// This code ensures proper PWA functionality
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    // Service worker is registered automatically by vite-plugin-pwa
+    // This is just for logging and ensuring PWA is ready
+    navigator.serviceWorker.ready.then((registration) => {
+      console.log('PWA Service Worker ready:', registration.scope)
+    }).catch((error) => {
+      console.log('PWA Service Worker registration failed:', error)
+    })
+  })
+}
 
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'

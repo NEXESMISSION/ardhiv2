@@ -105,12 +105,40 @@ export function InstallmentDetailsDialog({
   const [showErrorDialog, setShowErrorDialog] = useState(false)
   const [successMessage, setSuccessMessage] = useState('')
   const [errorMessage, setErrorMessage] = useState('')
+  const [loadedPaymentOffer, setLoadedPaymentOffer] = useState<Sale['payment_offer'] | null>(null)
 
   useEffect(() => {
     if (open && sale) {
       loadInstallments()
+      // Load payment offer if missing but payment_offer_id exists
+      if (sale.payment_method === 'installment' && sale.payment_offer_id && !sale.payment_offer) {
+        loadPaymentOffer(sale.payment_offer_id)
+      } else {
+        setLoadedPaymentOffer(null)
+      }
     }
   }, [open, sale])
+
+  async function loadPaymentOffer(offerId: string) {
+    if (!offerId) return
+    try {
+      const { data, error } = await supabase
+        .from('payment_offers')
+        .select('id, name, price_per_m2_installment, advance_mode, advance_value, calc_mode, monthly_amount, months')
+        .eq('id', offerId)
+        .single()
+
+      if (error) {
+        console.error('Error loading payment offer:', error)
+        setLoadedPaymentOffer(null)
+      } else {
+        setLoadedPaymentOffer(data)
+      }
+    } catch (e: any) {
+      console.error('Exception loading payment offer:', e)
+      setLoadedPaymentOffer(null)
+    }
+  }
 
   async function loadInstallments() {
     setLoading(true)
@@ -147,17 +175,20 @@ export function InstallmentDetailsDialog({
 
     let totalPaid = sale.deposit_amount || 0
 
+    // Use payment_offer from sale or loadedPaymentOffer
+    const paymentOffer = sale.payment_offer || loadedPaymentOffer
+
     // If payment_offer exists, calculate advance payment
-    if (sale.payment_offer) {
+    if (paymentOffer) {
       const calc = calculateInstallmentWithDeposit(
         sale.piece.surface_m2,
         {
-          price_per_m2_installment: sale.payment_offer.price_per_m2_installment,
-          advance_mode: sale.payment_offer.advance_mode,
-          advance_value: sale.payment_offer.advance_value,
-          calc_mode: sale.payment_offer.calc_mode,
-          monthly_amount: sale.payment_offer.monthly_amount,
-          months: sale.payment_offer.months,
+          price_per_m2_installment: paymentOffer.price_per_m2_installment,
+          advance_mode: paymentOffer.advance_mode,
+          advance_value: paymentOffer.advance_value,
+          calc_mode: paymentOffer.calc_mode,
+          monthly_amount: paymentOffer.monthly_amount,
+          months: paymentOffer.months,
         },
         sale.deposit_amount || 0
       )
@@ -167,7 +198,7 @@ export function InstallmentDetailsDialog({
 
     // Add paid installments
     const paidInstallments = installments.filter((i) => i.status === 'paid')
-    totalPaid += paidInstallments.reduce((sum, i) => sum + i.amount_paid, 0)
+      totalPaid += paidInstallments.reduce((sum, i) => sum + i.amount_paid, 0)
 
     const remaining = sale.sale_price - totalPaid
     const progress = sale.sale_price > 0 ? (totalPaid / sale.sale_price) * 100 : 0
@@ -179,7 +210,7 @@ export function InstallmentDetailsDialog({
       paidCount: paidInstallments.length,
       totalCount: installments.length,
     }
-  }, [sale, installments])
+  }, [sale, installments, loadedPaymentOffer])
 
   function getDeadlineStatus() {
     if (!sale.deadline_date) return null
@@ -340,6 +371,43 @@ export function InstallmentDetailsDialog({
                 <span className="text-gray-600">القطعة:</span>
                 <span className="font-medium">{sale.piece?.piece_number || '-'}</span>
               </div>
+              <div className="flex items-center justify-between">
+                <span className="text-gray-600">طريقة الدفع:</span>
+                <span className="font-medium">
+                  {sale.payment_method === 'full' ? 'نقدي' :
+                   sale.payment_method === 'installment' ? 'تقسيط' :
+                   sale.payment_method === 'promise' ? 'وعد بالبيع' :
+                   sale.payment_method || 'غير محدد'}
+                </span>
+              </div>
+              {(sale.payment_offer || loadedPaymentOffer) && (
+                <div className="mt-2 pt-2 border-t border-blue-300">
+                  <p className="font-semibold text-blue-900 mb-1">عرض التقسيط:</p>
+                  <div className="space-y-0.5 text-xs text-gray-700">
+                    {(() => {
+                      const offer = sale.payment_offer || loadedPaymentOffer
+                      if (!offer) return null
+                      return (
+                        <>
+                          <p>• الاسم: {offer.name || 'بدون اسم'}</p>
+                          <p>• السعر لكل م²: {offer.price_per_m2_installment.toLocaleString()} دت</p>
+                          <p>• التسبقة: {
+                            offer.advance_mode === 'fixed' 
+                              ? `${offer.advance_value.toLocaleString()} دت`
+                              : `${offer.advance_value}%`
+                          }</p>
+                          {offer.calc_mode === 'monthlyAmount' && offer.monthly_amount && (
+                            <p>• المبلغ الشهري: {offer.monthly_amount.toLocaleString()} دت</p>
+                          )}
+                          {offer.calc_mode === 'months' && offer.months && (
+                            <p>• عدد الأشهر: {offer.months} شهر</p>
+                          )}
+                        </>
+                      )
+                    })()}
+                  </div>
+                </div>
+              )}
             </div>
           </Card>
 

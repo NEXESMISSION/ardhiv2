@@ -88,6 +88,8 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
   const [promisePaymentAmount, setPromisePaymentAmount] = useState('')
   const [showAppointmentDialog, setShowAppointmentDialog] = useState(false)
   const [appointmentDate, setAppointmentDate] = useState('')
+  const [loadedPaymentOffer, setLoadedPaymentOffer] = useState<Sale['payment_offer'] | null>(null)
+  const [loadingPaymentOffer, setLoadingPaymentOffer] = useState(false)
 
   useEffect(() => {
     if (open && sale) {
@@ -97,7 +99,15 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
       setPaymentMethod('cash')
       setContractWriterId('')
       setNotes('')
-      setCompanyFee('')
+      // Only set company fee from sale if it's a promise sale with existing partial payment
+      // Otherwise, always start with empty to let user type it fresh
+      if (sale.payment_method === 'promise' && sale.partial_payment_amount && sale.company_fee_amount) {
+        // For promise sales with existing partial payment, show existing fee (read-only)
+        setCompanyFee('')
+      } else {
+        // For all other cases, start empty - user must type it
+        setCompanyFee('')
+      }
       setAppointmentDate('')
       
       // For promise sales, auto-fill with remaining amount if partial payment was made
@@ -117,6 +127,25 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
         })
       }
       
+      // Always try to load payment offer if payment_offer_id exists but payment_offer is missing
+      // This ensures we have the offer data even if it wasn't included in the initial query
+      if (sale.payment_method === 'installment') {
+        if (sale.payment_offer_id) {
+          if (!sale.payment_offer) {
+            // Payment offer not loaded, fetch it immediately
+            loadPaymentOffer(sale.payment_offer_id)
+          } else {
+            // Payment offer already loaded, clear any previously loaded offer
+            setLoadedPaymentOffer(null)
+          }
+        } else {
+          // No payment_offer_id - this is an error for installment sales
+          setLoadedPaymentOffer(null)
+        }
+      } else {
+        setLoadedPaymentOffer(null)
+      }
+      
       setError(null)
       setShowFinalConfirmDialog(false)
       setShowSuccessDialog(false)
@@ -125,6 +154,37 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
       loadContractWriters()
     }
   }, [open, sale])
+
+  async function loadPaymentOffer(offerId: string) {
+    if (!offerId) {
+      setLoadedPaymentOffer(null)
+      return
+    }
+    
+    setLoadingPaymentOffer(true)
+    try {
+      const { data, error } = await supabase
+        .from('payment_offers')
+        .select('id, name, price_per_m2_installment, advance_mode, advance_value, calc_mode, monthly_amount, months')
+        .eq('id', offerId)
+        .single()
+
+      if (error) {
+        console.error('Error loading payment offer:', error)
+        setLoadedPaymentOffer(null)
+      } else {
+        setLoadedPaymentOffer(data)
+        if (process.env.NODE_ENV === 'development') {
+          console.log('Loaded payment offer:', data)
+        }
+      }
+    } catch (e: any) {
+      console.error('Exception loading payment offer:', e)
+      setLoadedPaymentOffer(null)
+    } finally {
+      setLoadingPaymentOffer(false)
+    }
+  }
 
   async function loadContractWriters() {
     setLoadingWriters(true)
@@ -152,17 +212,20 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
     let remainingForInstallments = 0
     let installmentDetails = null
 
-    if (sale.payment_method === 'installment' && sale.payment_offer && sale.piece) {
+    // Use loaded payment offer if sale doesn't have one
+    const paymentOffer = sale.payment_offer || loadedPaymentOffer
+
+    if (sale.payment_method === 'installment' && paymentOffer && sale.piece) {
       // Use centralized calculator
       const calc = calculateInstallmentWithDeposit(
         sale.piece.surface_m2,
         {
-          price_per_m2_installment: sale.payment_offer.price_per_m2_installment,
-          advance_mode: sale.payment_offer.advance_mode,
-          advance_value: sale.payment_offer.advance_value,
-          calc_mode: sale.payment_offer.calc_mode,
-          monthly_amount: sale.payment_offer.monthly_amount,
-          months: sale.payment_offer.months,
+          price_per_m2_installment: paymentOffer.price_per_m2_installment,
+          advance_mode: paymentOffer.advance_mode,
+          advance_value: paymentOffer.advance_value,
+          calc_mode: paymentOffer.calc_mode,
+          monthly_amount: paymentOffer.monthly_amount,
+          months: paymentOffer.months,
         },
         depositAmount
       )
@@ -180,12 +243,12 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
         const schedule = generateInstallmentSchedule(
           sale.piece.surface_m2,
           {
-            price_per_m2_installment: sale.payment_offer.price_per_m2_installment,
-            advance_mode: sale.payment_offer.advance_mode,
-            advance_value: sale.payment_offer.advance_value,
-            calc_mode: sale.payment_offer.calc_mode,
-            monthly_amount: sale.payment_offer.monthly_amount,
-            months: sale.payment_offer.months,
+            price_per_m2_installment: paymentOffer.price_per_m2_installment,
+            advance_mode: paymentOffer.advance_mode,
+            advance_value: paymentOffer.advance_value,
+            calc_mode: paymentOffer.calc_mode,
+            monthly_amount: paymentOffer.monthly_amount,
+            months: paymentOffer.months,
           },
           new Date(installmentStartDate),
           depositAmount
@@ -196,14 +259,22 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
         endDate = schedule.length > 0 ? schedule[schedule.length - 1].dueDate : null
       }
 
-      // Calculate number of months based on remaining amount divided by monthly payment
-      const calculatedMonths = calc.recalculatedMonthlyPayment > 0 
-        ? Math.ceil(remainingForInstallments / calc.recalculatedMonthlyPayment)
-        : calc.recalculatedNumberOfMonths
+      // Recalculate monthly payment and number of months based on the correct remaining amount
+      // المبلغ المتبقي للأقساط = السعر الإجمالي - المتبقي من التسبقة بعد العربون
+      let finalMonthlyPayment = calc.recalculatedMonthlyPayment
+      let finalNumberOfMonths = calc.recalculatedNumberOfMonths
+      
+      if (paymentOffer.calc_mode === 'monthlyAmount' && finalMonthlyPayment > 0) {
+        // If monthly amount is specified, recalculate months from the correct remaining amount
+        finalNumberOfMonths = Math.ceil(remainingForInstallments / finalMonthlyPayment)
+      } else if (paymentOffer.calc_mode === 'months' && finalNumberOfMonths > 0) {
+        // If months is specified, recalculate monthly payment from the correct remaining amount
+        finalMonthlyPayment = remainingForInstallments / finalNumberOfMonths
+      }
 
       installmentDetails = {
-        numberOfMonths: calculatedMonths,
-        monthlyPayment: calc.recalculatedMonthlyPayment,
+        numberOfMonths: finalNumberOfMonths,
+        monthlyPayment: finalMonthlyPayment,
         startDate,
         endDate,
         totalRemaining: totalRemainingFromSchedule > 0 ? totalRemainingFromSchedule : remainingForInstallments,
@@ -228,7 +299,7 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
       installmentDetails,
       totalPrice: sale.sale_price,
     }
-  }, [sale, installmentStartDate, sale?.partial_payment_amount, sale?.remaining_payment_amount])
+  }, [sale, installmentStartDate, sale?.partial_payment_amount, sale?.remaining_payment_amount, loadedPaymentOffer])
 
   function handleConfirmClick() {
     if (!sale) return
@@ -255,14 +326,51 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
       }
     }
 
+    // Reset company fee when opening final confirm dialog to ensure it starts fresh
+    // Only preserve if it's a promise sale with existing partial payment (read-only case)
+    if (!(sale.payment_method === 'promise' && sale.partial_payment_amount && sale.company_fee_amount)) {
+      setCompanyFee('')
+    }
+    
     setShowFinalConfirmDialog(true)
   }
 
   async function handleFinalConfirm() {
     if (!sale) return
+    
+    // Prevent multiple simultaneous confirmations
+    if (confirming) {
+      console.warn('Already confirming, ignoring duplicate request')
+      return
+    }
 
     setShowFinalConfirmDialog(false)
     setConfirming(true)
+    
+    // Early check: verify sale is still pending before proceeding
+    try {
+      const { data: preCheckSale, error: preCheckError } = await supabase
+        .from('sales')
+        .select('id, status')
+        .eq('id', sale.id)
+        .single()
+      
+      if (preCheckError || !preCheckSale) {
+        throw new Error('فشل التحقق من حالة البيع')
+      }
+      
+      if (preCheckSale.status !== 'pending') {
+        setConfirming(false)
+        setErrorMessage(`لا يمكن تأكيد البيع. الحالة الحالية: ${preCheckSale.status}`)
+        setShowErrorDialog(true)
+        return
+      }
+    } catch (earlyError: any) {
+      setConfirming(false)
+      setErrorMessage(earlyError.message || 'فشل التحقق من البيع')
+      setShowErrorDialog(true)
+      return
+    }
 
     try {
       // For promise sales, check if this is completion or partial payment
@@ -519,16 +627,17 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
       if (pieceErr) throw pieceErr
 
       // Create installment schedule if installment sale
-      if (sale.payment_method === 'installment' && sale.payment_offer && sale.piece && installmentStartDate) {
+      const paymentOffer = sale.payment_offer || loadedPaymentOffer
+      if (sale.payment_method === 'installment' && paymentOffer && sale.piece && installmentStartDate) {
         const schedule = generateInstallmentSchedule(
           sale.piece.surface_m2,
           {
-            price_per_m2_installment: sale.payment_offer.price_per_m2_installment,
-            advance_mode: sale.payment_offer.advance_mode,
-            advance_value: sale.payment_offer.advance_value,
-            calc_mode: sale.payment_offer.calc_mode,
-            monthly_amount: sale.payment_offer.monthly_amount,
-            months: sale.payment_offer.months,
+            price_per_m2_installment: paymentOffer.price_per_m2_installment,
+            advance_mode: paymentOffer.advance_mode,
+            advance_value: paymentOffer.advance_value,
+            calc_mode: paymentOffer.calc_mode,
+            monthly_amount: paymentOffer.monthly_amount,
+            months: paymentOffer.months,
           },
           new Date(installmentStartDate),
           sale.deposit_amount || 0
@@ -551,9 +660,24 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
         if (installmentsErr) throw installmentsErr
       }
 
-      // Notify owners and current user about sale confirmation
-      try {
-      const clientName = sale.client?.name || 'عميل غير معروف'
+      // Double-check sale status before creating notifications to prevent duplicates
+      // This ensures we don't create notifications if the sale was already confirmed
+      const { data: finalSaleCheck, error: finalCheckError } = await supabase
+        .from('sales')
+        .select('id, status')
+        .eq('id', sale.id)
+        .single()
+
+      if (finalCheckError || !finalSaleCheck) {
+        console.warn('Could not verify sale status before notification, skipping notifications')
+      } else if (finalSaleCheck.status !== 'completed') {
+        console.warn(`Sale status is ${finalSaleCheck.status}, not 'completed'. Skipping notifications to prevent duplicates.`)
+        // Don't create notifications if sale is not actually completed
+      } else {
+        // Sale is confirmed as completed, proceed with notifications
+        // Notify owners and current user about sale confirmation
+        try {
+        const clientName = sale.client?.name || 'عميل غير معروف'
       const pieceNumber = sale.piece?.piece_number || 'غير معروف'
       const batchName = sale.batch?.name || 'غير معروف'
         const confirmedByName = systemUser?.name || 'غير معروف'
@@ -682,9 +806,10 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
             console.warn('Failed to notify current user about sale confirmation')
           }
         }
-      } catch (notifError: any) {
-        // Don't fail the confirmation if notification fails
-        console.error('Error creating notifications (non-critical):', notifError)
+        } catch (notifError: any) {
+          // Don't fail the confirmation if notification fails
+          console.error('Error creating notifications (non-critical):', notifError)
+        }
       }
 
       setSuccessMessage('تم تأكيد البيع بنجاح!')
@@ -815,12 +940,12 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
                             calculateInstallmentWithDeposit(
                               sale.piece!.surface_m2,
                               {
-                                price_per_m2_installment: sale.payment_offer.price_per_m2_installment,
-                                advance_mode: sale.payment_offer.advance_mode,
-                                advance_value: sale.payment_offer.advance_value,
-                                calc_mode: sale.payment_offer.calc_mode,
-                                monthly_amount: sale.payment_offer.monthly_amount,
-                                months: sale.payment_offer.months,
+                                price_per_m2_installment: (sale.payment_offer || loadedPaymentOffer)!.price_per_m2_installment,
+                                advance_mode: (sale.payment_offer || loadedPaymentOffer)!.advance_mode,
+                                advance_value: (sale.payment_offer || loadedPaymentOffer)!.advance_value,
+                                calc_mode: (sale.payment_offer || loadedPaymentOffer)!.calc_mode,
+                                monthly_amount: (sale.payment_offer || loadedPaymentOffer)!.monthly_amount,
+                                months: (sale.payment_offer || loadedPaymentOffer)!.months,
                               },
                               calculations.depositAmount
                             ).advanceAmount
@@ -900,20 +1025,36 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
                         (السعر الإجمالي - التسبقة بعد خصم العربون)
                       </div>
                     </div>
-                    {sale.payment_offer.name && (
+                    {(sale.payment_offer || loadedPaymentOffer)?.name && (
                       <div className="border-t border-blue-300 pt-2 mt-2">
                         <div className="text-xs text-gray-600">
-                          <span className="font-medium">اسم العرض:</span> {sale.payment_offer.name}
+                          <span className="font-medium">اسم العرض:</span> {(sale.payment_offer || loadedPaymentOffer)!.name}
                         </div>
                       </div>
                     )}
                   </>
                 ) : (
-                  <div className="border-t border-red-200 pt-2 mt-2">
-                    <div className="text-xs text-red-600 bg-red-50 p-2 rounded">
-                      ⚠️ تحذير: لم يتم العثور على عرض التقسيط. يرجى التحقق من البيانات.
-                    </div>
-                  </div>
+                  <>
+                    {loadingPaymentOffer ? (
+                      <div className="border-t border-yellow-200 pt-2 mt-2">
+                        <div className="text-xs text-yellow-600 bg-yellow-50 p-2 rounded">
+                          جاري تحميل عرض التقسيط...
+                        </div>
+                      </div>
+                    ) : sale.payment_offer_id ? (
+                      <div className="border-t border-yellow-200 pt-2 mt-2">
+                        <div className="text-xs text-yellow-600 bg-yellow-50 p-2 rounded">
+                          ⚠️ تحذير: لم يتم العثور على عرض التقسيط (ID: {sale.payment_offer_id}). يرجى التحقق من البيانات.
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="border-t border-red-200 pt-2 mt-2">
+                        <div className="text-xs text-red-600 bg-red-50 p-2 rounded">
+                          ⚠️ تحذير: لم يتم تحديد عرض التقسيط لهذا البيع.
+                        </div>
+                      </div>
+                    )}
+                  </>
                 )}
               </>
             )}
@@ -1115,15 +1256,23 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
               )}
             </Label>
           <Input
+            key={`company-fee-${sale.id}-${showFinalConfirmDialog}`}
             type="number"
             min="0"
             step="0.01"
-            value={companyFee}
-            onChange={(e) => setCompanyFee(e.target.value)}
+            value={companyFee || ''}
+            onChange={(e) => {
+              const val = e.target.value
+              // Only allow numbers and decimal point
+              if (val === '' || /^\d*\.?\d*$/.test(val)) {
+                setCompanyFee(val)
+              }
+            }}
             placeholder="0.00"
             size="sm"
             className="text-xs sm:text-sm"
-              disabled={isPromise && sale.partial_payment_amount && sale.company_fee_amount ? true : false}
+            disabled={isPromise && sale.partial_payment_amount && sale.company_fee_amount ? true : false}
+            autoComplete="off"
           />
             {isPromise && sale.partial_payment_amount && sale.company_fee_amount && (
               <p className="text-xs text-gray-500">

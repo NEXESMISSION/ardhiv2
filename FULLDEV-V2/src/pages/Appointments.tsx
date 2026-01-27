@@ -28,12 +28,25 @@ interface Appointment {
   sale?: {
     id: string
     sale_price: number
+    deposit_amount: number | null
+    payment_method: 'full' | 'installment' | 'promise' | null
+    payment_offer_id: string | null
     piece?: {
       piece_number: string
       surface_m2: number
     }
     batch?: {
       name: string
+    }
+    payment_offer?: {
+      id: string
+      name: string | null
+      price_per_m2_installment: number
+      advance_mode: 'fixed' | 'percent'
+      advance_value: number
+      calc_mode: 'monthlyAmount' | 'months'
+      monthly_amount: number | null
+      months: number | null
     }
   }
   client?: {
@@ -114,6 +127,19 @@ export function AppointmentsPage() {
           sales:sale_id (
             id,
             sale_price,
+            deposit_amount,
+            payment_method,
+            payment_offer_id,
+            payment_offers:payment_offer_id (
+              id,
+              name,
+              price_per_m2_installment,
+              advance_mode,
+              advance_value,
+              calc_mode,
+              monthly_amount,
+              months
+            ),
             land_pieces:land_piece_id (
               piece_number,
               surface_m2
@@ -140,13 +166,22 @@ export function AppointmentsPage() {
         const client = Array.isArray(apt.clients) ? apt.clients[0] : apt.clients
         const piece = sale?.land_pieces ? (Array.isArray(sale.land_pieces) ? sale.land_pieces[0] : sale.land_pieces) : null
         const batch = sale?.land_batches ? (Array.isArray(sale.land_batches) ? sale.land_batches[0] : sale.land_batches) : null
+        const payment_offer = sale?.payment_offers ? (Array.isArray(sale.payment_offers) ? sale.payment_offers[0] : sale.payment_offers) : null
+
+        // Infer payment_method from payment_offer_id if payment_method is null
+        let inferredPaymentMethod = sale?.payment_method
+        if (!inferredPaymentMethod && (sale?.payment_offer_id || payment_offer)) {
+          inferredPaymentMethod = 'installment'
+        }
 
         return {
           ...apt,
           sale: sale ? {
             ...sale,
+            payment_method: inferredPaymentMethod || sale.payment_method,
             piece,
-            batch
+            batch,
+            payment_offer
           } : null,
           client
         }
@@ -890,6 +925,41 @@ export function AppointmentsPage() {
                   <p><span className="font-medium text-gray-700">القطعة:</span> {selectedAppointment.sale.batch?.name || '-'} - {selectedAppointment.sale.piece?.piece_number || '-'}</p>
                   <p><span className="font-medium text-gray-700">المساحة:</span> {selectedAppointment.sale.piece?.surface_m2.toLocaleString() || '-'} م²</p>
                   <p><span className="font-medium text-gray-700">سعر البيع:</span> {selectedAppointment.sale.sale_price.toLocaleString()} دت</p>
+                  {selectedAppointment.sale.deposit_amount && (
+                    <p><span className="font-medium text-gray-700">العربون:</span> {selectedAppointment.sale.deposit_amount.toLocaleString()} دت</p>
+                  )}
+                  <p><span className="font-medium text-gray-700">طريقة الدفع:</span> {
+                    (() => {
+                      const method = selectedAppointment.sale.payment_method
+                      if (method === 'full') return 'نقدي'
+                      if (method === 'installment') return 'تقسيط'
+                      if (method === 'promise') return 'وعد بالبيع'
+                      // Infer from payment_offer_id if method is null
+                      if (!method && selectedAppointment.sale.payment_offer_id) return 'تقسيط'
+                      if (!method && selectedAppointment.sale.payment_offer) return 'تقسيط'
+                      return method || 'غير محدد'
+                    })()
+                  }</p>
+                  {selectedAppointment.sale.payment_offer && (
+                    <div className="mt-2 pt-2 border-t border-gray-200">
+                      <p className="font-medium text-gray-700 mb-1">عرض التقسيط:</p>
+                      <div className="text-xs sm:text-sm space-y-1 text-gray-600">
+                        <p>• الاسم: {selectedAppointment.sale.payment_offer.name || 'بدون اسم'}</p>
+                        <p>• السعر لكل م²: {selectedAppointment.sale.payment_offer.price_per_m2_installment.toLocaleString()} دت</p>
+                        <p>• التسبقة: {
+                          selectedAppointment.sale.payment_offer.advance_mode === 'fixed' 
+                            ? `${selectedAppointment.sale.payment_offer.advance_value.toLocaleString()} دت`
+                            : `${selectedAppointment.sale.payment_offer.advance_value}%`
+                        }</p>
+                        {selectedAppointment.sale.payment_offer.calc_mode === 'monthlyAmount' && selectedAppointment.sale.payment_offer.monthly_amount && (
+                          <p>• المبلغ الشهري: {selectedAppointment.sale.payment_offer.monthly_amount.toLocaleString()} دت</p>
+                        )}
+                        {selectedAppointment.sale.payment_offer.calc_mode === 'months' && selectedAppointment.sale.payment_offer.months && (
+                          <p>• عدد الأشهر: {selectedAppointment.sale.payment_offer.months} شهر</p>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </>
               )}
               {selectedAppointment.notes && (

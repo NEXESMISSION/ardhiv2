@@ -147,14 +147,30 @@ export function MultiPieceSaleDialog({
         deposit
       )
       
+      // Calculate remaining for installments correctly:
+      // المبلغ المتبقي للأقساط = السعر الإجمالي - المتبقي من التسبقة بعد العربون
+      const remainingForInstallments = totalPrice - calc.advanceAfterDeposit
+      
+      // Recalculate number of months based on the correct remaining amount
+      let finalMonthlyPayment = calc.recalculatedMonthlyPayment
+      let finalNumberOfMonths = calc.recalculatedNumberOfMonths
+      
+      // If monthly payment is specified, recalculate months from the correct remaining amount
+      if (selectedOffer.calc_mode === 'monthlyAmount' && finalMonthlyPayment > 0) {
+        finalNumberOfMonths = Math.ceil(remainingForInstallments / finalMonthlyPayment)
+      } else if (selectedOffer.calc_mode === 'months' && finalNumberOfMonths > 0) {
+        // If months is specified, recalculate monthly payment from the correct remaining amount
+        finalMonthlyPayment = remainingForInstallments / finalNumberOfMonths
+      }
+      
       installmentDetails = {
         basePrice: calc.basePrice,
         advanceAmount: calc.advanceAmount,
         advanceAfterDeposit: calc.advanceAfterDeposit,
-        remainingAmount: calc.remainingForInstallments,
-        monthlyPayment: calc.recalculatedMonthlyPayment,
-        numberOfMonths: calc.recalculatedNumberOfMonths,
-        remaining: calc.remainingForInstallments,
+        remainingAmount: remainingForInstallments, // Use corrected calculation
+        monthlyPayment: finalMonthlyPayment,
+        numberOfMonths: finalNumberOfMonths,
+        remaining: remainingForInstallments,
       }
     }
 
