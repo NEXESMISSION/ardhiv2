@@ -9,10 +9,10 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['vite.svg'],
+      includeAssets: ['icon.png'],
       manifest: {
-        name: 'FullDev Land Management System',
-        short_name: 'FullDev',
+        name: 'الادارة',
+        short_name: 'الادارة',
         description: 'نظام إدارة الأراضي والعقارات',
         theme_color: '#3b82f6',
         background_color: '#ffffff',
@@ -22,10 +22,22 @@ export default defineConfig({
         start_url: '/',
         icons: [
           {
-            src: '/vite.svg',
-            sizes: 'any',
-            type: 'image/svg+xml',
+            src: '/icon.png',
+            sizes: '512x512',
+            type: 'image/png',
             purpose: 'any maskable'
+          },
+          {
+            src: '/icon.png',
+            sizes: '192x192',
+            type: 'image/png',
+            purpose: 'any'
+          },
+          {
+            src: '/icon.png',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'any'
           }
         ]
       },

@@ -790,16 +790,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function signOut() {
     try {
       setLoading(true)
-      const { error } = await supabase.auth.signOut()
-      if (error) {
-        console.error('Error signing out:', error)
+      
+      // Check if there's an active session before attempting to sign out
+      const { data: { session } } = await supabase.auth.getSession()
+      
+      if (session) {
+        // Only attempt sign out if there's an active session
+        // Use local scope to avoid 403 errors with global scope
+        const { error } = await supabase.auth.signOut({ scope: 'local' })
+        if (error) {
+          // Log error but don't throw - we'll clear state anyway
+          console.warn('Error signing out (non-critical):', error.message)
+        }
       }
+      
+      // Always clear local state regardless of signOut result
       setUser(null)
       setSystemUser(null)
+      systemUserRef.current = null
+      initialSessionLoadedRef.current = false
+      
       // Clear any cached data
       window.location.hash = ''
-    } catch (error) {
-      console.error('Error during sign out:', error)
+    } catch (error: any) {
+      // Handle errors gracefully - clear state even if signOut fails
+      console.warn('Error during sign out (non-critical):', error?.message || error)
+      setUser(null)
+      setSystemUser(null)
+      systemUserRef.current = null
+      initialSessionLoadedRef.current = false
     } finally {
       setLoading(false)
     }

@@ -303,13 +303,6 @@ export function LoginPage() {
               )}
             </Button>
           </form>
-
-          {/* Footer Info */}
-          <div className="mt-6 pt-6 border-t border-gray-200">
-            <p className="text-xs text-center text-gray-500">
-              نظام آمن ومحمي - جميع الحقوق محفوظة
-            </p>
-          </div>
         </div>
       </Card>
     </div>
