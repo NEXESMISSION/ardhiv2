@@ -210,8 +210,15 @@ export function EditSaleDialog({ open, onClose, sale, onSave }: EditSaleDialogPr
 
     setSaving(true)
     try {
+      // For installment sales, ensure we use the correct price from the offer
+      let finalPrice = price
+      if (paymentMethod === 'installment' && installmentPreview && installmentPreview.basePrice > 0) {
+        // Use the installment price (calculated from price_per_m2_installment)
+        finalPrice = installmentPreview.basePrice
+      }
+
       const updateData: any = {
-        sale_price: price,
+        sale_price: finalPrice,
         deposit_amount: deposit,
         payment_method: paymentMethod,
         payment_offer_id: paymentMethod === 'installment' ? paymentOfferId : null,
@@ -273,6 +280,18 @@ export function EditSaleDialog({ open, onClose, sale, onSave }: EditSaleDialogPr
       setSaving(false)
     }
   }
+
+  // Auto-update sale_price when installment offer is selected
+  useEffect(() => {
+    if (paymentMethod === 'installment' && installmentPreview && installmentPreview.basePrice > 0) {
+      // Update sale_price to reflect the installment price (calculated from price_per_m2_installment)
+      setSalePrice(installmentPreview.basePrice.toFixed(2))
+    } else if (paymentMethod === 'full' && sale.piece && sale.batch?.price_per_m2_cash) {
+      // For full payment, use cash price
+      const cashPrice = sale.piece.surface_m2 * sale.batch.price_per_m2_cash
+      setSalePrice(cashPrice.toFixed(2))
+    }
+  }, [paymentMethod, paymentOfferId, installmentPreview, sale.piece, sale.batch])
 
   // Auto-calculate remaining for promise sales - LIVE UPDATE
   useEffect(() => {

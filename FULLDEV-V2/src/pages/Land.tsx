@@ -1333,13 +1333,13 @@ export function LandPage() {
       // First, calculate all prices
       const { calculatePiecePrice } = await import('@/utils/priceCalculator')
       const pieceCalculations = selectedPiecesForSale.map((piece) => {
-        // Use installment price if available, otherwise use batch price
-        const pricePerM2 = installmentPricePerM2 ?? selectedBatchForPieces.pricePerM2
-        
+        // For installment sales, pass installmentPricePerM2 separately so calculatePiecePrice can use it
+        // For other sales, use batch price
         const calc = calculatePiecePrice({
           surfaceM2: piece.surface_m2,
-          batchPricePerM2: pricePerM2,
+          batchPricePerM2: selectedBatchForPieces.pricePerM2,
           pieceDirectPrice: piece.direct_full_payment_price,
+          installmentPricePerM2: installmentPricePerM2, // Pass installment price separately
           depositAmount: 0,
         })
         return { piece, calc }

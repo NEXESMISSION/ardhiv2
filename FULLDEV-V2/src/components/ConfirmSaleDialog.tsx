@@ -215,9 +215,13 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
     // Use loaded payment offer if sale doesn't have one
     const paymentOffer = sale.payment_offer || loadedPaymentOffer
 
+    // Calculate total price: use installment base price for installment sales, otherwise use sale_price
+    let totalPrice = sale.sale_price
+    let calc: ReturnType<typeof calculateInstallmentWithDeposit> | null = null
+
     if (sale.payment_method === 'installment' && paymentOffer && sale.piece) {
-      // Use centralized calculator
-      const calc = calculateInstallmentWithDeposit(
+      // Use centralized calculator - calculate once and reuse
+      calc = calculateInstallmentWithDeposit(
         sale.piece.surface_m2,
         {
           price_per_m2_installment: paymentOffer.price_per_m2_installment,
@@ -230,9 +234,11 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
         depositAmount
       )
 
+      // Use installment price (calculated from price_per_m2_installment) instead of cash price
+      totalPrice = calc.basePrice
       confirmationAmount = calc.advanceAfterDeposit
-      // المتبقي للتقسيط = السعر الفعلي للبيع - (التسبقة بعد خصم العربون)
-      remainingForInstallments = sale.sale_price - calc.advanceAfterDeposit
+      // المتبقي للتقسيط = السعر الإجمالي (من سعر التقسيط) - (التسبقة بعد خصم العربون)
+      remainingForInstallments = calc.remainingForInstallments
 
       // Always create installment details, even without start date
       let startDate = null
@@ -297,7 +303,7 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
       confirmationAmount,
       remainingForInstallments,
       installmentDetails,
-      totalPrice: sale.sale_price,
+      totalPrice,
     }
   }, [sale, installmentStartDate, sale?.partial_payment_amount, sale?.remaining_payment_amount, loadedPaymentOffer])
 
@@ -692,7 +698,7 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
           notificationTitle = 'تم تأكيد البيع - دفع كامل'
           notificationMessage = `تم تأكيد بيع القطعة ${pieceNumber} للعميل ${clientName} من دفعة ${batchName}\n\n`
           notificationMessage += `📋 تفاصيل البيع:\n`
-          notificationMessage += `• السعر الإجمالي: ${formatPrice(sale.sale_price)} DT\n`
+          notificationMessage += `• السعر الإجمالي: ${formatPrice(calculations.totalPrice)} DT\n`
           notificationMessage += `• العربون (مدفوع مسبقاً): ${formatPrice(sale.deposit_amount || 0)} DT\n`
           notificationMessage += `• المبلغ المستلم عند التأكيد: ${formatPrice(calculations.confirmationAmount)} DT\n\n`
           notificationMessage += `✅ تم التأكيد بواسطة: ${confirmedByName}${confirmedByPlace ? ` (${confirmedByPlace})` : ''}`
@@ -701,7 +707,7 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
           notificationTitle = 'تم تأكيد البيع - تقسيط'
           notificationMessage = `تم تأكيد بيع القطعة ${pieceNumber} للعميل ${clientName} من دفعة ${batchName}\n\n`
           notificationMessage += `📋 تفاصيل البيع:\n`
-          notificationMessage += `• السعر الإجمالي: ${formatPrice(sale.sale_price)} DT\n`
+          notificationMessage += `• السعر الإجمالي: ${formatPrice(calculations.totalPrice)} DT\n`
           notificationMessage += `• العربون (مدفوع مسبقاً): ${formatPrice(sale.deposit_amount || 0)} DT\n`
           notificationMessage += `• التسبقة (المستلم عند التأكيد): ${formatPrice(calculations.confirmationAmount)} DT\n`
           
@@ -730,7 +736,7 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
             notificationTitle = 'تم استلام دفعة - وعد بالبيع'
             notificationMessage = `تم استلام دفعة على بيع القطعة ${pieceNumber} للعميل ${clientName} من دفعة ${batchName}\n\n`
             notificationMessage += `📋 تفاصيل الدفعة:\n`
-            notificationMessage += `• السعر الإجمالي: ${formatPrice(sale.sale_price)} DT\n`
+            notificationMessage += `• السعر الإجمالي: ${formatPrice(calculations.totalPrice)} DT\n`
             notificationMessage += `• العربون (مدفوع مسبقاً): ${formatPrice(sale.deposit_amount || 0)} DT\n`
             notificationMessage += `• المبلغ المستلم الآن: ${formatPrice(paymentAmount)} DT\n`
             notificationMessage += `• المبلغ المتبقي: ${formatPrice(newRemaining)} DT\n`
@@ -739,7 +745,7 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
             notificationTitle = 'تم تأكيد البيع - وعد بالبيع'
             notificationMessage = `تم تأكيد بيع القطعة ${pieceNumber} للعميل ${clientName} من دفعة ${batchName}\n\n`
             notificationMessage += `📋 تفاصيل البيع:\n`
-            notificationMessage += `• السعر الإجمالي: ${formatPrice(sale.sale_price)} DT\n`
+            notificationMessage += `• السعر الإجمالي: ${formatPrice(calculations.totalPrice)} DT\n`
             notificationMessage += `• العربون (مدفوع مسبقاً): ${formatPrice(sale.deposit_amount || 0)} DT\n`
             notificationMessage += `• المبلغ المستلم عند التأكيد: ${formatPrice(calculations.confirmationAmount)} DT\n`
           }
@@ -749,7 +755,7 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
           // Fallback for unknown payment method
           notificationTitle = 'تم تأكيد البيع'
           notificationMessage = `تم تأكيد بيع القطعة ${pieceNumber} للعميل ${clientName} من دفعة ${batchName}\n\n`
-          notificationMessage += `• السعر: ${formatPrice(sale.sale_price)} DT\n`
+          notificationMessage += `• السعر: ${formatPrice(calculations.totalPrice)} DT\n`
           notificationMessage += `\n✅ تم التأكيد بواسطة: ${confirmedByName}${confirmedByPlace ? ` (${confirmedByPlace})` : ''}`
         }
       
