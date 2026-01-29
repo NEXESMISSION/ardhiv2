@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, type ReactNode } from 'react'
 import { Sidebar } from './Sidebar'
 import { IconButton } from './ui/icon-button'
 import { Button } from './ui/button'
+import { HardRefreshWrapper } from './HardRefreshWrapper'
 import { useAuth } from '@/contexts/AuthContext'
 import { supabase } from '@/lib/supabase'
 import { getNotifications, getUnreadCount, markAsRead, markAllAsRead, deleteNotification, formatTimeAgo, type Notification } from '@/utils/notifications'
@@ -426,8 +427,9 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
         onToggle={() => setSidebarOpen(!sidebarOpen)}
       />
 
-      {/* Main Content */}
-      <div className="flex-1 lg:mr-0 transition-all duration-300 min-w-0">
+      {/* Main Content - pull-down or long-press to hard refresh (PWA & browser) */}
+      <HardRefreshWrapper className="flex-1 lg:mr-0 transition-all duration-300 min-w-0 flex flex-col min-h-screen">
+      <div className="flex-1 flex flex-col min-h-0">
         {/* Top Bar with Menu Toggle and Back Button */}
         <div className="sticky top-0 z-20 bg-white border-b border-gray-200 shadow-sm">
           <div className="px-2 sm:px-3 lg:px-4 py-1.5 sm:py-2 lg:py-3 flex items-center justify-between gap-2 sm:gap-3 lg:gap-4">
@@ -621,8 +623,9 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
         </div>
 
         {/* Page Content */}
-        <main className="w-full">{children}</main>
+        <main className="w-full flex-1 min-h-0">{children}</main>
       </div>
+      </HardRefreshWrapper>
     </div>
   )
 }
