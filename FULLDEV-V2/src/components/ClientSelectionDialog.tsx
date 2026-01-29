@@ -310,8 +310,13 @@ export function ClientSelectionDialog({ open, onClose, onClientSelected }: Clien
       }
       
       // If we get here, it's a real error
-      console.log('Setting error:', e.message || 'فشل إنشاء العميل')
-      setError(e.message || 'فشل إنشاء العميل')
+      const msg = e.message || ''
+      const isRlsError = /row-level security|violates.*policy/i.test(msg)
+      const displayMessage = isRlsError
+        ? 'لا يوجد صلاحية لإنشاء عميل. يرجى طلب إضافة صلاحية "الأراضي" أو "العملاء" من المسؤول.'
+        : (msg || 'فشل إنشاء العميل')
+      console.log('Setting error:', displayMessage)
+      setError(displayMessage)
     } finally {
       console.log('=== handleCreateClient FINALLY - setting creating=false ===')
       setCreating(false)
