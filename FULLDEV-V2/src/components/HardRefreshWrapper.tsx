@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback, type ReactNode } from 'react'
+import { useRef, useState, useEffect, useCallback, type ReactNode } from 'react'
 
 const PULL_THRESHOLD = 55
 
