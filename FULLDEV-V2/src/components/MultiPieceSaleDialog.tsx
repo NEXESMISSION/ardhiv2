@@ -54,6 +54,8 @@ interface MultiPieceSaleDialogProps {
     saleType: 'full' | 'installment' | 'promise'
     paymentOfferId?: string
     notes?: string
+    /** When set, use this total price instead of price per m² (temporary fixed price) */
+    fixedTotalPrice?: number
   }) => Promise<void>
 }
 
@@ -77,6 +79,9 @@ export function MultiPieceSaleDialog({
   const [paymentOffers, setPaymentOffers] = useState<PaymentOffer[]>([])
   const [loadingOffers, setLoadingOffers] = useState(false)
   const [notes, setNotes] = useState('')
+  /** Temporary option: use a hard-coded total price instead of price per m² */
+  const [useFixedPrice, setUseFixedPrice] = useState(false)
+  const [fixedTotalPriceInput, setFixedTotalPriceInput] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [showFinalConfirmDialog, setShowFinalConfirmDialog] = useState(false)
@@ -85,7 +90,7 @@ export function MultiPieceSaleDialog({
   const [successMessage, setSuccessMessage] = useState('')
   const [errorMessage, setErrorMessage] = useState('')
 
-  // Calculate totals - recalculate when offer changes
+  // Calculate totals - recalculate when offer changes (or when fixed price is used)
   const calculations = useMemo(() => {
     let totalSurface = 0
     let totalPrice = 0
@@ -98,8 +103,11 @@ export function MultiPieceSaleDialog({
       totalSurface += piece.surface_m2 || 0
     })
 
-    // If installment, calculate using installment calculator for total surface
-    if (saleType === 'installment' && selectedOffer && totalSurface > 0) {
+    // Temporary fixed price: use hard-coded total instead of price per m²
+    const fixedPrice = useFixedPrice ? parseFloat(fixedTotalPriceInput) : NaN
+    if (useFixedPrice && !isNaN(fixedPrice) && fixedPrice > 0) {
+      totalPrice = fixedPrice
+    } else if (saleType === 'installment' && selectedOffer && totalSurface > 0) {
       // Calculate for total surface (more accurate than summing per piece)
       const totalInstallmentCalc = calculateInstallmentWithDeposit(
         totalSurface,
@@ -132,42 +140,68 @@ export function MultiPieceSaleDialog({
     
     // Calculate installment details if installment is selected
     let installmentDetails = null
-    if (saleType === 'installment' && selectedOffer && totalSurface > 0) {
-      // Use centralized calculator
-      const calc = calculateInstallmentWithDeposit(
-        totalSurface,
-        {
-          price_per_m2_installment: selectedOffer.price_per_m2_installment,
-          advance_mode: selectedOffer.advance_mode,
-          advance_value: selectedOffer.advance_value,
-          calc_mode: selectedOffer.calc_mode,
-          monthly_amount: selectedOffer.monthly_amount,
-          months: selectedOffer.months,
-        },
-        deposit
-      )
-      
-      // Calculate remaining for installments correctly:
-      // المبلغ المتبقي للأقساط = السعر الإجمالي - المتبقي من التسبقة بعد العربون
-      const remainingForInstallments = totalPrice - calc.advanceAfterDeposit
-      
-      // Recalculate number of months based on the correct remaining amount
-      let finalMonthlyPayment = calc.recalculatedMonthlyPayment
-      let finalNumberOfMonths = calc.recalculatedNumberOfMonths
-      
-      // If monthly payment is specified, recalculate months from the correct remaining amount
-      if (selectedOffer.calc_mode === 'monthlyAmount' && finalMonthlyPayment > 0) {
-        finalNumberOfMonths = Math.ceil(remainingForInstallments / finalMonthlyPayment)
-      } else if (selectedOffer.calc_mode === 'months' && finalNumberOfMonths > 0) {
-        // If months is specified, recalculate monthly payment from the correct remaining amount
-        finalMonthlyPayment = remainingForInstallments / finalNumberOfMonths
+    if (saleType === 'installment' && selectedOffer && (totalSurface > 0 || (useFixedPrice && totalPrice > 0))) {
+      let advanceAmount: number
+      let advanceAfterDeposit: number
+      let remainingForInstallments: number
+      let finalMonthlyPayment: number
+      let finalNumberOfMonths: number
+
+      if (useFixedPrice && totalPrice > 0) {
+        // Fixed price: compute advance and remaining from our total (not from price_per_m² × surface)
+        advanceAmount = selectedOffer.advance_mode === 'fixed'
+          ? selectedOffer.advance_value
+          : (totalPrice * selectedOffer.advance_value) / 100
+        advanceAfterDeposit = Math.max(0, advanceAmount - deposit)
+        // المبلغ المتبقي للأقساط = السعر الإجمالي - max(التسبقة، العربون)
+        remainingForInstallments = totalPrice - Math.max(advanceAmount, deposit)
+      } else {
+        // Normal: use calculator with surface × price_per_m²
+        const calc = calculateInstallmentWithDeposit(
+          totalSurface,
+          {
+            price_per_m2_installment: selectedOffer.price_per_m2_installment,
+            advance_mode: selectedOffer.advance_mode,
+            advance_value: selectedOffer.advance_value,
+            calc_mode: selectedOffer.calc_mode,
+            monthly_amount: selectedOffer.monthly_amount,
+            months: selectedOffer.months,
+          },
+          deposit
+        )
+        advanceAmount = calc.advanceAmount
+        advanceAfterDeposit = calc.advanceAfterDeposit
+        remainingForInstallments = calc.remainingForInstallments
+        finalMonthlyPayment = calc.recalculatedMonthlyPayment
+        finalNumberOfMonths = calc.recalculatedNumberOfMonths
+      }
+
+      // When fixed price, compute monthly/number of months from remainingForInstallments and offer
+      if (useFixedPrice && totalPrice > 0) {
+        if (selectedOffer.calc_mode === 'months' && (selectedOffer.months || 0) > 0) {
+          finalNumberOfMonths = selectedOffer.months!
+          finalMonthlyPayment = finalNumberOfMonths > 0 ? remainingForInstallments / finalNumberOfMonths : 0
+        } else if (selectedOffer.calc_mode === 'monthlyAmount' && (selectedOffer.monthly_amount || 0) > 0) {
+          finalMonthlyPayment = selectedOffer.monthly_amount!
+          finalNumberOfMonths = Math.ceil(remainingForInstallments / finalMonthlyPayment)
+        } else {
+          finalMonthlyPayment = 0
+          finalNumberOfMonths = 0
+        }
+      } else {
+        // Non-fixed: adjust monthly/months from remaining (original logic)
+        if (selectedOffer.calc_mode === 'monthlyAmount' && finalMonthlyPayment > 0) {
+          finalNumberOfMonths = Math.ceil(remainingForInstallments / finalMonthlyPayment)
+        } else if (selectedOffer.calc_mode === 'months' && finalNumberOfMonths > 0) {
+          finalMonthlyPayment = remainingForInstallments / finalNumberOfMonths
+        }
       }
       
       installmentDetails = {
-        basePrice: calc.basePrice,
-        advanceAmount: calc.advanceAmount,
-        advanceAfterDeposit: calc.advanceAfterDeposit,
-        remainingAmount: remainingForInstallments, // Use corrected calculation
+        basePrice: totalPrice,
+        advanceAmount,
+        advanceAfterDeposit,
+        remainingAmount: remainingForInstallments,
         monthlyPayment: finalMonthlyPayment,
         numberOfMonths: finalNumberOfMonths,
         remaining: remainingForInstallments,
@@ -185,7 +219,7 @@ export function MultiPieceSaleDialog({
       remaining,
       installmentDetails,
     }
-  }, [pieces, batchPricePerM2, depositAmount, saleType, selectedOfferId, paymentOffers])
+  }, [pieces, batchPricePerM2, depositAmount, saleType, selectedOfferId, paymentOffers, useFixedPrice, fixedTotalPriceInput])
 
   // Reset form when dialog opens
   useEffect(() => {
@@ -194,6 +228,8 @@ export function MultiPieceSaleDialog({
       setNotes('')
       setSaleType('full')
       setSelectedOfferId('')
+      setUseFixedPrice(false)
+      setFixedTotalPriceInput('')
       setError(null)
       
       // Set default deadline to today
@@ -265,6 +301,11 @@ export function MultiPieceSaleDialog({
       return
     }
 
+    if (useFixedPrice && (calculations.totalPrice <= 0 || isNaN(calculations.totalPrice))) {
+      setError('يرجى إدخال سعر إجمالي صحيح عند استخدام السعر الثابت')
+      return
+    }
+
     if (saleType === 'installment' && !selectedOfferId) {
       setError('يرجى اختيار عرض التقسيط')
       return
@@ -286,6 +327,7 @@ export function MultiPieceSaleDialog({
         saleType,
         paymentOfferId: saleType === 'installment' && selectedOfferId ? selectedOfferId : undefined,
         notes: notes.trim() || undefined,
+        fixedTotalPrice: useFixedPrice && calculations.totalPrice > 0 ? calculations.totalPrice : undefined,
       })
       setSuccessMessage(`تم إنشاء ${pieces.length} بيع بنجاح!`)
       setShowSuccessDialog(true)
@@ -343,20 +385,23 @@ export function MultiPieceSaleDialog({
           <h3 className="text-xs sm:text-sm lg:text-base font-semibold text-gray-900 mb-2 sm:mb-3">القطع المختارة ({pieces.length})</h3>
           <div className="space-y-1.5 sm:space-y-2 max-h-48 sm:max-h-56 lg:max-h-64 overflow-y-auto scrollbar-thin">
             {pieces.map((piece, idx) => {
-              // Get selected offer for this render
-              const selectedOffer = paymentOffers.find((o) => o.id === selectedOfferId)
-              
-              // Use installment price if installment is selected and offer is available
-              const pricePerM2 = saleType === 'installment' && selectedOffer
-                ? selectedOffer.price_per_m2_installment
-                : batchPricePerM2
-              
-              const calc = calculatePiecePrice({
-                surfaceM2: piece.surface_m2,
-                batchPricePerM2: pricePerM2,
-                pieceDirectPrice: piece.direct_full_payment_price,
-                depositAmount: 0,
-              })
+              // When fixed price is used, show proportional price per piece
+              const totalSurface = pieces.reduce((s, p) => s + (p.surface_m2 || 0), 0)
+              const piecePrice = useFixedPrice && calculations.totalPrice > 0 && totalSurface > 0
+                ? (piece.surface_m2 / totalSurface) * calculations.totalPrice
+                : (() => {
+                    const selectedOffer = paymentOffers.find((o) => o.id === selectedOfferId)
+                    const pricePerM2 = saleType === 'installment' && selectedOffer
+                      ? selectedOffer.price_per_m2_installment
+                      : batchPricePerM2
+                    const calc = calculatePiecePrice({
+                      surfaceM2: piece.surface_m2,
+                      batchPricePerM2: pricePerM2,
+                      pieceDirectPrice: piece.direct_full_payment_price,
+                      depositAmount: 0,
+                    })
+                    return calc.totalPrice
+                  })()
               return (
                 <Card key={piece.id} className="p-2 sm:p-2.5 lg:p-3">
                   <div className="flex items-center justify-between gap-2">
@@ -366,7 +411,7 @@ export function MultiPieceSaleDialog({
                         <span className="text-xs sm:text-sm font-medium truncate">القطعة {piece.piece_number}</span>
                       </div>
                       <div className="text-xs sm:text-sm text-gray-600 mt-0.5 sm:mt-1">
-                        المساحة: {piece.surface_m2.toLocaleString()} م² · السعر: {formatPrice(calc.totalPrice)} DT
+                        المساحة: {piece.surface_m2.toLocaleString()} م² · السعر: {formatPrice(piecePrice)} DT
                       </div>
                     </div>
                   </div>
@@ -375,6 +420,42 @@ export function MultiPieceSaleDialog({
             })}
           </div>
         </div>
+
+        {/* Temporary: fixed price option (hard-coded total instead of price per m²) */}
+        <Card className="p-2 sm:p-3 bg-amber-50 border-amber-200 border">
+          <div className="flex items-start gap-2">
+            <input
+              type="checkbox"
+              id="useFixedPrice"
+              checked={useFixedPrice}
+              onChange={(e) => setUseFixedPrice(e.target.checked)}
+              className="mt-1 w-4 h-4 rounded border-gray-300 text-amber-600 focus:ring-amber-500"
+            />
+            <div className="flex-1 space-y-1.5">
+              <Label htmlFor="useFixedPrice" className="text-xs sm:text-sm font-medium text-amber-900 cursor-pointer">
+                استخدام سعر ثابت (مؤقت)
+              </Label>
+              <p className="text-xs text-amber-800">
+                استخدم سعراً إجمالياً محدداً بدلاً من السعر لكل م² (نقدي أو تقسيط).
+              </p>
+              {useFixedPrice && (
+                <div className="pt-1">
+                  <Label className="text-xs sm:text-sm">السعر الإجمالي (د.ت) *</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={fixedTotalPriceInput}
+                    onChange={(e) => setFixedTotalPriceInput(e.target.value)}
+                    placeholder="0.00"
+                    size="sm"
+                    className="mt-1 text-xs sm:text-sm w-full max-w-[12rem]"
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+        </Card>
 
         {/* Form Fields */}
         <div className="space-y-2 sm:space-y-3 lg:space-y-4">

@@ -210,12 +210,8 @@ export function EditSaleDialog({ open, onClose, sale, onSave }: EditSaleDialogPr
 
     setSaving(true)
     try {
-      // For installment sales, ensure we use the correct price from the offer
-      let finalPrice = price
-      if (paymentMethod === 'installment' && installmentPreview && installmentPreview.basePrice > 0) {
-        // Use the installment price (calculated from price_per_m2_installment)
-        finalPrice = installmentPreview.basePrice
-      }
+      // Use the price from the form (user may have edited it - including fixed/custom price)
+      const finalPrice = price
 
       const updateData: any = {
         sale_price: finalPrice,
@@ -259,16 +255,20 @@ export function EditSaleDialog({ open, onClose, sale, onSave }: EditSaleDialogPr
         throw new Error(`لا يمكن تحديث البيع. الحالة الحالية: ${existingSale.status}`)
       }
 
-      // Now update only by ID (status already verified)
-      // Use match() with single field to ensure proper UUID type handling
-      const { error: updateError } = await supabase
+      // Update by ID (status already verified)
+      const { data: updatedRows, error: updateError } = await supabase
         .from('sales')
         .update(updateData)
-        .match({ id: saleId })
+        .eq('id', saleId)
+        .select('id')
 
       if (updateError) {
         console.error('Error updating sale:', updateError)
         throw updateError
+      }
+
+      if (!updatedRows || updatedRows.length === 0) {
+        throw new Error('لم يتم تحديث أي سجل. قد تكون الصلاحيات غير كافية أو السجل غير موجود.')
       }
 
       onSave()

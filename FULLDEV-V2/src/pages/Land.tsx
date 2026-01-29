@@ -1283,6 +1283,8 @@ export function LandPage() {
     saleType: 'full' | 'installment' | 'promise'
     paymentOfferId?: string
     notes?: string
+    /** When set, use this total price instead of price per m² (temporary fixed price) */
+    fixedTotalPrice?: number
   }) {
     if (!saleData.client || selectedPiecesForSale.length === 0 || !selectedBatchForPieces) return
 
@@ -1330,20 +1332,33 @@ export function LandPage() {
         }
       }
 
-      // First, calculate all prices
+      // First, calculate all prices (or use fixed total when provided)
       const { calculatePiecePrice } = await import('@/utils/priceCalculator')
-      const pieceCalculations = selectedPiecesForSale.map((piece) => {
-        // For installment sales, pass installmentPricePerM2 separately so calculatePiecePrice can use it
-        // For other sales, use batch price
-        const calc = calculatePiecePrice({
-          surfaceM2: piece.surface_m2,
-          batchPricePerM2: selectedBatchForPieces.pricePerM2,
-          pieceDirectPrice: piece.direct_full_payment_price,
-          installmentPricePerM2: installmentPricePerM2, // Pass installment price separately
-          depositAmount: 0,
+      const totalSurface = selectedPiecesForSale.reduce((sum, p) => sum + (p.surface_m2 || 0), 0)
+      let pieceCalculations: { piece: any; calc: { totalPrice: number } }[]
+
+      if (saleData.fixedTotalPrice != null && saleData.fixedTotalPrice > 0) {
+        // Use hard-coded total price: distribute per piece by surface ratio
+        const totalPrice = saleData.fixedTotalPrice
+        pieceCalculations = selectedPiecesForSale.map((piece) => {
+          const piecePrice = totalSurface > 0
+            ? (piece.surface_m2 / totalSurface) * totalPrice
+            : totalPrice / selectedPiecesForSale.length
+          return { piece, calc: { totalPrice: piecePrice } }
         })
-        return { piece, calc }
-      })
+      } else {
+        // Normal: calculate from price per m² (full or installment)
+        pieceCalculations = selectedPiecesForSale.map((piece) => {
+          const calc = calculatePiecePrice({
+            surfaceM2: piece.surface_m2,
+            batchPricePerM2: selectedBatchForPieces.pricePerM2,
+            pieceDirectPrice: piece.direct_full_payment_price,
+            installmentPricePerM2: installmentPricePerM2,
+            depositAmount: 0,
+          })
+          return { piece, calc }
+        })
+      }
 
       const totalPrice = pieceCalculations.reduce((sum, { calc }) => sum + calc.totalPrice, 0)
 
