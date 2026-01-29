@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Dialog } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
@@ -74,26 +74,74 @@ export function EditSaleDialog({ open, onClose, sale, onSave }: EditSaleDialogPr
   
   const [paymentOffers, setPaymentOffers] = useState<PaymentOffer[]>([])
   const [loadingOffers, setLoadingOffers] = useState(false)
+  const [loadingSale, setLoadingSale] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Initialize form when dialog opens or sale changes
+  // Track when dialog opens and which sale we inited from
+  const prevOpenRef = useRef(false)
+  const initialOfferRef = useRef<{ method: string; offerId: string } | null>(null)
+  const skipNextAutoUpdateRef = useRef(false)
+  const initedSaleIdRef = useRef<string | null>(null)
+
+  // Fetch sale by id when dialog opens so we always show actual DB values (fixes stale list data)
+  useEffect(() => {
+    if (!open || !sale?.id) return
+    let cancelled = false
+    setLoadingSale(true)
+    const saleId = typeof sale.id === 'string' ? sale.id : String(sale.id)
+    supabase
+      .from('sales')
+      .select('sale_price, deposit_amount, payment_method, payment_offer_id, deadline_date, notes, partial_payment_amount, remaining_payment_amount')
+      .eq('id', saleId)
+      .single()
+      .then(({ data, error: err }) => {
+        if (cancelled) return
+        setLoadingSale(false)
+        if (err || !data) return
+        setSalePrice(Number(data.sale_price).toString())
+        setDepositAmount(Number(data.deposit_amount).toString())
+        setPaymentMethod((data.payment_method as 'full' | 'installment' | 'promise') || 'full')
+        setPaymentOfferId(data.payment_offer_id || '')
+        setDeadlineDate(data.deadline_date || '')
+        setNotes(data.notes || '')
+        setPartialPaymentAmount(data.partial_payment_amount != null ? String(data.partial_payment_amount) : '')
+        setRemainingPaymentAmount(data.remaining_payment_amount != null ? String(data.remaining_payment_amount) : '')
+      })
+    return () => { cancelled = true }
+  }, [open, sale?.id])
+
+  // Initialize form when dialog opens OR when sale.id changes (client data for piece/batch/offer; price comes from fetch above)
   useEffect(() => {
     if (open && sale) {
-      setSalePrice(sale.sale_price.toString())
-      setDepositAmount(sale.deposit_amount.toString())
-      setPaymentMethod(sale.payment_method || 'full')
-      setPaymentOfferId(sale.payment_offer_id || '')
-      setDeadlineDate(sale.deadline_date || '')
-      setNotes(sale.notes || '')
-      setPartialPaymentAmount(sale.partial_payment_amount?.toString() || '')
-      setRemainingPaymentAmount(sale.remaining_payment_amount?.toString() || '')
-      setError(null)
-      
-      // Load payment offers if installment
-      if (sale.payment_method === 'installment' && sale.batch_id) {
-        loadPaymentOffers(sale.batch_id)
+      const justOpened = !prevOpenRef.current
+      prevOpenRef.current = true
+      const saleIdChanged = initedSaleIdRef.current !== sale.id
+      if (justOpened || saleIdChanged) {
+        initedSaleIdRef.current = sale.id
+        // Set from prop only as fallback before fetch; fetch above will overwrite with DB values
+        setSalePrice(sale.sale_price.toString())
+        setDepositAmount(sale.deposit_amount.toString())
+        setPaymentMethod(sale.payment_method || 'full')
+        setPaymentOfferId(sale.payment_offer_id || '')
+        setDeadlineDate(sale.deadline_date || '')
+        setNotes(sale.notes || '')
+        setPartialPaymentAmount(sale.partial_payment_amount?.toString() || '')
+        setRemainingPaymentAmount(sale.remaining_payment_amount?.toString() || '')
+        setError(null)
+        initialOfferRef.current = {
+          method: sale.payment_method || 'full',
+          offerId: sale.payment_offer_id || '',
+        }
+        skipNextAutoUpdateRef.current = true
+        if (sale.payment_method === 'installment' && sale.batch_id) {
+          loadPaymentOffers(sale.batch_id)
+        }
       }
+    } else {
+      prevOpenRef.current = false
+      initialOfferRef.current = null
+      initedSaleIdRef.current = null
     }
   }, [open, sale])
 
@@ -130,7 +178,7 @@ export function EditSaleDialog({ open, onClose, sale, onSave }: EditSaleDialogPr
     }
   }, [paymentMethod, open, sale.batch_id])
 
-  // Calculate installment details for preview
+  // Calculate installment details for preview. Uses form sale price as total when set (custom price), otherwise offer-based total.
   const installmentPreview = useMemo(() => {
     if (paymentMethod !== 'installment' || !sale.piece) return null
     
@@ -138,6 +186,9 @@ export function EditSaleDialog({ open, onClose, sale, onSave }: EditSaleDialogPr
     if (!selectedOffer) return null
 
     const deposit = parseFloat(depositAmount) || 0
+    const formPrice = parseFloat(salePrice)
+    const useCustomTotal = !isNaN(formPrice) && formPrice > 0
+
     const calc = calculateInstallmentWithDeposit(
       sale.piece.surface_m2,
       {
@@ -151,15 +202,40 @@ export function EditSaleDialog({ open, onClose, sale, onSave }: EditSaleDialogPr
       deposit
     )
 
+    // When user entered a custom sale price, use it as total and recalc advance/remaining from it
+    let totalPrice = calc.basePrice
+    let advanceAmount = calc.advanceAmount
+    let advanceAfterDeposit = calc.advanceAfterDeposit
+    let remainingForInstallments = calc.remainingForInstallments
+    let monthlyPayment = calc.recalculatedMonthlyPayment
+    let numberOfMonths = calc.recalculatedNumberOfMonths
+
+    if (useCustomTotal) {
+      totalPrice = formPrice
+      advanceAmount = selectedOffer.advance_mode === 'fixed'
+        ? selectedOffer.advance_value
+        : (formPrice * selectedOffer.advance_value) / 100
+      advanceAfterDeposit = Math.max(0, advanceAmount - deposit)
+      remainingForInstallments = formPrice - Math.max(advanceAmount, deposit)
+      if (selectedOffer.calc_mode === 'months' && (selectedOffer.months || 0) > 0) {
+        numberOfMonths = selectedOffer.months!
+        monthlyPayment = remainingForInstallments / numberOfMonths
+      } else if (selectedOffer.calc_mode === 'monthlyAmount' && (selectedOffer.monthly_amount || 0) > 0) {
+        monthlyPayment = selectedOffer.monthly_amount!
+        numberOfMonths = Math.ceil(remainingForInstallments / monthlyPayment)
+      }
+    }
+
     return {
       basePrice: calc.basePrice,
-      advanceAmount: calc.advanceAmount,
-      advanceAfterDeposit: calc.advanceAfterDeposit,
-      remainingForInstallments: calc.remainingForInstallments,
-      monthlyPayment: calc.recalculatedMonthlyPayment,
-      numberOfMonths: calc.recalculatedNumberOfMonths,
+      totalPrice,
+      advanceAmount,
+      advanceAfterDeposit,
+      remainingForInstallments,
+      monthlyPayment,
+      numberOfMonths,
     }
-  }, [paymentMethod, paymentOfferId, depositAmount, sale.piece, paymentOffers])
+  }, [paymentMethod, paymentOfferId, depositAmount, salePrice, sale.piece, paymentOffers])
 
   async function handleSave() {
     setError(null)
@@ -268,7 +344,38 @@ export function EditSaleDialog({ open, onClose, sale, onSave }: EditSaleDialogPr
       }
 
       if (!updatedRows || updatedRows.length === 0) {
-        throw new Error('لم يتم تحديث أي سجل. قد تكون الصلاحيات غير كافية أو السجل غير موجود.')
+        // Retry without .select() - sometimes UPDATE succeeds but RETURN is blocked by SELECT RLS
+        const { error: updateOnlyError } = await supabase
+          .from('sales')
+          .update(updateData)
+          .eq('id', saleId)
+
+        if (updateOnlyError) {
+          console.error('Error updating sale (retry):', updateOnlyError)
+          throw new Error(
+            'لم يتم حفظ التعديلات (الصلاحيات). شغّل docs/sql/fix_sales_update_for_confirmation.sql في Supabase → SQL Editor.'
+          )
+        }
+      }
+
+      // Verify the update actually persisted (RLS can make UPDATE "succeed" but affect 0 rows)
+      const { data: verifyRow, error: verifyError } = await supabase
+        .from('sales')
+        .select('sale_price')
+        .eq('id', saleId)
+        .single()
+
+      if (verifyError || !verifyRow) {
+        throw new Error(
+          'لم يتم حفظ التعديلات (الصلاحيات). شغّل docs/sql/fix_sales_update_for_confirmation.sql في Supabase → SQL Editor.'
+        )
+      }
+
+      const savedPrice = Number(verifyRow.sale_price)
+      if (Math.abs(savedPrice - finalPrice) > 0.01) {
+        throw new Error(
+          'لم يتم حفظ التعديلات (الصلاحيات). شغّل docs/sql/fix_sales_update_for_confirmation.sql في Supabase → SQL Editor.'
+        )
       }
 
       onSave()
@@ -281,17 +388,23 @@ export function EditSaleDialog({ open, onClose, sale, onSave }: EditSaleDialogPr
     }
   }
 
-  // Auto-update sale_price when installment offer is selected
+  // Auto-update sale_price only when user switches to "full" (cash) - use batch cash price.
+  // For installment we never overwrite: keep sale's actual price (may be custom/fixed).
   useEffect(() => {
-    if (paymentMethod === 'installment' && installmentPreview && installmentPreview.basePrice > 0) {
-      // Update sale_price to reflect the installment price (calculated from price_per_m2_installment)
-      setSalePrice(installmentPreview.basePrice.toFixed(2))
-    } else if (paymentMethod === 'full' && sale.piece && sale.batch?.price_per_m2_cash) {
-      // For full payment, use cash price
+    if (!open || !initialOfferRef.current || !sale.piece) return
+    if (skipNextAutoUpdateRef.current) {
+      skipNextAutoUpdateRef.current = false
+      return
+    }
+    const init = initialOfferRef.current
+    const userChangedOffer = paymentOfferId !== init.offerId || paymentMethod !== init.method
+    if (!userChangedOffer) return
+    if (paymentMethod === 'full' && sale.batch?.price_per_m2_cash) {
       const cashPrice = sale.piece.surface_m2 * sale.batch.price_per_m2_cash
       setSalePrice(cashPrice.toFixed(2))
     }
-  }, [paymentMethod, paymentOfferId, installmentPreview, sale.piece, sale.batch])
+    // For installment: do NOT overwrite sale_price so custom/fixed price is preserved
+  }, [paymentMethod, paymentOfferId, sale.piece, sale.batch, open])
 
   // Auto-calculate remaining for promise sales - LIVE UPDATE
   useEffect(() => {
@@ -314,16 +427,19 @@ export function EditSaleDialog({ open, onClose, sale, onSave }: EditSaleDialogPr
       size="lg"
       footer={
         <div className="flex justify-end gap-3">
-          <Button variant="secondary" onClick={onClose} disabled={saving}>
+          <Button variant="secondary" onClick={onClose} disabled={saving || loadingSale}>
             إلغاء
           </Button>
-          <Button onClick={handleSave} disabled={saving}>
-            {saving ? 'جاري الحفظ...' : '💾 حفظ التعديلات'}
+          <Button onClick={handleSave} disabled={saving || loadingSale}>
+            {saving ? 'جاري الحفظ...' : loadingSale ? 'جاري تحميل التفاصيل...' : '💾 حفظ التعديلات'}
           </Button>
         </div>
       }
     >
       <div className="space-y-4">
+        {loadingSale && (
+          <p className="text-xs sm:text-sm text-gray-500">جاري تحميل تفاصيل البيع من السجل...</p>
+        )}
         {error && <Alert variant="error" className="text-xs sm:text-sm">{error}</Alert>}
 
         {/* Sale Info */}
@@ -417,7 +533,7 @@ export function EditSaleDialog({ open, onClose, sale, onSave }: EditSaleDialogPr
                 <div className="space-y-1 text-xs sm:text-sm">
                   <div className="flex justify-between">
                     <span>السعر الإجمالي:</span>
-                    <span className="font-semibold">{formatPrice(installmentPreview.basePrice)} DT</span>
+                    <span className="font-semibold">{formatPrice(installmentPreview.totalPrice)} DT</span>
                   </div>
                   <div className="flex justify-between">
                     <span>التسبقة:</span>

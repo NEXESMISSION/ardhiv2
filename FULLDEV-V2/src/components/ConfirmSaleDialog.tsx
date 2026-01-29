@@ -225,16 +225,16 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
     let confirmationAmount = 0
     let remainingForInstallments = 0
     let installmentDetails = null
+    let advanceAmount = 0
 
     // Use loaded payment offer if sale doesn't have one
     const paymentOffer = sale.payment_offer || loadedPaymentOffer
 
-    // Calculate total price: use installment base price for installment sales, otherwise use sale_price
+    // Use sale.sale_price as total (actual contract price; may be custom/fixed for installment)
     let totalPrice = sale.sale_price
     let calc: ReturnType<typeof calculateInstallmentWithDeposit> | null = null
 
     if (sale.payment_method === 'installment' && paymentOffer && sale.piece) {
-      // Use centralized calculator - calculate once and reuse
       calc = calculateInstallmentWithDeposit(
         sale.piece.surface_m2,
         {
@@ -248,11 +248,13 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
         depositAmount
       )
 
-      // Use installment price (calculated from price_per_m2_installment) instead of cash price
-      totalPrice = calc.basePrice
-      confirmationAmount = calc.advanceAfterDeposit
-      // المتبقي للتقسيط = السعر الإجمالي (من سعر التقسيط) - (التسبقة بعد خصم العربون)
-      remainingForInstallments = calc.remainingForInstallments
+      // Use sale.sale_price as total (not offer basePrice) so custom/fixed price is correct
+      totalPrice = sale.sale_price
+      advanceAmount = paymentOffer.advance_mode === 'fixed'
+        ? paymentOffer.advance_value
+        : (sale.sale_price * paymentOffer.advance_value) / 100
+      confirmationAmount = Math.max(0, advanceAmount - depositAmount)
+      remainingForInstallments = sale.sale_price - Math.max(advanceAmount, depositAmount)
 
       // Always create installment details, even without start date
       let startDate = null
@@ -279,17 +281,15 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
         endDate = schedule.length > 0 ? schedule[schedule.length - 1].dueDate : null
       }
 
-      // Recalculate monthly payment and number of months based on the correct remaining amount
-      // المبلغ المتبقي للأقساط = السعر الإجمالي - المتبقي من التسبقة بعد العربون
-      let finalMonthlyPayment = calc.recalculatedMonthlyPayment
-      let finalNumberOfMonths = calc.recalculatedNumberOfMonths
-      
-      if (paymentOffer.calc_mode === 'monthlyAmount' && finalMonthlyPayment > 0) {
-        // If monthly amount is specified, recalculate months from the correct remaining amount
-        finalNumberOfMonths = Math.ceil(remainingForInstallments / finalMonthlyPayment)
-      } else if (paymentOffer.calc_mode === 'months' && finalNumberOfMonths > 0) {
-        // If months is specified, recalculate monthly payment from the correct remaining amount
+      // Monthly and months from offer rules, using remainingForInstallments (based on sale.sale_price)
+      let finalMonthlyPayment = 0
+      let finalNumberOfMonths = 0
+      if (paymentOffer.calc_mode === 'months' && (paymentOffer.months || 0) > 0) {
+        finalNumberOfMonths = paymentOffer.months!
         finalMonthlyPayment = remainingForInstallments / finalNumberOfMonths
+      } else if (paymentOffer.calc_mode === 'monthlyAmount' && (paymentOffer.monthly_amount || 0) > 0) {
+        finalMonthlyPayment = paymentOffer.monthly_amount!
+        finalNumberOfMonths = Math.ceil(remainingForInstallments / finalMonthlyPayment)
       }
 
       installmentDetails = {
@@ -297,7 +297,7 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
         monthlyPayment: finalMonthlyPayment,
         startDate,
         endDate,
-        totalRemaining: totalRemainingFromSchedule > 0 ? totalRemainingFromSchedule : remainingForInstallments,
+        totalRemaining: remainingForInstallments,
       }
     } else if (sale.payment_method === 'full') {
       confirmationAmount = sale.sale_price - depositAmount
@@ -318,6 +318,7 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
       remainingForInstallments,
       installmentDetails,
       totalPrice,
+      advanceAmount,
     }
   }, [sale, installmentStartDate, sale?.partial_payment_amount, sale?.remaining_payment_amount, loadedPaymentOffer])
 
@@ -966,21 +967,7 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
                       <div className="flex justify-between">
                         <span>التسبقة:</span>
                         <span className="font-semibold text-orange-600">
-                          {formatPrice(
-                            calculateInstallmentWithDeposit(
-                              sale.piece!.surface_m2,
-                              {
-                                price_per_m2_installment: (sale.payment_offer || loadedPaymentOffer)!.price_per_m2_installment,
-                                advance_mode: (sale.payment_offer || loadedPaymentOffer)!.advance_mode,
-                                advance_value: (sale.payment_offer || loadedPaymentOffer)!.advance_value,
-                                calc_mode: (sale.payment_offer || loadedPaymentOffer)!.calc_mode,
-                                monthly_amount: (sale.payment_offer || loadedPaymentOffer)!.monthly_amount,
-                                months: (sale.payment_offer || loadedPaymentOffer)!.months,
-                              },
-                              calculations.depositAmount
-                            ).advanceAmount
-                          )}{' '}
-                          DT
+                          {formatPrice(calculations.advanceAmount)} DT
                         </span>
                       </div>
                       <div className="flex justify-between text-xs text-gray-600">

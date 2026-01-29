@@ -701,7 +701,7 @@ export function ConfirmationPage() {
         />
       )}
 
-      {/* Edit Sale Dialog */}
+      {/* Edit Sale Dialog - pass the sale the user clicked on (same object as card) so price is correct */}
       {selectedSale && (
         <EditSaleDialog
           open={editDialogOpen}
