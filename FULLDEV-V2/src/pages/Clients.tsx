@@ -117,6 +117,12 @@ export function ClientsPage() {
   const [success, setSuccess] = useState<string | null>(null)
 
   // ============================================================================
+  // STATE: ID number auto-check (exists or available)
+  // ============================================================================
+  const [idNumberCheck, setIdNumberCheck] = useState<'idle' | 'checking' | 'exists' | 'available'>('idle')
+  const [idNumberExistingName, setIdNumberExistingName] = useState<string | null>(null)
+
+  // ============================================================================
   // EFFECTS
   // ============================================================================
   useEffect(() => {
@@ -216,6 +222,57 @@ export function ClientsPage() {
       statsAnimationRef.current.clear()
     }
   }, [stats]) // Only depend on stats, NOT displayedStats to avoid infinite loop
+
+  // Auto-check if ID number (رقم الهوية) already exists when user types 8 digits
+  useEffect(() => {
+    const trimmed = idNumber.trim()
+    if (trimmed.length !== 8 || !/^\d{8}$/.test(trimmed)) {
+      setIdNumberCheck('idle')
+      setIdNumberExistingName(null)
+      return
+    }
+
+    // When editing: if ID is unchanged, consider it available (no check needed)
+    if (editingClientId) {
+      const current = clients.find(c => c.id === editingClientId)
+      if (current && current.id_number === trimmed) {
+        setIdNumberCheck('available')
+        setIdNumberExistingName(null)
+        return
+      }
+    }
+
+    const timeoutId = setTimeout(async () => {
+      setIdNumberCheck('checking')
+      setIdNumberExistingName(null)
+      try {
+        let query = supabase
+          .from('clients')
+          .select('id, name')
+          .eq('id_number', trimmed)
+        if (editingClientId) {
+          query = query.neq('id', editingClientId)
+        }
+        const { data, error: err } = await query.maybeSingle()
+
+        if (err) {
+          setIdNumberCheck('idle')
+          return
+        }
+        if (data) {
+          setIdNumberCheck('exists')
+          setIdNumberExistingName(data.name || null)
+        } else {
+          setIdNumberCheck('available')
+          setIdNumberExistingName(null)
+        }
+      } catch {
+        setIdNumberCheck('idle')
+      }
+    }, 400)
+
+    return () => clearTimeout(timeoutId)
+  }, [idNumber, editingClientId, clients])
 
   // ============================================================================
   // DATA LOADING FUNCTIONS
@@ -438,6 +495,8 @@ export function ClientsPage() {
     setType('individual')
     setError(null)
     setSuccess(null)
+    setIdNumberCheck('idle')
+    setIdNumberExistingName(null)
   }
 
   function validateForm(): boolean {
@@ -995,7 +1054,10 @@ export function ClientsPage() {
               >
                 إلغاء
               </Button>
-              <Button onClick={handleSaveClient} disabled={saving}>
+              <Button
+                onClick={handleSaveClient}
+                disabled={saving || idNumberCheck === 'exists' || idNumberCheck === 'checking'}
+              >
                 {saving ? (
                   <span className="flex items-center gap-2">
                     <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
@@ -1029,13 +1091,33 @@ export function ClientsPage() {
               </Label>
               <Input
                 value={idNumber}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setIdNumber(e.target.value)}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                  const v = e.target.value.replace(/\D/g, '').slice(0, 8)
+                  setIdNumber(v)
+                }}
                 placeholder="رقم الهوية (8 أرقام)"
                 maxLength={8}
                 pattern="[0-9]{8}"
-                className="transition-all focus:shadow-md"
+                className={`transition-all focus:shadow-md ${
+                  idNumberCheck === 'exists' ? 'border-red-500 focus:ring-red-500' : ''
+                } ${idNumberCheck === 'available' ? 'border-green-500 focus:ring-green-500' : ''}`}
               />
               <p className="text-xs text-gray-500">يجب أن يكون 8 أرقام</p>
+              {idNumberCheck === 'checking' && (
+                <p className="text-xs text-amber-600 flex items-center gap-1">
+                  <span className="inline-block w-3 h-3 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
+                  جاري التحقق...
+                </p>
+              )}
+              {idNumberCheck === 'exists' && (
+                <p className="text-xs text-red-600">
+                  رقم الهوية مستخدم بالفعل
+                  {idNumberExistingName ? ` (العميل: ${idNumberExistingName})` : ''}
+                </p>
+              )}
+              {idNumberCheck === 'available' && (
+                <p className="text-xs text-green-600">✓ رقم الهوية متاح</p>
+              )}
             </div>
 
             <div className="space-y-2">
