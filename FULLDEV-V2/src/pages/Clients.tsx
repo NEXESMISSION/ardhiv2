@@ -123,6 +123,12 @@ export function ClientsPage() {
   const [idNumberExistingName, setIdNumberExistingName] = useState<string | null>(null)
 
   // ============================================================================
+  // STATE: Name search when adding client (see if similar name exists)
+  // ============================================================================
+  const [nameSearchStatus, setNameSearchStatus] = useState<'idle' | 'checking' | 'found' | 'none'>('idle')
+  const [nameSearchMatches, setNameSearchMatches] = useState<Array<{ id: string; name: string; id_number: string }>>([])
+
+  // ============================================================================
   // EFFECTS
   // ============================================================================
   useEffect(() => {
@@ -288,6 +294,52 @@ export function ClientsPage() {
 
     return () => clearTimeout(timeoutId)
   }, [idNumber, editingClientId, clients])
+
+  // Search by name when adding/editing client - show similar names so user knows if client may exist
+  useEffect(() => {
+    const trimmed = name.trim()
+    if (trimmed.length < 2) {
+      setNameSearchStatus('idle')
+      setNameSearchMatches([])
+      return
+    }
+
+    const timeoutId = setTimeout(async () => {
+      setNameSearchStatus('checking')
+      setNameSearchMatches([])
+      try {
+        // Escape ilike special chars (%, _) so search is safe and predictable
+        const escaped = trimmed.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_')
+        const pattern = `%${escaped}%`
+        let query = supabase
+          .from('clients')
+          .select('id, name, id_number')
+          .ilike('name', pattern)
+          .limit(10)
+        if (editingClientId) {
+          query = query.neq('id', editingClientId)
+        }
+        const { data, error: err } = await query
+
+        if (err) {
+          setNameSearchStatus('idle')
+          return
+        }
+        const list = (data || []) as Array<{ id: string; name: string; id_number: string }>
+        if (list.length > 0) {
+          setNameSearchStatus('found')
+          setNameSearchMatches(list)
+        } else {
+          setNameSearchStatus('none')
+          setNameSearchMatches([])
+        }
+      } catch {
+        setNameSearchStatus('idle')
+      }
+    }, 500)
+
+    return () => clearTimeout(timeoutId)
+  }, [name, editingClientId])
 
   // ============================================================================
   // DATA LOADING FUNCTIONS
@@ -512,6 +564,8 @@ export function ClientsPage() {
     setSuccess(null)
     setIdNumberCheck('idle')
     setIdNumberExistingName(null)
+    setNameSearchStatus('idle')
+    setNameSearchMatches([])
   }
 
   function validateForm(): boolean {
@@ -1159,6 +1213,29 @@ export function ClientsPage() {
                 placeholder="اسم العميل"
                 className="text-base min-h-[2.75rem] transition-all focus:shadow-md"
               />
+              {nameSearchStatus === 'checking' && (
+                <p className="text-xs text-amber-600 flex items-center gap-1">
+                  <span className="inline-block w-3 h-3 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
+                  جاري البحث عن أسماء مشابهة...
+                </p>
+              )}
+              {nameSearchStatus === 'found' && nameSearchMatches.length > 0 && (
+                <div className="rounded-md border border-amber-200 bg-amber-50/80 p-2 text-xs">
+                  <p className="font-semibold text-amber-900 mb-1">يوجد عملاء بأسماء مشابهة:</p>
+                  <ul className="space-y-1 text-amber-800">
+                    {nameSearchMatches.map((c) => (
+                      <li key={c.id} className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                        <span className="font-medium">{c.name}</span>
+                        <span className="text-amber-700">· رقم الهوية: {c.id_number}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="text-amber-700 mt-1">تحقق من عدم تكرار العميل قبل الحفظ.</p>
+                </div>
+              )}
+              {nameSearchStatus === 'none' && name.trim().length >= 2 && (
+                <p className="text-xs text-green-600">لا يوجد عميل بهذا الاسم في السجل.</p>
+              )}
             </div>
             </div>
 

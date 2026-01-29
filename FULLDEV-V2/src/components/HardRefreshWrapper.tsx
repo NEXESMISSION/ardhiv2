@@ -1,7 +1,14 @@
-import { useRef, useState, useEffect, useCallback, type ReactNode } from 'react'
+import { useRef, useState, useCallback, type ReactNode } from 'react'
 
-const PULL_THRESHOLD = 50
-const LONG_PRESS_MS = 1000
+const PULL_THRESHOLD = 55
+
+/** Return true if any dialog/modal is open - do not refresh when true */
+function isDialogOpen(): boolean {
+  if (document.querySelector('[data-modal="true"]')) return true
+  return Array.from(document.querySelectorAll('div')).some(
+    (el) => el.classList?.contains('fixed') && el.classList?.contains('inset-0')
+  )
+}
 
 interface HardRefreshWrapperProps {
   children: ReactNode
@@ -9,48 +16,35 @@ interface HardRefreshWrapperProps {
 }
 
 /**
- * Pull-down and long-press to hard refresh. Uses document-level listeners
- * so it works on mobile/PWA even when touching buttons or scrollable content.
+ * Pull-down to refresh only. No long-press - avoids accidental refresh
+ * and dialog close. Refresh is disabled when any dialog/modal is open.
  */
 export function HardRefreshWrapper({ children, className = '' }: HardRefreshWrapperProps) {
   const [pullDistance, setPullDistance] = useState(0)
   const [isRefreshing, setIsRefreshing] = useState(false)
-  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const touchStartRef = useRef<{ y: number; scrollTop: number } | null>(null)
   const pullDistanceRef = useRef(0)
 
   const doHardRefresh = useCallback(() => {
     if (isRefreshing) return
+    if (isDialogOpen()) return
     setIsRefreshing(true)
     window.location.reload()
   }, [isRefreshing])
 
-  const clearLongPress = useCallback(() => {
-    if (longPressTimerRef.current) {
-      clearTimeout(longPressTimerRef.current)
-      longPressTimerRef.current = null
-    }
-  }, [])
-
-  // Document-level listeners so we capture touch/pointer even on children (capture phase)
   useEffect(() => {
-    const getScrollTop = () => {
-      return window.scrollY ?? document.documentElement.scrollTop ?? 0
-    }
+    const getScrollTop = () => window.scrollY ?? document.documentElement.scrollTop ?? 0
 
     const onTouchStart = (e: TouchEvent) => {
+      if (isDialogOpen()) return
       if (e.touches.length !== 1) return
       touchStartRef.current = { y: e.touches[0].clientY, scrollTop: getScrollTop() }
       pullDistanceRef.current = 0
       setPullDistance(0)
-      clearLongPress()
-      longPressTimerRef.current = setTimeout(() => {
-        longPressTimerRef.current = null
-        doHardRefresh()
-      }, LONG_PRESS_MS)
     }
 
     const onTouchMove = (e: TouchEvent) => {
+      if (isDialogOpen()) return
       const start = touchStartRef.current
       if (!start || e.touches.length !== 1) return
       const currentY = e.touches[0].clientY
@@ -59,12 +53,16 @@ export function HardRefreshWrapper({ children, className = '' }: HardRefreshWrap
         const distance = Math.min(deltaY * 0.6, 90)
         pullDistanceRef.current = distance
         setPullDistance(distance)
-        clearLongPress()
       }
     }
 
     const onTouchEnd = () => {
-      clearLongPress()
+      if (isDialogOpen()) {
+        touchStartRef.current = null
+        pullDistanceRef.current = 0
+        setPullDistance(0)
+        return
+      }
       if (pullDistanceRef.current >= PULL_THRESHOLD) {
         doHardRefresh()
       }
@@ -73,42 +71,21 @@ export function HardRefreshWrapper({ children, className = '' }: HardRefreshWrap
       setPullDistance(0)
     }
 
-    const onPointerDown = (e: PointerEvent) => {
-      if (e.pointerType === 'mouse') {
-        clearLongPress()
-        longPressTimerRef.current = setTimeout(() => {
-          longPressTimerRef.current = null
-          doHardRefresh()
-        }, LONG_PRESS_MS)
-      }
-    }
-
-    const onPointerUp = () => clearLongPress()
-    const onPointerCancel = () => clearLongPress()
-
     document.addEventListener('touchstart', onTouchStart, { capture: true, passive: true })
     document.addEventListener('touchmove', onTouchMove, { capture: true, passive: true })
     document.addEventListener('touchend', onTouchEnd, { capture: true })
     document.addEventListener('touchcancel', onTouchEnd, { capture: true })
-    document.addEventListener('pointerdown', onPointerDown, { capture: true })
-    document.addEventListener('pointerup', onPointerUp, { capture: true })
-    document.addEventListener('pointercancel', onPointerCancel, { capture: true })
 
     return () => {
       document.removeEventListener('touchstart', onTouchStart, { capture: true })
       document.removeEventListener('touchmove', onTouchMove, { capture: true })
       document.removeEventListener('touchend', onTouchEnd, { capture: true })
       document.removeEventListener('touchcancel', onTouchEnd, { capture: true })
-      document.removeEventListener('pointerdown', onPointerDown, { capture: true })
-      document.removeEventListener('pointerup', onPointerUp, { capture: true })
-      document.removeEventListener('pointercancel', onPointerCancel, { capture: true })
-      clearLongPress()
     }
-  }, [doHardRefresh, clearLongPress])
+  }, [doHardRefresh])
 
   return (
     <div className={`relative ${className}`}>
-      {/* Pull-down indicator - fixed at top so visible when pulling */}
       {pullDistance > 0 && (
         <div
           className="fixed left-0 right-0 top-0 z-[100] flex items-center justify-center bg-blue-500/90 text-white shadow-lg transition-all duration-150"
