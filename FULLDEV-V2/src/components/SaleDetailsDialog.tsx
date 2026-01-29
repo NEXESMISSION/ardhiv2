@@ -49,6 +49,11 @@ interface Sale {
     monthly_amount: number | null
     months: number | null
   }
+  seller?: {
+    id: string
+    name: string
+    place: string | null
+  }
 }
 
 interface SaleDetailsDialogProps {
@@ -90,6 +95,27 @@ export function SaleDetailsDialog({ open, onClose, sale }: SaleDetailsDialogProp
             </div>
           </div>
         </Card>
+
+        {/* Seller / Place */}
+        {(sale.seller?.name || sale.seller?.place) && (
+          <Card className="p-2 sm:p-3 bg-indigo-50 border-indigo-200">
+            <h3 className="text-xs sm:text-sm font-semibold text-indigo-900 mb-2">البائع / المكان</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs sm:text-sm">
+              {sale.seller?.name && (
+                <div>
+                  <span className="text-gray-600">البائع:</span>
+                  <span className="font-medium mr-1">{sale.seller.name}</span>
+                </div>
+              )}
+              {sale.seller?.place && (
+                <div>
+                  <span className="text-gray-600">المكان:</span>
+                  <span className="font-medium mr-1">{sale.seller.place}</span>
+                </div>
+              )}
+            </div>
+          </Card>
+        )}
 
         {/* Piece Info */}
         <Card className="p-2 sm:p-3 bg-green-50 border-green-200">

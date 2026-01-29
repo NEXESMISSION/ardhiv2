@@ -9,6 +9,7 @@ import { Alert } from './ui/alert'
 import { Card } from './ui/card'
 import { ConfirmDialog } from './ui/confirm-dialog'
 import { NotificationDialog } from './ui/notification-dialog'
+import { SaleDetailsDialog } from './SaleDetailsDialog'
 import { formatPrice, formatDate } from '@/utils/priceCalculator'
 import { calculateInstallmentWithDeposit } from '@/utils/installmentCalculator'
 import { generateInstallmentSchedule } from '@/utils/installmentSchedule'
@@ -54,6 +55,17 @@ interface Sale {
     id_number: string
     phone: string
   }
+  notes?: string | null
+  deadline_date?: string | null
+  appointment_date?: string | null
+  sold_by?: string | null
+  confirmed_by?: string | null
+  created_at?: string
+  seller?: {
+    id: string
+    name: string
+    place: string | null
+  }
 }
 
 interface ContractWriter {
@@ -90,6 +102,7 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
   const [appointmentDate, setAppointmentDate] = useState('')
   const [loadedPaymentOffer, setLoadedPaymentOffer] = useState<Sale['payment_offer'] | null>(null)
   const [loadingPaymentOffer, setLoadingPaymentOffer] = useState(false)
+  const [showDetailsDialog, setShowDetailsDialog] = useState(false)
 
   useEffect(() => {
     if (open && sale) {
@@ -148,6 +161,7 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
       
       setError(null)
       setShowFinalConfirmDialog(false)
+      setShowDetailsDialog(false)
       setShowSuccessDialog(false)
       setShowErrorDialog(false)
       setShowAppointmentDialog(false)
@@ -890,15 +904,24 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
       }
       size="xl"
       footer={
-        <div className="flex justify-end gap-3">
-          <Button variant="secondary" onClick={onClose} disabled={confirming}>
-            إلغاء
-          </Button>
-          <Button 
-            onClick={handleConfirmClick} 
+        <div className="flex justify-between w-full gap-3">
+          <Button
+            variant="secondary"
+            onClick={() => setShowDetailsDialog(true)}
             disabled={confirming}
-            className="bg-green-600 hover:bg-green-700 active:bg-green-800 focus-visible:ring-green-500"
+            className="text-blue-600 border-blue-300 hover:bg-blue-50"
           >
+            تفاصيل
+          </Button>
+          <div className="flex gap-3">
+            <Button variant="secondary" onClick={onClose} disabled={confirming}>
+              إلغاء
+            </Button>
+            <Button 
+              onClick={handleConfirmClick} 
+              disabled={confirming}
+              className="bg-green-600 hover:bg-green-700 active:bg-green-800 focus-visible:ring-green-500"
+            >
             {confirming 
               ? 'جاري التأكيد...' 
               : isPromise && sale.partial_payment_amount
@@ -910,7 +933,8 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
                     : isFull
                       ? 'تأكيد بيع نقدي'
                       : 'تأكيد البيع'}
-          </Button>
+            </Button>
+          </div>
         </div>
       }
     >
@@ -1348,6 +1372,13 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
           )}
         </div>
       </Dialog>
+
+      {/* Sale details (تفاصيل) */}
+      <SaleDetailsDialog
+        open={showDetailsDialog}
+        onClose={() => setShowDetailsDialog(false)}
+        sale={sale}
+      />
     </Dialog>
   )
 }

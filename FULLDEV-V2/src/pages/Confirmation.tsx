@@ -509,23 +509,23 @@ export function ConfirmationPage() {
                         {/* Status Badges */}
                       <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
                           {deadlineStatus?.overdue && (
-                            <Badge className="bg-red-500 text-white border-0 text-xs px-2.5 py-1 font-semibold shadow-md">
+                            <Badge className="bg-red-100 text-red-800 border border-red-200 text-xs px-2.5 py-1 font-semibold">
                               ⚠️ تجاوز {deadlineStatus.days} يوم
                             </Badge>
                           )}
                           <div className="flex items-center gap-1 flex-wrap justify-end">
                           {isPromise && (
-                              <Badge className="bg-purple-400/40 text-white border border-white/50 text-xs px-2 py-0.5 font-medium shadow-sm">
+                              <Badge className="bg-purple-100 text-purple-800 border border-purple-200 text-xs px-2 py-0.5 font-medium">
                               وعد بالبيع
                             </Badge>
                           )}
                           {isInstallment && (
-                              <Badge className="bg-blue-400/40 text-white border border-white/50 text-xs px-2 py-0.5 font-medium shadow-sm">
+                              <Badge className="bg-blue-100 text-blue-800 border border-blue-200 text-xs px-2 py-0.5 font-medium">
                               تقسيط
                             </Badge>
                           )}
                           {sale.status === 'pending' && (
-                              <Badge className="bg-orange-400/40 text-white border border-white/50 text-xs px-2 py-0.5 font-medium shadow-sm">
+                              <Badge className="bg-amber-100 text-amber-800 border border-amber-200 text-xs px-2 py-0.5 font-medium">
                               محجوز
                             </Badge>
                           )}
@@ -598,7 +598,7 @@ export function ConfirmationPage() {
 
                   {/* Action Buttons - Modern Design */}
                   <div className="bg-gray-50 p-4 border-t border-gray-200">
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
                 <Button
                   size="sm"
                         className={`${getConfirmButtonColor(sale)} text-white text-xs px-3 py-2.5 font-semibold shadow-md hover:shadow-lg transition-all`}
@@ -608,6 +608,17 @@ export function ConfirmationPage() {
                         }}
                       >
                         ✅ {getConfirmButtonText(sale)}
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                        className="text-xs px-3 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-800 border border-gray-300 font-medium transition-all"
+                        onClick={() => {
+                          setSelectedSale(sale)
+                          setSaleDetailsDialogOpen(true)
+                        }}
+                      >
+                        📋 تفاصيل
                 </Button>
                 <Button
                   variant="secondary"

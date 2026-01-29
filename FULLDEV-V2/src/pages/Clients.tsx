@@ -223,6 +223,21 @@ export function ClientsPage() {
     }
   }, [stats]) // Only depend on stats, NOT displayedStats to avoid infinite loop
 
+  // Keyboard shortcut: "+" opens add client popup (Clients page only - this component only mounts here)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const isPlus = e.key === '+' || (e.key === '=' && e.shiftKey)
+      if (!isPlus) return
+      const target = e.target as HTMLElement
+      const inInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable
+      if (inInput) return
+      e.preventDefault()
+      if (!dialogOpen) openCreateDialog()
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [dialogOpen])
+
   // Auto-check if ID number (رقم الهوية) already exists when user types 8 digits
   useEffect(() => {
     const trimmed = idNumber.trim()
@@ -705,8 +720,21 @@ export function ClientsPage() {
     <div className="max-w-7xl mx-auto px-2 sm:px-4 lg:px-6 py-3 sm:py-4 lg:py-6">
         {/* Header */}
         <header className="mb-3 sm:mb-4 lg:mb-6">
-          <h1 className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-900 mb-1 sm:mb-2">إدارة العملاء</h1>
-          <p className="text-xs sm:text-sm text-gray-600">إدارة عملائك ومعلوماتهم</p>
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div>
+              <h1 className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-900 mb-1 sm:mb-2">إدارة العملاء</h1>
+              <p className="text-xs sm:text-sm text-gray-600">إدارة عملائك ومعلوماتهم</p>
+            </div>
+            <Button
+              onClick={openCreateDialog}
+              size="sm"
+              className="w-9 h-9 sm:w-10 sm:h-10 p-0 rounded-full bg-gray-700 hover:bg-gray-800 text-white flex-shrink-0 shadow-sm"
+              title="إضافة عميل (اختصار: +)"
+              aria-label="إضافة عميل (اضغط +)"
+            >
+              +
+            </Button>
+          </div>
         </header>
 
         {/* Statistics Cards */}
@@ -819,9 +847,6 @@ export function ClientsPage() {
                 {Math.min(currentPage * itemsPerPage, totalCount)} من {totalCount}</>
               )}
             </div>
-            <Button onClick={openCreateDialog} size="sm" className="text-xs sm:text-sm w-full sm:w-auto">
-              + إضافة عميل
-            </Button>
           </div>
         </div>
 
@@ -1031,7 +1056,7 @@ export function ClientsPage() {
           </>
         )}
 
-        {/* Create/Edit Dialog */}
+        {/* Create/Edit Dialog - Add client popup (Clients page only) */}
         <Dialog
           open={dialogOpen}
           onClose={() => {
@@ -1041,7 +1066,7 @@ export function ClientsPage() {
             }
           }}
           title={editingClientId ? 'تعديل العميل' : 'إضافة عميل جديد'}
-          size="md"
+          size="xl"
           footer={
             <div className="flex justify-end gap-3">
               <Button
@@ -1051,12 +1076,14 @@ export function ClientsPage() {
                   resetForm()
                 }}
                 disabled={saving}
+                className="bg-gray-100 text-gray-800 border border-gray-300 hover:bg-gray-200"
               >
                 إلغاء
               </Button>
               <Button
                 onClick={handleSaveClient}
                 disabled={saving || idNumberCheck === 'exists' || idNumberCheck === 'checking'}
+                className="bg-gray-700 hover:bg-gray-800"
               >
                 {saving ? (
                   <span className="flex items-center gap-2">
@@ -1070,23 +1097,25 @@ export function ClientsPage() {
             </div>
           }
         >
+          <div className="rounded-lg bg-gray-50/80 p-5 sm:p-6 -mx-1 sm:-mx-2 border border-gray-100">
           {/* Alerts */}
           {error && (
-            <div className="mb-4">
-              <Alert variant="error">{error}</Alert>
+            <div className="mb-5">
+              <Alert variant="error" className="text-sm">{error}</Alert>
             </div>
           )}
 
           {success && (
-            <div className="mb-4">
-              <Alert variant="success">{success}</Alert>
+            <div className="mb-5">
+              <Alert variant="success" className="text-sm">{success}</Alert>
             </div>
           )}
 
-          {/* Form */}
-          <div className="space-y-4">
+          {/* Form - larger and easier to use */}
+          <div className="space-y-5 sm:space-y-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 sm:gap-6">
             <div className="space-y-2">
-              <Label className="text-gray-700 font-medium">
+              <Label className="text-gray-800 font-medium text-sm sm:text-base">
                 رقم الهوية <span className="text-red-500">*</span>
               </Label>
               <Input
@@ -1098,11 +1127,11 @@ export function ClientsPage() {
                 placeholder="رقم الهوية (8 أرقام)"
                 maxLength={8}
                 pattern="[0-9]{8}"
-                className={`transition-all focus:shadow-md ${
+                className={`text-base min-h-[2.75rem] transition-all focus:shadow-md ${
                   idNumberCheck === 'exists' ? 'border-red-500 focus:ring-red-500' : ''
                 } ${idNumberCheck === 'available' ? 'border-green-500 focus:ring-green-500' : ''}`}
               />
-              <p className="text-xs text-gray-500">يجب أن يكون 8 أرقام</p>
+              <p className="text-xs sm:text-sm text-gray-600">يجب أن يكون 8 أرقام</p>
               {idNumberCheck === 'checking' && (
                 <p className="text-xs text-amber-600 flex items-center gap-1">
                   <span className="inline-block w-3 h-3 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
@@ -1116,62 +1145,66 @@ export function ClientsPage() {
                 </p>
               )}
               {idNumberCheck === 'available' && (
-                <p className="text-xs text-green-600">✓ رقم الهوية متاح</p>
+                <p className="text-xs sm:text-sm text-green-600">✓ رقم الهوية متاح</p>
               )}
             </div>
 
             <div className="space-y-2">
-              <Label className="text-gray-700 font-medium">
+              <Label className="text-gray-800 font-medium text-sm sm:text-base">
                 الاسم <span className="text-red-500">*</span>
               </Label>
               <Input
                 value={name}
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) => setName(e.target.value)}
                 placeholder="اسم العميل"
-                className="transition-all focus:shadow-md"
+                className="text-base min-h-[2.75rem] transition-all focus:shadow-md"
               />
             </div>
+            </div>
 
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 sm:gap-6">
             <div className="space-y-2">
-              <Label className="text-gray-700 font-medium">
+              <Label className="text-gray-800 font-medium text-sm sm:text-base">
                 الهاتف <span className="text-red-500">*</span>
               </Label>
               <Input
                 value={phone}
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPhone(e.target.value)}
                 placeholder="مثال: 5822092120192614/10/593"
-                className="transition-all focus:shadow-md"
+                className="text-base min-h-[2.75rem] transition-all focus:shadow-md"
               />
             </div>
 
             <div className="space-y-2">
-              <Label className="text-gray-700 font-medium">البريد الإلكتروني</Label>
+              <Label className="text-gray-800 font-medium text-sm sm:text-base">البريد الإلكتروني</Label>
               <Input
                 type="email"
                 value={email}
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) => setEmail(e.target.value)}
                 placeholder="example@email.com"
-                className="transition-all focus:shadow-md"
+                className="text-base min-h-[2.75rem] transition-all focus:shadow-md"
               />
+            </div>
             </div>
 
             <div className="space-y-2">
-              <Label className="text-gray-700 font-medium">العنوان</Label>
+              <Label className="text-gray-800 font-medium text-sm sm:text-base">العنوان</Label>
               <Input
                 value={address}
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAddress(e.target.value)}
                 placeholder="عنوان العميل"
-                className="transition-all focus:shadow-md"
+                className="text-base min-h-[2.75rem] transition-all focus:shadow-md"
               />
             </div>
 
             <div className="space-y-2">
-              <Label className="text-gray-700 font-medium">النوع</Label>
+              <Label className="text-gray-800 font-medium text-sm sm:text-base">النوع</Label>
               <Select
                 value={type}
                 onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
                   setType(e.target.value as ClientType)
                 }
+                className="text-base min-h-[2.75rem]"
               >
                 <option value="individual">فردي</option>
                 <option value="company">شركة</option>
@@ -1179,15 +1212,16 @@ export function ClientsPage() {
             </div>
 
             <div className="space-y-2">
-              <Label className="text-gray-700 font-medium">ملاحظات</Label>
+              <Label className="text-gray-800 font-medium text-sm sm:text-base">ملاحظات</Label>
               <Textarea
                 value={notes}
                 onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setNotes(e.target.value)}
                 placeholder="ملاحظات إضافية"
-                rows={3}
-                className="transition-all focus:shadow-md"
+                rows={4}
+                className="text-base min-h-[5rem] transition-all focus:shadow-md w-full"
               />
             </div>
+          </div>
           </div>
         </Dialog>
 
