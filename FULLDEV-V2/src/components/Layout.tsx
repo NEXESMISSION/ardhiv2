@@ -479,7 +479,7 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
 
                 {/* Notifications Full-Screen Modal */}
                 {notificationsOpen && (
-                  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setNotificationsOpen(false)}>
+                  <div data-modal="true" role="dialog" aria-modal="true" className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setNotificationsOpen(false)}>
                     <div className="w-full h-full max-w-7xl max-h-[95vh] bg-white rounded-lg shadow-2xl flex flex-col m-4" onClick={(e) => e.stopPropagation()}>
                       {/* Header */}
                       <div className="p-4 sm:p-6 border-b border-gray-200 flex items-center justify-between bg-gradient-to-r from-blue-50 to-indigo-50 flex-shrink-0">

@@ -1283,8 +1283,8 @@ export function LandPage() {
     saleType: 'full' | 'installment' | 'promise'
     paymentOfferId?: string
     notes?: string
-    /** When set, use this total price instead of price per m² (temporary fixed price) */
-    fixedTotalPrice?: number
+    /** When set, use fixed price per piece in same order as pieces (temporary fixed price) */
+    fixedPricesPerPiece?: number[]
   }) {
     if (!saleData.client || selectedPiecesForSale.length === 0 || !selectedBatchForPieces) return
 
@@ -1337,15 +1337,12 @@ export function LandPage() {
       const totalSurface = selectedPiecesForSale.reduce((sum, p) => sum + (p.surface_m2 || 0), 0)
       let pieceCalculations: { piece: any; calc: { totalPrice: number } }[]
 
-      if (saleData.fixedTotalPrice != null && saleData.fixedTotalPrice > 0) {
-        // Use hard-coded total price: distribute per piece by surface ratio
-        const totalPrice = saleData.fixedTotalPrice
-        pieceCalculations = selectedPiecesForSale.map((piece) => {
-          const piecePrice = totalSurface > 0
-            ? (piece.surface_m2 / totalSurface) * totalPrice
-            : totalPrice / selectedPiecesForSale.length
-          return { piece, calc: { totalPrice: piecePrice } }
-        })
+      if (saleData.fixedPricesPerPiece != null && saleData.fixedPricesPerPiece.length === selectedPiecesForSale.length) {
+        // Use per-piece fixed prices (one can be 4500, another 5000, etc.)
+        pieceCalculations = selectedPiecesForSale.map((piece, i) => ({
+          piece,
+          calc: { totalPrice: saleData.fixedPricesPerPiece![i] },
+        }))
       } else {
         // Normal: calculate from price per m² (full or installment)
         pieceCalculations = selectedPiecesForSale.map((piece) => {

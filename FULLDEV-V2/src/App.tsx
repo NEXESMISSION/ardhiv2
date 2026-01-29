@@ -52,7 +52,8 @@ function AppContent() {
   
   // Check if user has access to a page
   const hasAccessToPage = (pageId: string) => {
-    if (!systemUser) return false
+    // While systemUser is still loading, only home is visible so user sees something (no blank screen)
+    if (!systemUser) return pageId === 'home'
     // Owners have access to all pages
     if (systemUser.role === 'owner') return true
     // Home is always accessible

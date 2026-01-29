@@ -11,7 +11,7 @@ import { Badge } from './ui/badge'
 import { ConfirmDialog } from './ui/confirm-dialog'
 import { NotificationDialog } from './ui/notification-dialog'
 import { formatPrice, calculatePiecePrice } from '@/utils/priceCalculator'
-import { calculateInstallmentWithDeposit } from '@/utils/installmentCalculator'
+import { calculateInstallment } from '@/utils/installmentCalculator'
 
 interface LandPiece {
   id: string
@@ -54,8 +54,8 @@ interface MultiPieceSaleDialogProps {
     saleType: 'full' | 'installment' | 'promise'
     paymentOfferId?: string
     notes?: string
-    /** When set, use this total price instead of price per m² (temporary fixed price) */
-    fixedTotalPrice?: number
+    /** When set, use fixed prices: one per piece in same order as pieces (temporary fixed price) */
+    fixedPricesPerPiece?: number[]
   }) => Promise<void>
 }
 
@@ -79,9 +79,10 @@ export function MultiPieceSaleDialog({
   const [paymentOffers, setPaymentOffers] = useState<PaymentOffer[]>([])
   const [loadingOffers, setLoadingOffers] = useState(false)
   const [notes, setNotes] = useState('')
-  /** Temporary option: use a hard-coded total price instead of price per m² */
-  const [useFixedPrice, setUseFixedPrice] = useState(false)
-  const [fixedTotalPriceInput, setFixedTotalPriceInput] = useState('')
+  /** Temporary option: use fixed price per piece instead of price per m² */
+  const [useFixedPrice, setUseFixedPrice] = useState(true)
+  /** Per-piece fixed price input (piece.id -> input value) when useFixedPrice */
+  const [fixedPriceByPieceId, setFixedPriceByPieceId] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [showFinalConfirmDialog, setShowFinalConfirmDialog] = useState(false)
@@ -103,26 +104,24 @@ export function MultiPieceSaleDialog({
       totalSurface += piece.surface_m2 || 0
     })
 
-    // Temporary fixed price: use hard-coded total instead of price per m²
-    const fixedPrice = useFixedPrice ? parseFloat(fixedTotalPriceInput) : NaN
-    if (useFixedPrice && !isNaN(fixedPrice) && fixedPrice > 0) {
-      totalPrice = fixedPrice
+    // Temporary fixed price: per-piece prices (سعر كل قطعة على حدة), total = sum
+    if (useFixedPrice) {
+      pieces.forEach((piece) => {
+        const v = parseFloat(fixedPriceByPieceId[piece.id] || '0')
+        if (!isNaN(v) && v > 0) totalPrice += v
+      })
     } else if (saleType === 'installment' && selectedOffer && totalSurface > 0) {
-      // Calculate for total surface (more accurate than summing per piece)
-      const totalInstallmentCalc = calculateInstallmentWithDeposit(
-        totalSurface,
-        {
-          price_per_m2_installment: selectedOffer.price_per_m2_installment,
-          advance_mode: selectedOffer.advance_mode,
-          advance_value: selectedOffer.advance_value,
-          calc_mode: selectedOffer.calc_mode,
-          monthly_amount: selectedOffer.monthly_amount,
-          months: selectedOffer.months,
-        },
-        0 // No deposit yet at this stage
-      )
-      
-      totalPrice = totalInstallmentCalc.basePrice
+      // Offer is per piece: base = price_per_m² × total surface
+      const surfacePerPiece = totalSurface / pieces.length
+      const perPieceCalc = calculateInstallment(surfacePerPiece, {
+        price_per_m2_installment: selectedOffer.price_per_m2_installment,
+        advance_mode: selectedOffer.advance_mode,
+        advance_value: selectedOffer.advance_value,
+        calc_mode: selectedOffer.calc_mode,
+        monthly_amount: selectedOffer.monthly_amount,
+        months: selectedOffer.months,
+      })
+      totalPrice = perPieceCalc.basePrice * pieces.length
     } else {
       // For full payment or promise, use regular price calculation
       pieces.forEach((piece) => {
@@ -148,52 +147,40 @@ export function MultiPieceSaleDialog({
       let finalNumberOfMonths: number
 
       if (useFixedPrice && totalPrice > 0) {
-        // Fixed price: compute advance and remaining from our total (not from price_per_m² × surface)
-        advanceAmount = selectedOffer.advance_mode === 'fixed'
+        // Fixed price: advance and monthly are per piece × n
+        const advancePerPiece = selectedOffer.advance_mode === 'fixed'
           ? selectedOffer.advance_value
-          : (totalPrice * selectedOffer.advance_value) / 100
+          : (totalPrice / pieces.length) * (selectedOffer.advance_value / 100)
+        advanceAmount = advancePerPiece * pieces.length
         advanceAfterDeposit = Math.max(0, advanceAmount - deposit)
-        // المبلغ المتبقي للأقساط = السعر الإجمالي - max(التسبقة، العربون)
         remainingForInstallments = totalPrice - Math.max(advanceAmount, deposit)
-      } else {
-        // Normal: use calculator with surface × price_per_m²
-        const calc = calculateInstallmentWithDeposit(
-          totalSurface,
-          {
-            price_per_m2_installment: selectedOffer.price_per_m2_installment,
-            advance_mode: selectedOffer.advance_mode,
-            advance_value: selectedOffer.advance_value,
-            calc_mode: selectedOffer.calc_mode,
-            monthly_amount: selectedOffer.monthly_amount,
-            months: selectedOffer.months,
-          },
-          deposit
-        )
-        advanceAmount = calc.advanceAmount
-        advanceAfterDeposit = calc.advanceAfterDeposit
-        remainingForInstallments = calc.remainingForInstallments
-        finalMonthlyPayment = calc.recalculatedMonthlyPayment
-        finalNumberOfMonths = calc.recalculatedNumberOfMonths
-      }
-
-      // When fixed price, compute monthly/number of months from remainingForInstallments and offer
-      if (useFixedPrice && totalPrice > 0) {
+        const monthlyPerPiece = selectedOffer.monthly_amount || 0
+        finalMonthlyPayment = monthlyPerPiece * pieces.length
+        finalNumberOfMonths = finalMonthlyPayment > 0 ? Math.ceil(remainingForInstallments / finalMonthlyPayment) : 0
         if (selectedOffer.calc_mode === 'months' && (selectedOffer.months || 0) > 0) {
           finalNumberOfMonths = selectedOffer.months!
           finalMonthlyPayment = finalNumberOfMonths > 0 ? remainingForInstallments / finalNumberOfMonths : 0
-        } else if (selectedOffer.calc_mode === 'monthlyAmount' && (selectedOffer.monthly_amount || 0) > 0) {
-          finalMonthlyPayment = selectedOffer.monthly_amount!
-          finalNumberOfMonths = Math.ceil(remainingForInstallments / finalMonthlyPayment)
-        } else {
-          finalMonthlyPayment = 0
-          finalNumberOfMonths = 0
         }
       } else {
-        // Non-fixed: adjust monthly/months from remaining (original logic)
-        if (selectedOffer.calc_mode === 'monthlyAmount' && finalMonthlyPayment > 0) {
-          finalNumberOfMonths = Math.ceil(remainingForInstallments / finalMonthlyPayment)
-        } else if (selectedOffer.calc_mode === 'months' && finalNumberOfMonths > 0) {
-          finalMonthlyPayment = remainingForInstallments / finalNumberOfMonths
+        // Normal: offer is per piece — تسبقة and مبلغ شهري are per piece, so multiply by n
+        const surfacePerPiece = totalSurface / pieces.length
+        const perPieceCalc = calculateInstallment(surfacePerPiece, {
+          price_per_m2_installment: selectedOffer.price_per_m2_installment,
+          advance_mode: selectedOffer.advance_mode,
+          advance_value: selectedOffer.advance_value,
+          calc_mode: selectedOffer.calc_mode,
+          monthly_amount: selectedOffer.monthly_amount,
+          months: selectedOffer.months,
+        })
+        advanceAmount = perPieceCalc.advanceAmount * pieces.length
+        advanceAfterDeposit = Math.max(0, advanceAmount - deposit)
+        remainingForInstallments = totalPrice - Math.max(advanceAmount, deposit)
+        finalMonthlyPayment = perPieceCalc.monthlyPayment * pieces.length
+        if (selectedOffer.calc_mode === 'months' && (selectedOffer.months || 0) > 0) {
+          finalNumberOfMonths = selectedOffer.months!
+          finalMonthlyPayment = finalNumberOfMonths > 0 ? remainingForInstallments / finalNumberOfMonths : 0
+        } else {
+          finalNumberOfMonths = finalMonthlyPayment > 0 ? Math.ceil(remainingForInstallments / finalMonthlyPayment) : 0
         }
       }
       
@@ -219,7 +206,7 @@ export function MultiPieceSaleDialog({
       remaining,
       installmentDetails,
     }
-  }, [pieces, batchPricePerM2, depositAmount, saleType, selectedOfferId, paymentOffers, useFixedPrice, fixedTotalPriceInput])
+  }, [pieces, batchPricePerM2, depositAmount, saleType, selectedOfferId, paymentOffers, useFixedPrice, fixedPriceByPieceId])
 
   // Reset form when dialog opens
   useEffect(() => {
@@ -228,8 +215,8 @@ export function MultiPieceSaleDialog({
       setNotes('')
       setSaleType('full')
       setSelectedOfferId('')
-      setUseFixedPrice(false)
-      setFixedTotalPriceInput('')
+      setUseFixedPrice(true)
+      setFixedPriceByPieceId({})
       setError(null)
       
       // Set default deadline to today
@@ -301,9 +288,15 @@ export function MultiPieceSaleDialog({
       return
     }
 
-    if (useFixedPrice && (calculations.totalPrice <= 0 || isNaN(calculations.totalPrice))) {
-      setError('يرجى إدخال سعر إجمالي صحيح عند استخدام السعر الثابت')
-      return
+    if (useFixedPrice) {
+      const missing = pieces.some((p) => {
+        const v = parseFloat(fixedPriceByPieceId[p.id] || '0')
+        return isNaN(v) || v <= 0
+      })
+      if (missing || calculations.totalPrice <= 0) {
+        setError('يرجى إدخال سعراً صحيحاً لكل قطعة عند استخدام السعر الثابت')
+        return
+      }
     }
 
     if (saleType === 'installment' && !selectedOfferId) {
@@ -327,7 +320,9 @@ export function MultiPieceSaleDialog({
         saleType,
         paymentOfferId: saleType === 'installment' && selectedOfferId ? selectedOfferId : undefined,
         notes: notes.trim() || undefined,
-        fixedTotalPrice: useFixedPrice && calculations.totalPrice > 0 ? calculations.totalPrice : undefined,
+        fixedPricesPerPiece: useFixedPrice && calculations.totalPrice > 0
+          ? pieces.map((p) => parseFloat(fixedPriceByPieceId[p.id] || '0'))
+          : undefined,
       })
       setSuccessMessage(`تم إنشاء ${pieces.length} بيع بنجاح!`)
       setShowSuccessDialog(true)
@@ -366,43 +361,6 @@ export function MultiPieceSaleDialog({
       }
     >
       <div className="space-y-3 sm:space-y-4 lg:space-y-6">
-        {/* Fixed price option - FIRST so always visible on mobile/PWA */}
-        <Card className="p-3 sm:p-4 bg-amber-50 border-2 border-amber-300 flex-shrink-0">
-          <div className="flex items-start gap-3">
-            <input
-              type="checkbox"
-              id="useFixedPrice"
-              checked={useFixedPrice}
-              onChange={(e) => setUseFixedPrice(e.target.checked)}
-              className="mt-0.5 w-5 h-5 rounded border-2 border-amber-500 text-amber-600 focus:ring-amber-500 flex-shrink-0"
-              aria-label="استخدام سعر ثابت"
-            />
-            <div className="flex-1 min-w-0 space-y-2">
-              <Label htmlFor="useFixedPrice" className="text-sm sm:text-base font-bold text-amber-900 cursor-pointer block">
-                استخدام سعر ثابت (مؤقت)
-              </Label>
-              <p className="text-xs sm:text-sm text-amber-800 leading-relaxed">
-                استخدم سعراً إجمالياً محدداً بدلاً من السعر لكل م² (نقدي أو تقسيط).
-              </p>
-              {useFixedPrice && (
-                <div className="pt-2">
-                  <Label className="text-xs sm:text-sm font-medium">السعر الإجمالي (د.ت) *</Label>
-                  <Input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={fixedTotalPriceInput}
-                    onChange={(e) => setFixedTotalPriceInput(e.target.value)}
-                    placeholder="0.00"
-                    size="sm"
-                    className="mt-1 text-sm w-full max-w-[14rem]"
-                  />
-                </div>
-              )}
-            </div>
-          </div>
-        </Card>
-
         {error && <Alert variant="error" className="text-xs sm:text-sm">{error}</Alert>}
 
         {/* Client Information */}
@@ -422,10 +380,8 @@ export function MultiPieceSaleDialog({
           <h3 className="text-xs sm:text-sm lg:text-base font-semibold text-gray-900 mb-2 sm:mb-3">القطع المختارة ({pieces.length})</h3>
           <div className="space-y-1.5 sm:space-y-2 max-h-48 sm:max-h-56 lg:max-h-64 overflow-y-auto scrollbar-thin">
             {pieces.map((piece, idx) => {
-              // When fixed price is used, show proportional price per piece
-              const totalSurface = pieces.reduce((s, p) => s + (p.surface_m2 || 0), 0)
-              const piecePrice = useFixedPrice && calculations.totalPrice > 0 && totalSurface > 0
-                ? (piece.surface_m2 / totalSurface) * calculations.totalPrice
+              const piecePrice = useFixedPrice
+                ? parseFloat(fixedPriceByPieceId[piece.id] || '0') || 0
                 : (() => {
                     const selectedOffer = paymentOffers.find((o) => o.id === selectedOfferId)
                     const pricePerM2 = saleType === 'installment' && selectedOffer
@@ -441,14 +397,31 @@ export function MultiPieceSaleDialog({
                   })()
               return (
                 <Card key={piece.id} className="p-2 sm:p-2.5 lg:p-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-                        <Badge variant="default" size="sm" className="text-xs">#{idx + 1}</Badge>
-                        <span className="text-xs sm:text-sm font-medium truncate">القطعة {piece.piece_number}</span>
+                  <div className="space-y-2">
+                    {useFixedPrice && (
+                      <div className="flex items-center gap-2">
+                        <Label className="text-xs sm:text-sm font-medium whitespace-nowrap">السعر (د.ت) *</Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={fixedPriceByPieceId[piece.id] ?? ''}
+                          onChange={(e) => setFixedPriceByPieceId((prev) => ({ ...prev, [piece.id]: e.target.value }))}
+                          placeholder="0.00"
+                          size="sm"
+                          className="text-xs sm:text-sm w-24 sm:w-28"
+                        />
                       </div>
-                      <div className="text-xs sm:text-sm text-gray-600 mt-0.5 sm:mt-1">
-                        المساحة: {piece.surface_m2.toLocaleString()} م² · السعر: {formatPrice(piecePrice)} DT
+                    )}
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                          <Badge variant="default" size="sm" className="text-xs">#{idx + 1}</Badge>
+                          <span className="text-xs sm:text-sm font-medium truncate">القطعة {piece.piece_number}</span>
+                        </div>
+                        <div className="text-xs sm:text-sm text-gray-600 mt-0.5 sm:mt-1">
+                          المساحة: {piece.surface_m2.toLocaleString()} م² · السعر: {formatPrice(piecePrice)} DT
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -460,6 +433,28 @@ export function MultiPieceSaleDialog({
 
         {/* Form Fields */}
         <div className="space-y-2 sm:space-y-3 lg:space-y-4">
+          {/* Fixed price option - directly above deposit */}
+          <Card className="p-3 sm:p-4 bg-amber-50 border-2 border-amber-300 flex-shrink-0">
+            <div className="flex items-start gap-3">
+              <input
+                type="checkbox"
+                id="useFixedPrice"
+                checked={useFixedPrice}
+                onChange={(e) => setUseFixedPrice(e.target.checked)}
+                className="mt-0.5 w-5 h-5 rounded border-2 border-amber-500 text-amber-600 focus:ring-amber-500 flex-shrink-0"
+                aria-label="استخدام سعر ثابت"
+              />
+              <div className="flex-1 min-w-0 space-y-2">
+                <Label htmlFor="useFixedPrice" className="text-sm sm:text-base font-bold text-amber-900 cursor-pointer block">
+                  استخدام سعر ثابت (مؤقت)
+                </Label>
+                <p className="text-xs sm:text-sm text-amber-800 leading-relaxed">
+                  استخدم سعراً إجمالياً محدداً بدلاً من السعر لكل م² (نقدي أو تقسيط). أدخل سعر كل قطعة في القائمة أعلاه.
+                </p>
+              </div>
+            </div>
+          </Card>
+
           <div className="space-y-1.5 sm:space-y-2">
             <Label className="text-xs sm:text-sm">مبلغ العربون (DT) *</Label>
             <Input

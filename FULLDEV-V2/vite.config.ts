@@ -43,6 +43,9 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        // SPA: serve index.html for all navigation so PWA opens correctly from home screen
+        navigateFallback: '/index.html',
+        navigateFallbackDenylist: [/^\/api\//, /^\/_/, /^\/[^/]+\.[a-z0-9]+$/i],
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/.*\.supabase\.co\/.*/i,
