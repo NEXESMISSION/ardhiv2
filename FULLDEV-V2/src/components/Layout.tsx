@@ -40,6 +40,7 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
   const [loadingMore, setLoadingMore] = useState(false)
   const [hasMore, setHasMore] = useState(true)
   const [newNotificationReceived, setNewNotificationReceived] = useState(false)
+  const [pwaUpdateAvailable, setPwaUpdateAvailable] = useState(false)
   const subscriptionRef = useRef<any>(null)
   const notificationIdsRef = useRef<Set<string>>(new Set())
   const INITIAL_LIMIT = 20
@@ -56,6 +57,13 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
     }
     sessionStorage.setItem('previousPage', currentPage)
   }, [currentPage])
+
+  // PWA: show banner when new version is available (after deploy)
+  useEffect(() => {
+    const onUpdate = () => setPwaUpdateAvailable(true)
+    window.addEventListener('pwa-update-available', onUpdate)
+    return () => window.removeEventListener('pwa-update-available', onUpdate)
+  }, [])
 
   // Load notifications and set up real-time subscription (for all users)
   useEffect(() => {
@@ -418,8 +426,28 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
     }
   }, [notificationsOpen])
 
+  const handlePwaRefresh = () => {
+    const updateSW = (window as any).__pwa_updateSW
+    if (typeof updateSW === 'function') updateSW(true)
+    else window.location.reload()
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 flex">
+      {/* PWA update banner: new version available after deploy */}
+      {pwaUpdateAvailable && (
+        <div className="fixed top-0 left-0 right-0 z-[200] bg-blue-600 text-white px-3 py-2 flex items-center justify-center gap-3 shadow-lg">
+          <span className="text-sm font-medium">يتوفر إصدار جديد. أعد التحميل لاستخدامه.</span>
+          <button
+            type="button"
+            onClick={handlePwaRefresh}
+            className="px-3 py-1.5 bg-white text-blue-600 rounded-md text-sm font-semibold hover:bg-blue-50"
+          >
+            أعد التحميل
+          </button>
+        </div>
+      )}
+
       <Sidebar
         currentPage={currentPage}
         onNavigate={onNavigate}

@@ -47,6 +47,8 @@ interface MultiPieceSaleDialogProps {
   batchId: string
   batchName: string
   batchPricePerM2: number | null
+  /** Called when user wants to add another piece to the sale from inside the dialog */
+  onRequestAddPiece?: () => void
   onConfirm: (data: {
     client: Client
     depositAmount: number
@@ -67,6 +69,7 @@ export function MultiPieceSaleDialog({
   batchId,
   batchName,
   batchPricePerM2,
+  onRequestAddPiece,
   onConfirm,
 }: MultiPieceSaleDialogProps) {
   // Client is already selected, just use it
@@ -208,7 +211,7 @@ export function MultiPieceSaleDialog({
     }
   }, [pieces, batchPricePerM2, depositAmount, saleType, selectedOfferId, paymentOffers, useFixedPrice, fixedPriceByPieceId])
 
-  // Reset form when dialog opens
+  // Reset form when dialog opens; price fields stay empty (no auto-fill)
   useEffect(() => {
     if (open) {
       setDepositAmount('')
@@ -216,10 +219,8 @@ export function MultiPieceSaleDialog({
       setSaleType('full')
       setSelectedOfferId('')
       setUseFixedPrice(true)
-      setFixedPriceByPieceId({})
       setError(null)
-      
-      // Set default deadline to today
+      setFixedPriceByPieceId({})
       const today = new Date()
       setDeadlineDate(today.toISOString().split('T')[0])
     }
@@ -377,7 +378,20 @@ export function MultiPieceSaleDialog({
 
         {/* Pieces List */}
         <div>
-          <h3 className="text-xs sm:text-sm lg:text-base font-semibold text-gray-900 mb-2 sm:mb-3">القطع المختارة ({pieces.length})</h3>
+          <div className="flex items-center justify-between gap-2 mb-2 sm:mb-3">
+            <h3 className="text-xs sm:text-sm lg:text-base font-semibold text-gray-900">القطع المختارة ({pieces.length})</h3>
+            {onRequestAddPiece && (
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={onRequestAddPiece}
+                className="text-xs sm:text-sm flex-shrink-0"
+              >
+                إضافة قطعة
+              </Button>
+            )}
+          </div>
           <div className="space-y-1.5 sm:space-y-2 max-h-48 sm:max-h-56 lg:max-h-64 overflow-y-auto scrollbar-thin">
             {pieces.map((piece, idx) => {
               const piecePrice = useFixedPrice

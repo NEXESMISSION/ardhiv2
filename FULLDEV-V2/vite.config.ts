@@ -8,7 +8,8 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: 'autoUpdate',
+      // prompt: show "New version" banner and reload when user clicks (avoids losing form data)
+      registerType: 'prompt',
       includeAssets: ['icon.png'],
       manifest: {
         name: 'الادارة',

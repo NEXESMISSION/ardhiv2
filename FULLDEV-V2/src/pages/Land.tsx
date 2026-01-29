@@ -146,6 +146,11 @@ export function LandPage() {
   const [saleDialogOpen, setSaleDialogOpen] = useState(false)
   const [selectedPiecesForSale, setSelectedPiecesForSale] = useState<any[]>([])
   const [selectedClient, setSelectedClient] = useState<any>(null)
+  const [addPieceToSaleDialogOpen, setAddPieceToSaleDialogOpen] = useState(false)
+  const [availablePiecesToAdd, setAvailablePiecesToAdd] = useState<any[]>([])
+  const [piecesToAddSelectedIds, setPiecesToAddSelectedIds] = useState<Set<string>>(new Set())
+  const [addPieceSearchQuery, setAddPieceSearchQuery] = useState('')
+  const [loadingAvailablePieces, setLoadingAvailablePieces] = useState(false)
   // Ref to track when we're transitioning from client selection to sale dialog
   // This prevents the onClose from clearing state during the transition
   const isTransitioningToSaleRef = useRef(false)
@@ -1275,6 +1280,61 @@ export function LandPage() {
   function removeInstallmentOffer(offerId: string) {
     setInstallmentOffers((prev) => prev.filter((o) => o.id !== offerId))
   }
+
+  async function openAddPieceToSaleDialog() {
+    if (!selectedBatchForPieces) return
+    setAddPieceToSaleDialogOpen(true)
+    setPiecesToAddSelectedIds(new Set())
+    setAddPieceSearchQuery('')
+    setLoadingAvailablePieces(true)
+    try {
+      const idsAlreadyInSale = new Set(selectedPiecesForSale.map((p) => p.id))
+      const { data, error } = await supabase
+        .from('land_pieces')
+        .select('id, batch_id, piece_number, surface_m2, notes, direct_full_payment_price, status, created_at, updated_at')
+        .eq('batch_id', selectedBatchForPieces.id)
+        .eq('status', 'Available')
+        .limit(500)
+      if (error) throw error
+      const available = (data || []).filter((p) => !idsAlreadyInSale.has(p.id))
+      setAvailablePiecesToAdd(available)
+    } catch (e) {
+      console.error('Error loading available pieces:', e)
+      setAvailablePiecesToAdd([])
+    } finally {
+      setLoadingAvailablePieces(false)
+    }
+  }
+
+  function togglePieceToAdd(id: string) {
+    setPiecesToAddSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function confirmAddPiecesToSale() {
+    const toAdd = availablePiecesToAdd.filter((p) => piecesToAddSelectedIds.has(p.id))
+    if (toAdd.length > 0) {
+      setSelectedPiecesForSale((prev) => [...prev, ...toAdd])
+    }
+    setAddPieceToSaleDialogOpen(false)
+    setAvailablePiecesToAdd([])
+    setPiecesToAddSelectedIds(new Set())
+    setAddPieceSearchQuery('')
+  }
+
+  // Filter available pieces by search (piece number or surface)
+  const filteredPiecesToAdd = addPieceSearchQuery.trim()
+    ? availablePiecesToAdd.filter((p) => {
+        const q = addPieceSearchQuery.trim().toLowerCase()
+        const num = String(p.piece_number ?? '').toLowerCase()
+        const surface = String(p.surface_m2 ?? '').toLowerCase()
+        return num.includes(q) || surface.includes(q)
+      })
+    : availablePiecesToAdd
 
   async function handleCreateSales(saleData: {
     client: Client
@@ -2747,24 +2807,99 @@ export function LandPage() {
         {selectedBatchForPieces && selectedClient && (
           <MultiPieceSaleDialog
             open={saleDialogOpen}
-                onClose={() => {
+            onClose={() => {
               setSaleDialogOpen(false)
               setSelectedClient(null)
               setSelectedPiecesForSale([])
-                }}
+            }}
             pieces={selectedPiecesForSale}
             client={selectedClient}
             batchId={selectedBatchForPieces.id}
-                batchName={selectedBatchForPieces.name}
-                batchPricePerM2={selectedBatchForPieces.pricePerM2}
+            batchName={selectedBatchForPieces.name}
+            batchPricePerM2={selectedBatchForPieces.pricePerM2}
+            onRequestAddPiece={openAddPieceToSaleDialog}
             onConfirm={async (saleData) => {
               await handleCreateSales({
                 ...saleData,
                 client: saleData.client,
               })
             }}
-              />
+          />
         )}
+
+        {/* Add piece to sale (from inside sale dialog) */}
+        <Dialog
+          open={addPieceToSaleDialogOpen}
+          onClose={() => {
+            setAddPieceToSaleDialogOpen(false)
+            setAvailablePiecesToAdd([])
+            setPiecesToAddSelectedIds(new Set())
+            setAddPieceSearchQuery('')
+          }}
+          title="إضافة قطعة للبيع"
+          size="md"
+          footer={
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setAddPieceToSaleDialogOpen(false)
+                  setAvailablePiecesToAdd([])
+                  setPiecesToAddSelectedIds(new Set())
+                  setAddPieceSearchQuery('')
+                }}
+              >
+                إلغاء
+              </Button>
+              <Button
+                variant="primary"
+                onClick={confirmAddPiecesToSale}
+                disabled={piecesToAddSelectedIds.size === 0}
+              >
+                إضافة المحدد ({piecesToAddSelectedIds.size})
+              </Button>
+            </div>
+          }
+        >
+          {loadingAvailablePieces ? (
+            <p className="text-sm text-gray-600 py-4">جاري تحميل القطع المتاحة...</p>
+          ) : availablePiecesToAdd.length === 0 ? (
+            <p className="text-sm text-gray-600 py-4">لا توجد قطع متاحة للإضافة في هذه الدفعة.</p>
+          ) : (
+            <>
+              <div className="mb-3">
+                <Input
+                  type="text"
+                  placeholder="بحث برقم القطعة أو المساحة..."
+                  value={addPieceSearchQuery}
+                  onChange={(e) => setAddPieceSearchQuery(e.target.value)}
+                  size="sm"
+                  className="w-full text-sm"
+                />
+              </div>
+              <div className="space-y-2 max-h-64 overflow-y-auto scrollbar-thin">
+                {filteredPiecesToAdd.map((piece) => (
+                <label
+                  key={piece.id}
+                  className="flex items-center gap-3 p-2 rounded-lg border border-gray-200 hover:bg-gray-50 cursor-pointer"
+                >
+                  <input
+                    type="checkbox"
+                    checked={piecesToAddSelectedIds.has(piece.id)}
+                    onChange={() => togglePieceToAdd(piece.id)}
+                    className="w-4 h-4 text-blue-600 rounded"
+                  />
+                  <span className="font-medium">القطعة {piece.piece_number}</span>
+                  <span className="text-sm text-gray-500">المساحة: {piece.surface_m2?.toLocaleString() ?? 0} م²</span>
+                </label>
+              ))}
+              </div>
+              {addPieceSearchQuery.trim() && filteredPiecesToAdd.length === 0 && (
+                <p className="text-sm text-gray-500 mt-2">لا توجد نتائج للبحث.</p>
+              )}
+            </>
+          )}
+        </Dialog>
 
         {/* Pieces View Dialog */}
         <Dialog

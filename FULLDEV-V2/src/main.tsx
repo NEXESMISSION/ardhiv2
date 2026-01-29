@@ -1,16 +1,26 @@
-// PWA Service Worker Registration
-// The vite-plugin-pwa handles service worker registration automatically
-// This code ensures proper PWA functionality
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    // Service worker is registered automatically by vite-plugin-pwa
-    // This is just for logging and ensuring PWA is ready
-    navigator.serviceWorker.ready.then((registration) => {
-      console.log('PWA Service Worker ready:', registration.scope)
-    }).catch((error) => {
-      console.log('PWA Service Worker registration failed:', error)
-    })
-  })
+// PWA: register service worker and notify app when update is available
+import { registerSW } from 'virtual:pwa-register'
+
+const updateSW = registerSW({
+  immediate: true,
+  onNeedRefresh() {
+    // New content available; tell the app to show "New version - Refresh" banner
+    window.dispatchEvent(new CustomEvent('pwa-update-available'))
+  },
+  onOfflineReady() {
+    console.log('PWA: offline ready')
+  },
+  onRegistered(registration) {
+    if (registration) console.log('PWA: SW registered', registration.scope)
+  },
+  onRegisterError(error) {
+    console.warn('PWA: SW register error', error)
+  },
+})
+
+// Expose reload for update banner (optional)
+if (typeof window !== 'undefined') {
+  ;(window as any).__pwa_updateSW = updateSW
 }
 
 import { StrictMode } from 'react'
