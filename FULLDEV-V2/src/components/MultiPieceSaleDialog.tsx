@@ -380,6 +380,43 @@ export function MultiPieceSaleDialog({
           </Card>
         )}
 
+        {/* Fixed price option - placed high so visible on mobile/PWA without scrolling */}
+        <Card className="p-2 sm:p-3 bg-amber-50 border-amber-200 border flex-shrink-0">
+          <div className="flex items-start gap-2 sm:gap-3">
+            <input
+              type="checkbox"
+              id="useFixedPrice"
+              checked={useFixedPrice}
+              onChange={(e) => setUseFixedPrice(e.target.checked)}
+              className="mt-1 w-4 h-4 sm:w-5 sm:h-5 rounded border-gray-300 text-amber-600 focus:ring-amber-500 flex-shrink-0"
+              aria-label="استخدام سعر ثابت"
+            />
+            <div className="flex-1 min-w-0 space-y-1.5">
+              <Label htmlFor="useFixedPrice" className="text-xs sm:text-sm font-semibold text-amber-900 cursor-pointer block">
+                استخدام سعر ثابت (مؤقت)
+              </Label>
+              <p className="text-xs sm:text-sm text-amber-800 leading-relaxed">
+                استخدم سعراً إجمالياً محدداً بدلاً من السعر لكل م² (نقدي أو تقسيط).
+              </p>
+              {useFixedPrice && (
+                <div className="pt-1">
+                  <Label className="text-xs sm:text-sm">السعر الإجمالي (د.ت) *</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={fixedTotalPriceInput}
+                    onChange={(e) => setFixedTotalPriceInput(e.target.value)}
+                    placeholder="0.00"
+                    size="sm"
+                    className="mt-1 text-xs sm:text-sm w-full sm:max-w-[12rem]"
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+        </Card>
+
         {/* Pieces List */}
         <div>
           <h3 className="text-xs sm:text-sm lg:text-base font-semibold text-gray-900 mb-2 sm:mb-3">القطع المختارة ({pieces.length})</h3>
@@ -420,42 +457,6 @@ export function MultiPieceSaleDialog({
             })}
           </div>
         </div>
-
-        {/* Temporary: fixed price option (hard-coded total instead of price per m²) */}
-        <Card className="p-2 sm:p-3 bg-amber-50 border-amber-200 border">
-          <div className="flex items-start gap-2">
-            <input
-              type="checkbox"
-              id="useFixedPrice"
-              checked={useFixedPrice}
-              onChange={(e) => setUseFixedPrice(e.target.checked)}
-              className="mt-1 w-4 h-4 rounded border-gray-300 text-amber-600 focus:ring-amber-500"
-            />
-            <div className="flex-1 space-y-1.5">
-              <Label htmlFor="useFixedPrice" className="text-xs sm:text-sm font-medium text-amber-900 cursor-pointer">
-                استخدام سعر ثابت (مؤقت)
-              </Label>
-              <p className="text-xs text-amber-800">
-                استخدم سعراً إجمالياً محدداً بدلاً من السعر لكل م² (نقدي أو تقسيط).
-              </p>
-              {useFixedPrice && (
-                <div className="pt-1">
-                  <Label className="text-xs sm:text-sm">السعر الإجمالي (د.ت) *</Label>
-                  <Input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={fixedTotalPriceInput}
-                    onChange={(e) => setFixedTotalPriceInput(e.target.value)}
-                    placeholder="0.00"
-                    size="sm"
-                    className="mt-1 text-xs sm:text-sm w-full max-w-[12rem]"
-                  />
-                </div>
-              )}
-            </div>
-          </div>
-        </Card>
 
         {/* Form Fields */}
         <div className="space-y-2 sm:space-y-3 lg:space-y-4">
