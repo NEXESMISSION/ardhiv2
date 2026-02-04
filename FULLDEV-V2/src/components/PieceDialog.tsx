@@ -641,78 +641,6 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
             )}
           </div>
 
-          {totalCount > PIECES_PAGE_SIZE && (
-            <div className="flex items-center justify-center gap-2 flex-wrap py-2 border-t border-b border-gray-200">
-              <Button
-                variant="secondary"
-                size="sm"
-                disabled={currentPage <= 1 || loading}
-                onClick={() => {
-                  const prev = currentPage - 1
-                  setCurrentPage(prev)
-                  loadPieces(prev)
-                }}
-                className="text-xs"
-              >
-                السابق
-              </Button>
-              <span className="flex items-center gap-1 px-2 text-sm text-gray-700">
-                {(() => {
-                  const totalPages = Math.ceil(totalCount / PIECES_PAGE_SIZE)
-                  const pages: (number | 'ellipsis')[] = []
-                  if (totalPages <= 7) {
-                    for (let i = 1; i <= totalPages; i++) pages.push(i)
-                  } else {
-                    pages.push(1)
-                    if (currentPage > 2) pages.push('ellipsis')
-                    const mid = [currentPage - 1, currentPage, currentPage + 1].filter(p => p >= 2 && p <= totalPages - 1)
-                    mid.forEach(p => { if (!pages.includes(p)) pages.push(p) })
-                    if (currentPage < totalPages - 1) pages.push('ellipsis')
-                    if (totalPages > 1) pages.push(totalPages)
-                  }
-                  return (
-                    <>
-                      {pages.map((p, i) =>
-                        p === 'ellipsis' ? (
-                          <span key={`e-${i}`} className="px-1">...</span>
-                        ) : (
-                          <button
-                            key={p}
-                            onClick={() => {
-                              setCurrentPage(p)
-                              loadPieces(p)
-                            }}
-                            disabled={loading}
-                            className={`min-w-[28px] h-8 rounded px-2 text-sm font-medium ${
-                              currentPage === p
-                                ? 'bg-blue-600 text-white'
-                                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                            }`}
-                          >
-                            {p}
-                          </button>
-                        )
-                      )}
-                    </>
-                  )
-                })()}
-              </span>
-              <Button
-                variant="secondary"
-                size="sm"
-                disabled={currentPage >= Math.ceil(totalCount / PIECES_PAGE_SIZE) || loading}
-                onClick={() => {
-                  const next = currentPage + 1
-                  setCurrentPage(next)
-                  loadPieces(next)
-                }}
-                className="text-xs"
-              >
-                التالي
-              </Button>
-            </div>
-          )}
-
           {loading ? (
             <div className="text-center py-6 sm:py-8 flex-1 flex items-center justify-center">
               <div className="inline-block animate-spin rounded-full h-6 w-6 sm:h-8 sm:w-8 border-b-2 border-blue-600"></div>
@@ -917,6 +845,81 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
                   </Card>
                 )
               })}
+            </div>
+          )}
+
+          {!loading && pieces.length > 0 && totalCount > PIECES_PAGE_SIZE && (
+            <div className="flex items-center justify-center gap-2 flex-wrap py-3 mt-3 border-t border-gray-200 flex-shrink-0">
+              <span className="text-xs text-gray-500 mr-1">
+                صفحة {currentPage} من {Math.ceil(totalCount / PIECES_PAGE_SIZE)}
+              </span>
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={currentPage <= 1}
+                onClick={() => {
+                  const prev = currentPage - 1
+                  setCurrentPage(prev)
+                  loadPieces(prev)
+                }}
+                className="text-xs"
+              >
+                السابق
+              </Button>
+              <span className="flex items-center gap-1 px-2 text-sm text-gray-700">
+                {(() => {
+                  const totalPages = Math.ceil(totalCount / PIECES_PAGE_SIZE)
+                  const pages: (number | 'ellipsis')[] = []
+                  if (totalPages <= 7) {
+                    for (let i = 1; i <= totalPages; i++) pages.push(i)
+                  } else {
+                    pages.push(1)
+                    if (currentPage > 2) pages.push('ellipsis')
+                    const mid = [currentPage - 1, currentPage, currentPage + 1].filter(p => p >= 2 && p <= totalPages - 1)
+                    mid.forEach(p => { if (!pages.includes(p)) pages.push(p) })
+                    if (currentPage < totalPages - 1) pages.push('ellipsis')
+                    if (totalPages > 1) pages.push(totalPages)
+                  }
+                  return (
+                    <>
+                      {pages.map((p, i) =>
+                        p === 'ellipsis' ? (
+                          <span key={`e-${i}`} className="px-1">...</span>
+                        ) : (
+                          <button
+                            key={p}
+                            onClick={() => {
+                              setCurrentPage(p)
+                              loadPieces(p)
+                            }}
+                            disabled={loading}
+                            className={`min-w-[28px] h-8 rounded px-2 text-sm font-medium ${
+                              currentPage === p
+                                ? 'bg-blue-600 text-white'
+                                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                            }`}
+                          >
+                            {p}
+                          </button>
+                        )
+                      )}
+                    </>
+                  )
+                })()}
+              </span>
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={currentPage >= Math.ceil(totalCount / PIECES_PAGE_SIZE)}
+                onClick={() => {
+                  const next = currentPage + 1
+                  setCurrentPage(next)
+                  loadPieces(next)
+                }}
+                className="text-xs"
+              >
+                التالي
+              </Button>
             </div>
           )}
 
