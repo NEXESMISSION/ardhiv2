@@ -1,19 +1,21 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, lazy, Suspense } from 'react'
 import './App.css'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import { Layout } from './components/Layout'
-import { LoginPage } from './pages/Login'
-import { HomePage } from './pages/Home'
-import { LandPage } from './pages/Land'
-import { ClientsPage } from './pages/Clients'
-import { ConfirmationPage } from './pages/Confirmation'
-import { FinancePage } from './pages/Finance'
-import { ContractWritersPage } from './pages/ContractWriters'
-import { InstallmentsPage } from './pages/Installments'
-import { SalesRecordsPage } from './pages/SalesRecords'
-import { AppointmentsPage } from './pages/Appointments'
-import { PhoneCallAppointmentsPage } from './pages/PhoneCallAppointments'
-import { UsersPage } from './pages/Users'
+
+// Lazy-load all pages so initial bundle is small and app opens in milliseconds (PWA-friendly)
+const LoginPage = lazy(() => import('./pages/Login').then(m => ({ default: m.LoginPage })))
+const HomePage = lazy(() => import('./pages/Home').then(m => ({ default: m.HomePage })))
+const LandPage = lazy(() => import('./pages/Land').then(m => ({ default: m.LandPage })))
+const ClientsPage = lazy(() => import('./pages/Clients').then(m => ({ default: m.ClientsPage })))
+const ConfirmationPage = lazy(() => import('./pages/Confirmation').then(m => ({ default: m.ConfirmationPage })))
+const FinancePage = lazy(() => import('./pages/Finance').then(m => ({ default: m.FinancePage })))
+const ContractWritersPage = lazy(() => import('./pages/ContractWriters').then(m => ({ default: m.ContractWritersPage })))
+const InstallmentsPage = lazy(() => import('./pages/Installments').then(m => ({ default: m.InstallmentsPage })))
+const SalesRecordsPage = lazy(() => import('./pages/SalesRecords').then(m => ({ default: m.SalesRecordsPage })))
+const AppointmentsPage = lazy(() => import('./pages/Appointments').then(m => ({ default: m.AppointmentsPage })))
+const PhoneCallAppointmentsPage = lazy(() => import('./pages/PhoneCallAppointments').then(m => ({ default: m.PhoneCallAppointmentsPage })))
+const UsersPage = lazy(() => import('./pages/Users').then(m => ({ default: m.UsersPage })))
 
 // Map URL hash to page IDs
 const pageHashMap: Record<string, string> = {
@@ -135,6 +137,21 @@ function AppContent() {
     }
   }, [systemUser, currentPage])
 
+  // Prefetch confirmation & land chunks when idle so PWA navigation is instant
+  useEffect(() => {
+    if (!user) return
+    const prefetch = () => {
+      import('./pages/Confirmation')
+      import('./pages/Land')
+    }
+    if (typeof requestIdleCallback !== 'undefined') {
+      const id = requestIdleCallback(prefetch, { timeout: 2000 })
+      return () => cancelIdleCallback(id)
+    }
+    const t = setTimeout(prefetch, 500)
+    return () => clearTimeout(t)
+  }, [user])
+
   // Update URL hash when page changes
   const handleNavigate = (page: string) => {
     // Check access before navigating
@@ -184,26 +201,41 @@ function AppContent() {
       </div>
     )
   } else {
-    // Not loading and no user - show login
-    return <LoginPage />
+    // Not loading and no user - show login (lazy chunk)
+    return (
+      <Suspense fallback={
+        <div className="min-h-screen flex items-center justify-center bg-gray-50">
+          <div className="animate-spin rounded-full h-10 w-10 border-2 border-blue-500 border-t-transparent" />
+        </div>
+      }>
+        <LoginPage />
+      </Suspense>
+    )
   }
 
-  // Show protected pages if authenticated
-  // Note: systemUser might be null temporarily while loading, but we show the app anyway
-  // This makes the app feel much faster - systemUser loads in < 500ms
+  // Minimal fallback so shell shows instantly while page chunk loads (PWA: open in ms)
+  const PageFallback = () => (
+    <div className="flex-1 flex items-center justify-center min-h-[200px]" aria-hidden>
+      <div className="animate-spin rounded-full h-8 w-8 border-2 border-blue-500 border-t-transparent" />
+    </div>
+  )
+
+  // Show protected pages if authenticated; lazy chunks load on demand
   return (
     <Layout currentPage={currentPage} onNavigate={handleNavigate}>
-      {currentPage === 'home' && <HomePage onNavigate={handleNavigate} />}
-      {hasAccessToPage('land') && currentPage === 'land' && <LandPage />}
-      {hasAccessToPage('clients') && currentPage === 'clients' && <ClientsPage />}
-      {hasAccessToPage('confirmation') && currentPage === 'confirmation' && <ConfirmationPage />}
-      {hasAccessToPage('finance') && currentPage === 'finance' && <FinancePage />}
-      {hasAccessToPage('contract-writers') && currentPage === 'contract-writers' && <ContractWritersPage />}
-      {hasAccessToPage('installments') && currentPage === 'installments' && <InstallmentsPage />}
-      {hasAccessToPage('sales-records') && currentPage === 'sales-records' && <SalesRecordsPage />}
-      {hasAccessToPage('appointments') && currentPage === 'appointments' && <AppointmentsPage />}
-      {hasAccessToPage('phone-call-appointments') && currentPage === 'phone-call-appointments' && <PhoneCallAppointmentsPage />}
-      {hasAccessToPage('users') && currentPage === 'users' && <UsersPage />}
+      <Suspense fallback={<PageFallback />}>
+        {currentPage === 'home' && <HomePage onNavigate={handleNavigate} />}
+        {hasAccessToPage('land') && currentPage === 'land' && <LandPage />}
+        {hasAccessToPage('clients') && currentPage === 'clients' && <ClientsPage />}
+        {hasAccessToPage('confirmation') && currentPage === 'confirmation' && <ConfirmationPage />}
+        {hasAccessToPage('finance') && currentPage === 'finance' && <FinancePage />}
+        {hasAccessToPage('contract-writers') && currentPage === 'contract-writers' && <ContractWritersPage />}
+        {hasAccessToPage('installments') && currentPage === 'installments' && <InstallmentsPage />}
+        {hasAccessToPage('sales-records') && currentPage === 'sales-records' && <SalesRecordsPage />}
+        {hasAccessToPage('appointments') && currentPage === 'appointments' && <AppointmentsPage />}
+        {hasAccessToPage('phone-call-appointments') && currentPage === 'phone-call-appointments' && <PhoneCallAppointmentsPage />}
+        {hasAccessToPage('users') && currentPage === 'users' && <UsersPage />}
+      </Suspense>
     </Layout>
   )
 }

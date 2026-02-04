@@ -51,21 +51,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let mounted = true
+    let sessionResolved = false
 
-    // Get initial session
+    // Cap initial auth wait so UI shows in ~1.2s even on slow network (PWA: open fast)
+    const maxWait = setTimeout(() => {
+      if (!mounted || sessionResolved) return
+      sessionResolved = true
+      setLoading(false)
+    }, 1200)
+
+    // Get initial session (often fast from localStorage)
     supabase.auth.getSession().then(async ({ data: { session } }: { data: { session: any } }) => {
       if (!mounted) return
-      
+      sessionResolved = true
+      clearTimeout(maxWait)
       initialSessionLoadedRef.current = true
       setUser(session?.user ?? null)
-      
+
       if (session?.user) {
-        // Set loading to false immediately - we have a user, show the app
-        // The systemUser will load in the background and update when ready
         setLoading(false)
-        // Only load if not already loading (prevent duplicate calls)
         if (!loadingSystemUserRef.current) {
-          // Load in background - don't await, don't block UI
           loadSystemUser(session.user.id).catch(console.error)
         }
       } else {
@@ -73,9 +78,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     }).catch((error: any) => {
       console.error('Error getting initial session:', error)
-      if (mounted) {
-      setLoading(false)
-      }
+      sessionResolved = true
+      clearTimeout(maxWait)
+      if (mounted) setLoading(false)
     })
 
     // Listen for auth changes
@@ -186,6 +191,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     return () => {
       mounted = false
+      clearTimeout(maxWait)
       subscription.unsubscribe()
       // Cleanup on unmount
       if (abortControllerRef.current) {
