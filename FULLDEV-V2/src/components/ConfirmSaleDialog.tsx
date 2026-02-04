@@ -434,28 +434,7 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
             throw new Error('معرف البيع غير صحيح')
           }
 
-          // First verify the sale exists and is pending
-          const { data: existingSale, error: checkError } = await supabase
-            .from('sales')
-            .select('id, status')
-            .eq('id', saleId)
-            .single()
-
-          if (checkError) {
-            console.error('Error checking sale:', checkError)
-            throw new Error('فشل التحقق من البيع: ' + (checkError.message || 'خطأ غير معروف'))
-          }
-
-          if (!existingSale) {
-            throw new Error('البيع غير موجود')
-          }
-
-          if (existingSale.status !== 'pending') {
-            throw new Error(`لا يمكن تحديث البيع. الحالة الحالية: ${existingSale.status}`)
-          }
-
-      // Now update only by ID (status already verified)
-      // Try direct update first
+          // Update by ID (status already verified by preCheck at start)
       let updateErr: any = null
       const updateResult = await supabase
             .from('sales')
@@ -464,53 +443,29 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
       
       updateErr = updateResult.error
 
-      // If UUID type error, try RPC function first, then show helpful error
       if (updateErr && (updateErr.message?.includes('uuid') || updateErr.message?.includes('character varying') || updateErr.message?.includes('operator does not exist'))) {
         console.warn('UUID type error detected, attempting RPC function workaround...')
-        
-        // Try RPC function as fallback (requires running fix_sales_update_uuid_issue.sql)
         try {
           const rpcResult = await supabase.rpc('update_sale_safe', {
             p_sale_id: saleId,
             p_update_data: updateData
           })
-          
           if (!rpcResult.error) {
-            // RPC succeeded, clear the error
             updateErr = null
-            console.log('RPC function succeeded!')
           } else {
-            console.error('RPC function also failed:', rpcResult.error)
-            console.error('UUID type mismatch error. This requires a database fix.')
-            console.error('Please run BOTH SQL files in your Supabase SQL editor:')
-            console.error('1. docs/sql/fix_sales_trigger_uuid_issue.sql (fixes triggers)')
-            console.error('2. docs/sql/fix_sales_update_uuid_issue.sql (creates RPC function)')
             throw new Error('خطأ في قاعدة البيانات: يرجى تشغيل ملفات SQL المطلوبة في Supabase. راجع ملفات docs/sql/fix_sales_trigger_uuid_issue.sql و fix_sales_update_uuid_issue.sql')
           }
         } catch (rpcErr: any) {
-          console.error('RPC function error:', rpcErr)
           throw new Error('خطأ في قاعدة البيانات: يرجى تشغيل ملفات SQL المطلوبة في Supabase. راجع ملفات docs/sql/fix_sales_trigger_uuid_issue.sql و fix_sales_update_uuid_issue.sql')
         }
       }
 
       if (updateErr) {
-        console.error('Error updating sale:', updateErr)
-        console.error('Update error details:', {
-          code: updateErr.code,
-          message: updateErr.message,
-          details: updateErr.details,
-          hint: updateErr.hint,
-        })
-        
-        // Check if it's a 404 (sale not found or RLS blocking)
         if (updateErr.code === 'PGRST116' || updateErr.message?.includes('404') || updateErr.message?.includes('not found')) {
           throw new Error('البيع غير موجود أو لا يمكن الوصول إليه. يرجى تحديث الصفحة والمحاولة مرة أخرى.')
         }
-        
         throw new Error(updateErr.message || 'فشل تحديث البيع')
       }
-
-          // If no error, update succeeded
 
           setSuccessMessage(`تم استلام ${formatPrice(paymentAmount)} DT. المتبقي: ${formatPrice(newRemaining)} DT`)
           setShowSuccessDialog(true)
@@ -561,36 +516,13 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
         throw new Error('معرف البيع غير صحيح')
       }
 
-      // First verify the sale exists and is pending before updating
-      const { data: existingSale, error: checkError } = await supabase
-        .from('sales')
-        .select('id, status')
-        .eq('id', saleId)
-        .single()
-
-      if (checkError) {
-        console.error('Error checking sale:', checkError)
-        throw new Error('فشل التحقق من البيع: ' + (checkError.message || 'خطأ غير معروف'))
-      }
-
-      if (!existingSale) {
-        throw new Error('البيع غير موجود')
-      }
-
-      if (existingSale.status !== 'pending') {
-        throw new Error(`لا يمكن تأكيد البيع. الحالة الحالية: ${existingSale.status}`)
-      }
-
-      // Now update only by ID (status already verified)
-      // Try direct update first, if it fails with UUID error, the database needs the RPC function
+      // Update by ID (status already verified by preCheck at start)
       let updateErr: any = null
-      
       try {
         const result = await supabase
         .from('sales')
         .update(updateData)
           .match({ id: saleId })
-        
         updateErr = result.error
       } catch (err: any) {
         updateErr = err
@@ -681,163 +613,48 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
         if (installmentsErr) throw installmentsErr
       }
 
-      // Double-check sale status before creating notifications to prevent duplicates
-      // This ensures we don't create notifications if the sale was already confirmed
-      const { data: finalSaleCheck, error: finalCheckError } = await supabase
-        .from('sales')
-        .select('id, status')
-        .eq('id', sale.id)
-        .single()
-
-      if (finalCheckError || !finalSaleCheck) {
-        console.warn('Could not verify sale status before notification, skipping notifications')
-      } else if (finalSaleCheck.status !== 'completed') {
-        console.warn(`Sale status is ${finalSaleCheck.status}, not 'completed'. Skipping notifications to prevent duplicates.`)
-        // Don't create notifications if sale is not actually completed
-      } else {
-        // Sale is confirmed as completed, proceed with notifications
-        // Notify owners and current user about sale confirmation
-        try {
-        const clientName = sale.client?.name || 'عميل غير معروف'
-      const pieceNumber = sale.piece?.piece_number || 'غير معروف'
-      const batchName = sale.batch?.name || 'غير معروف'
-        const confirmedByName = systemUser?.name || 'غير معروف'
-        const confirmedByPlace = systemUser?.place || null
-        
-        // Build notification message based on payment method
-        let notificationMessage = ''
-        let notificationTitle = ''
-        
-        if (sale.payment_method === 'full') {
-          // Full payment notification
-          notificationTitle = 'تم تأكيد البيع - دفع كامل'
-          notificationMessage = `تم تأكيد بيع القطعة ${pieceNumber} للعميل ${clientName} من دفعة ${batchName}\n\n`
-          notificationMessage += `📋 تفاصيل البيع:\n`
-          notificationMessage += `• السعر الإجمالي: ${formatPrice(calculations.totalPrice)} DT\n`
-          notificationMessage += `• العربون (مدفوع مسبقاً): ${formatPrice(sale.deposit_amount || 0)} DT\n`
-          notificationMessage += `• المبلغ المستلم عند التأكيد: ${formatPrice(calculations.confirmationAmount)} DT\n\n`
-          notificationMessage += `✅ تم التأكيد بواسطة: ${confirmedByName}${confirmedByPlace ? ` (${confirmedByPlace})` : ''}`
-        } else if (sale.payment_method === 'installment') {
-          // Installment notification
-          notificationTitle = 'تم تأكيد البيع - تقسيط'
-          notificationMessage = `تم تأكيد بيع القطعة ${pieceNumber} للعميل ${clientName} من دفعة ${batchName}\n\n`
-          notificationMessage += `📋 تفاصيل البيع:\n`
-          notificationMessage += `• السعر الإجمالي: ${formatPrice(calculations.totalPrice)} DT\n`
-          notificationMessage += `• العربون (مدفوع مسبقاً): ${formatPrice(sale.deposit_amount || 0)} DT\n`
-          notificationMessage += `• التسبقة (المستلم عند التأكيد): ${formatPrice(calculations.confirmationAmount)} DT\n`
-          
-          if (calculations.installmentDetails) {
-            notificationMessage += `\n📅 تفاصيل الأقساط:\n`
-            notificationMessage += `• عدد الأشهر: ${calculations.installmentDetails.numberOfMonths} شهر\n`
-            notificationMessage += `• المبلغ الشهري: ${formatPrice(calculations.installmentDetails.monthlyPayment)} DT\n`
-            if (calculations.installmentDetails.startDate && calculations.installmentDetails.endDate) {
-              notificationMessage += `• من: ${formatDate(calculations.installmentDetails.startDate, { year: 'numeric', month: 'long', day: 'numeric' })}\n`
-              notificationMessage += `• إلى: ${formatDate(calculations.installmentDetails.endDate, { year: 'numeric', month: 'long', day: 'numeric' })}\n`
-            }
-          }
-          
-          notificationMessage += `\n✅ تم التأكيد بواسطة: ${confirmedByName}${confirmedByPlace ? ` (${confirmedByPlace})` : ''}`
-        } else if (sale.payment_method === 'promise') {
-          // Promise of sale notification
-          // Check if this is a partial payment (we're in the partial payment path) or full completion
-          const cleanedAmount = promisePaymentAmount.trim().replace(/,/g, '')
-          const paymentAmount = parseFloat(cleanedAmount) || 0
-          const totalRemaining = calculations.confirmationAmount
-          const newRemaining = totalRemaining - paymentAmount
-          
-          if (newRemaining > 0.01) {
-            // Partial payment - this path returns early, so we won't reach here
-            // But keep it for consistency
-            notificationTitle = 'تم استلام دفعة - وعد بالبيع'
-            notificationMessage = `تم استلام دفعة على بيع القطعة ${pieceNumber} للعميل ${clientName} من دفعة ${batchName}\n\n`
-            notificationMessage += `📋 تفاصيل الدفعة:\n`
-            notificationMessage += `• السعر الإجمالي: ${formatPrice(calculations.totalPrice)} DT\n`
-            notificationMessage += `• العربون (مدفوع مسبقاً): ${formatPrice(sale.deposit_amount || 0)} DT\n`
-            notificationMessage += `• المبلغ المستلم الآن: ${formatPrice(paymentAmount)} DT\n`
-            notificationMessage += `• المبلغ المتبقي: ${formatPrice(newRemaining)} DT\n`
-          } else {
-            // Full completion
-            notificationTitle = 'تم تأكيد البيع - وعد بالبيع'
-            notificationMessage = `تم تأكيد بيع القطعة ${pieceNumber} للعميل ${clientName} من دفعة ${batchName}\n\n`
-            notificationMessage += `📋 تفاصيل البيع:\n`
-            notificationMessage += `• السعر الإجمالي: ${formatPrice(calculations.totalPrice)} DT\n`
-            notificationMessage += `• العربون (مدفوع مسبقاً): ${formatPrice(sale.deposit_amount || 0)} DT\n`
-            notificationMessage += `• المبلغ المستلم عند التأكيد: ${formatPrice(calculations.confirmationAmount)} DT\n`
-          }
-          
-          notificationMessage += `\n✅ تم التأكيد بواسطة: ${confirmedByName}${confirmedByPlace ? ` (${confirmedByPlace})` : ''}`
-        } else {
-          // Fallback for unknown payment method
-          notificationTitle = 'تم تأكيد البيع'
-          notificationMessage = `تم تأكيد بيع القطعة ${pieceNumber} للعميل ${clientName} من دفعة ${batchName}\n\n`
-          notificationMessage += `• السعر: ${formatPrice(calculations.totalPrice)} DT\n`
-          notificationMessage += `\n✅ تم التأكيد بواسطة: ${confirmedByName}${confirmedByPlace ? ` (${confirmedByPlace})` : ''}`
-        }
-      
-      // Notify owners
-        const notifyOwnersResult = await notifyOwners(
-        'sale_confirmed',
-          notificationTitle,
-        notificationMessage,
-        'sale',
-        sale.id,
-        {
-          client_name: clientName,
-          piece_number: pieceNumber,
-          batch_name: batchName,
-          sale_price: sale.sale_price,
-            deposit_amount: sale.deposit_amount || 0,
-            confirmation_amount: calculations.confirmationAmount,
-          payment_method: sale.payment_method,
-            confirmed_by_name: confirmedByName,
-            confirmed_by_place: confirmedByPlace,
-            installment_details: calculations.installmentDetails,
-            promise_payment_amount: sale.payment_method === 'promise' && promisePaymentAmount ? (parseFloat(promisePaymentAmount.trim().replace(/,/g, '')) || 0) : null,
-        }
-      )
-        
-        if (!notifyOwnersResult) {
-          console.warn('Failed to notify owners about sale confirmation')
-        }
-      
-      // Also notify current user if they're not an owner
-      if (systemUser?.id) {
-          const notifyUserResult = await notifyCurrentUser(
-          'sale_confirmed',
-            notificationTitle,
-          notificationMessage,
-          systemUser.id,
-          'sale',
-          sale.id,
-          {
-            client_name: clientName,
-            piece_number: pieceNumber,
-            batch_name: batchName,
-            sale_price: sale.sale_price,
-              deposit_amount: sale.deposit_amount || 0,
-              confirmation_amount: calculations.confirmationAmount,
-            payment_method: sale.payment_method,
-              confirmed_by_name: confirmedByName,
-              confirmed_by_place: confirmedByPlace,
-              installment_details: calculations.installmentDetails,
-          }
-        )
-          
-          if (!notifyUserResult) {
-            console.warn('Failed to notify current user about sale confirmation')
-          }
-        }
-        } catch (notifError: any) {
-          // Don't fail the confirmation if notification fails
-          console.error('Error creating notifications (non-critical):', notifError)
-        }
-      }
-
+      // Show success and close immediately; run notifications in background so confirm feels fast
       setSuccessMessage('تم تأكيد البيع بنجاح!')
       setShowSuccessDialog(true)
       onConfirm()
-      // Close the main dialog immediately
       onClose()
+
+      // Background: verify and send notifications (non-blocking)
+      ;(async () => {
+        try {
+          const { data: finalSaleCheck, error: finalCheckError } = await supabase
+            .from('sales')
+            .select('id, status')
+            .eq('id', sale.id)
+            .single()
+          if (finalCheckError || !finalSaleCheck || finalSaleCheck.status !== 'completed') return
+          const clientName = sale.client?.name || 'عميل غير معروف'
+          const pieceNumber = sale.piece?.piece_number || 'غير معروف'
+          const batchName = sale.batch?.name || 'غير معروف'
+          const confirmedByName = systemUser?.name || 'غير معروف'
+          const confirmedByPlace = systemUser?.place || null
+          let notificationMessage = ''
+          let notificationTitle = ''
+          if (sale.payment_method === 'full') {
+            notificationTitle = 'تم تأكيد البيع - دفع كامل'
+            notificationMessage = `تم تأكيد بيع القطعة ${pieceNumber} للعميل ${clientName} من دفعة ${batchName}\n\n📋 تفاصيل البيع:\n• السعر الإجمالي: ${formatPrice(calculations.totalPrice)} DT\n• العربون (مدفوع مسبقاً): ${formatPrice(sale.deposit_amount || 0)} DT\n• المبلغ المستلم عند التأكيد: ${formatPrice(calculations.confirmationAmount)} DT\n\n✅ تم التأكيد بواسطة: ${confirmedByName}${confirmedByPlace ? ` (${confirmedByPlace})` : ''}`
+          } else if (sale.payment_method === 'installment') {
+            notificationTitle = 'تم تأكيد البيع - تقسيط'
+            notificationMessage = `تم تأكيد بيع القطعة ${pieceNumber} للعميل ${clientName} من دفعة ${batchName}\n\n📋 تفاصيل البيع:\n• السعر الإجمالي: ${formatPrice(calculations.totalPrice)} DT\n• العربون (مدفوع مسبقاً): ${formatPrice(sale.deposit_amount || 0)} DT\n• التسبقة (المستلم عند التأكيد): ${formatPrice(calculations.confirmationAmount)} DT\n${calculations.installmentDetails ? `\n📅 تفاصيل الأقساط:\n• عدد الأشهر: ${calculations.installmentDetails.numberOfMonths} شهر\n• المبلغ الشهري: ${formatPrice(calculations.installmentDetails.monthlyPayment)} DT\n` : ''}\n✅ تم التأكيد بواسطة: ${confirmedByName}${confirmedByPlace ? ` (${confirmedByPlace})` : ''}`
+          } else if (sale.payment_method === 'promise') {
+            notificationTitle = 'تم تأكيد البيع - وعد بالبيع'
+            notificationMessage = `تم تأكيد بيع القطعة ${pieceNumber} للعميل ${clientName} من دفعة ${batchName}\n\n📋 تفاصيل البيع:\n• السعر الإجمالي: ${formatPrice(calculations.totalPrice)} DT\n• العربون (مدفوع مسبقاً): ${formatPrice(sale.deposit_amount || 0)} DT\n• المبلغ المستلم عند التأكيد: ${formatPrice(calculations.confirmationAmount)} DT\n\n✅ تم التأكيد بواسطة: ${confirmedByName}${confirmedByPlace ? ` (${confirmedByPlace})` : ''}`
+          } else {
+            notificationTitle = 'تم تأكيد البيع'
+            notificationMessage = `تم تأكيد بيع القطعة ${pieceNumber} للعميل ${clientName} من دفعة ${batchName}\n\n• السعر: ${formatPrice(calculations.totalPrice)} DT\n\n✅ تم التأكيد بواسطة: ${confirmedByName}${confirmedByPlace ? ` (${confirmedByPlace})` : ''}`
+          }
+          const payload = { client_name: clientName, piece_number: pieceNumber, batch_name: batchName, sale_price: sale.sale_price, deposit_amount: sale.deposit_amount || 0, confirmation_amount: calculations.confirmationAmount, payment_method: sale.payment_method, confirmed_by_name: confirmedByName, confirmed_by_place: confirmedByPlace, installment_details: calculations.installmentDetails, promise_payment_amount: sale.payment_method === 'promise' && promisePaymentAmount ? (parseFloat(promisePaymentAmount.trim().replace(/,/g, '')) || 0) : null }
+          await notifyOwners('sale_confirmed', notificationTitle, notificationMessage, 'sale', sale.id, payload)
+          if (systemUser?.id) await notifyCurrentUser('sale_confirmed', notificationTitle, notificationMessage, systemUser.id, 'sale', sale.id, { ...payload, promise_payment_amount: undefined })
+        } catch (e) {
+          console.error('Error creating notifications (non-critical):', e)
+        }
+      })()
     } catch (e: any) {
       setErrorMessage(e.message || 'فشل تأكيد البيع')
       setShowErrorDialog(true)

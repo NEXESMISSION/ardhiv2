@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import { calculatePiecePrice, formatPrice } from '@/utils/priceCalculator'
 import { Dialog } from './ui/dialog'
@@ -44,6 +44,8 @@ interface PieceDialogProps {
   onSellPieces?: (pieces: LandPiece[]) => void
 }
 
+const PIECES_PAGE_SIZE = 20
+
 export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2, batchImageUrl, isOwner = true, onImageClick, onPieceAdded, onSellPieces }: PieceDialogProps) {
   const [pieces, setPieces] = useState<LandPiece[]>([])
   const [loading, setLoading] = useState(false)
@@ -54,6 +56,12 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
   const [selectedPieces, setSelectedPieces] = useState<Set<string>>(new Set())
   const [touchStart, setTouchStart] = useState<{ x: number; y: number; time: number; isScrolling?: boolean } | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
+  const [currentPage, setCurrentPage] = useState(1)
+  const [totalCount, setTotalCount] = useState(0)
+  const currentPageRef = useRef(1)
+  useEffect(() => {
+    currentPageRef.current = currentPage
+  }, [currentPage])
 
   // Form state
   const [pieceNumber, setPieceNumber] = useState('')
@@ -72,42 +80,39 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
     }
   }, [open])
 
-  // Load pieces when dialog opens and listen for status changes
+  // Load first page when dialog opens; listen for status changes
   useEffect(() => {
     if (open && batchId) {
-      loadPieces()
+      setCurrentPage(1)
+      setTotalCount(0)
+      loadPieces(1)
 
-      // Debounce function to prevent too many refreshes
       let refreshTimeout: NodeJS.Timeout | null = null
       const debouncedRefresh = () => {
         if (refreshTimeout) clearTimeout(refreshTimeout)
         refreshTimeout = setTimeout(() => {
           if (open && batchId) {
-            loadPieces()
+            loadPieces(currentPageRef.current)
           }
-        }, 500) // Wait 500ms before refreshing
+        }, 500)
       }
 
-      // Listen for piece status events to refresh status (debounced)
       const handlePieceStatusChanged = () => {
         debouncedRefresh()
       }
 
-      // Listen for clear selections event
       const handleClearSelections = () => {
-        console.log('Clearing piece selections via event')
         setSelectedPieces(new Set())
       }
 
       window.addEventListener('pieceStatusChanged', handlePieceStatusChanged)
       window.addEventListener('clearPieceSelections', handleClearSelections)
 
-      // Periodic status refresh every 30 seconds while dialog is open (increased from 10 to reduce load)
       const statusRefreshInterval = setInterval(() => {
         if (open && batchId) {
-          loadPieces()
+          loadPieces(currentPageRef.current)
         }
-      }, 30000) // Refresh every 30 seconds
+      }, 30000)
 
       return () => {
         window.removeEventListener('pieceStatusChanged', handlePieceStatusChanged)
@@ -160,20 +165,25 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
     return 0
   }
 
-  async function loadPieces() {
-    // Don't show loading if we already have data (optimistic update)
-    const isInitialLoad = pieces.length === 0
+  async function loadPieces(page: number = currentPage) {
+    const isInitialLoad = pieces.length === 0 || pieces[0]?.batch_id !== batchId
     if (isInitialLoad) {
       setLoading(true)
     }
     try {
-      const { data, error: err } = await supabase
+      const from = (page - 1) * PIECES_PAGE_SIZE
+      const to = from + PIECES_PAGE_SIZE - 1
+      const { data, error: err, count } = await supabase
         .from('land_pieces')
-        .select('id, batch_id, piece_number, surface_m2, notes, direct_full_payment_price, status, created_at, updated_at')
+        .select('id, batch_id, piece_number, surface_m2, notes, direct_full_payment_price, status, created_at, updated_at', { count: 'exact' })
         .eq('batch_id', batchId)
-        .limit(1000)
+        .order('piece_number', { ascending: true })
+        .range(from, to)
 
       if (err) throw err
+
+      setTotalCount(count ?? 0)
+      setCurrentPage(page)
 
       if (!data || data.length === 0) {
         setPieces([])
@@ -181,7 +191,6 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
         return
       }
 
-      // Initialize availabilityStatus immediately based on piece.status to prevent flickering
       const piecesWithInitialStatus = data.map((p) => ({
         ...p,
         availabilityStatus: {
@@ -192,40 +201,23 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
         }
       }))
 
-      // Sort pieces immediately
-      const sortedPieces = [...piecesWithInitialStatus].sort((a, b) => 
-        naturalSort(a.piece_number || '', b.piece_number || '')
-      )
-
-      // Show pieces IMMEDIATELY with stable initial status
-      setPieces(sortedPieces)
+      setPieces(piecesWithInitialStatus)
       setLoading(false)
-      
-      // Load accurate availability status in background (non-blocking, lowest priority)
+
+      // Load availability status for current page only (background)
       Promise.resolve().then(async () => {
         try {
           const { getPiecesAvailabilityStatus } = await import('@/utils/pieceStatus')
           const pieceIds = data.map((p) => p.id)
           const availabilityMap = await getPiecesAvailabilityStatus(pieceIds)
-
-          // Update pieces with accurate availability status only if it's different
           setPieces(currentPieces => {
             if (currentPieces.length === 0 || currentPieces[0]?.batch_id !== batchId) {
               return currentPieces
             }
-            
             return currentPieces.map((p) => {
               const accurateStatus = availabilityMap.get(p.id)
-              if (accurateStatus) {
-                // Only update if status actually changed to prevent unnecessary re-renders
-                const currentStatus = p.availabilityStatus?.status || p.status
-                if (accurateStatus.status !== currentStatus || 
-                    accurateStatus.isAvailable !== p.availabilityStatus?.isAvailable) {
-                  return {
-                    ...p,
-                    availabilityStatus: accurateStatus
-                  }
-                }
+              if (accurateStatus && (accurateStatus.status !== (p.availabilityStatus?.status || p.status) || accurateStatus.isAvailable !== p.availabilityStatus?.isAvailable)) {
+                return { ...p, availabilityStatus: accurateStatus }
               }
               return p
             })
@@ -317,7 +309,7 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
       setDirectPrice('')
       setPricePerM2('')
       setNotes('')
-      await loadPieces()
+      await loadPieces(currentPageRef.current)
       onPieceAdded()
       // Hide form after successful addition
       setTimeout(() => {
@@ -349,7 +341,7 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
     try {
       const { error } = await supabase.from('land_pieces').delete().eq('id', pieceId)
       if (error) throw error
-      await loadPieces()
+      await loadPieces(currentPageRef.current)
       onPieceAdded()
     } catch (e: any) {
       alert('فشل حذف القطعة: ' + e.message)
@@ -423,7 +415,7 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
         {/* Add Piece Form Toggle */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 sm:gap-3">
           <h3 className="text-xs sm:text-sm lg:text-base font-semibold text-gray-900">
-            القطع ({pieces.length})
+            القطع {totalCount > 0 ? `(${totalCount})` : ''}
           </h3>
           {isOwner && (
           <Button
@@ -649,6 +641,78 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
               </Badge>
             )}
           </div>
+
+          {totalCount > PIECES_PAGE_SIZE && (
+            <div className="flex items-center justify-center gap-2 flex-wrap py-2 border-t border-b border-gray-200">
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={currentPage <= 1 || loading}
+                onClick={() => {
+                  const prev = currentPage - 1
+                  setCurrentPage(prev)
+                  loadPieces(prev)
+                }}
+                className="text-xs"
+              >
+                السابق
+              </Button>
+              <span className="flex items-center gap-1 px-2 text-sm text-gray-700">
+                {(() => {
+                  const totalPages = Math.ceil(totalCount / PIECES_PAGE_SIZE)
+                  const pages: (number | 'ellipsis')[] = []
+                  if (totalPages <= 7) {
+                    for (let i = 1; i <= totalPages; i++) pages.push(i)
+                  } else {
+                    pages.push(1)
+                    if (currentPage > 2) pages.push('ellipsis')
+                    const mid = [currentPage - 1, currentPage, currentPage + 1].filter(p => p >= 2 && p <= totalPages - 1)
+                    mid.forEach(p => { if (!pages.includes(p)) pages.push(p) })
+                    if (currentPage < totalPages - 1) pages.push('ellipsis')
+                    if (totalPages > 1) pages.push(totalPages)
+                  }
+                  return (
+                    <>
+                      {pages.map((p, i) =>
+                        p === 'ellipsis' ? (
+                          <span key={`e-${i}`} className="px-1">...</span>
+                        ) : (
+                          <button
+                            key={p}
+                            onClick={() => {
+                              setCurrentPage(p)
+                              loadPieces(p)
+                            }}
+                            disabled={loading}
+                            className={`min-w-[28px] h-8 rounded px-2 text-sm font-medium ${
+                              currentPage === p
+                                ? 'bg-blue-600 text-white'
+                                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                            }`}
+                          >
+                            {p}
+                          </button>
+                        )
+                      )}
+                    </>
+                  )
+                })()}
+              </span>
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={currentPage >= Math.ceil(totalCount / PIECES_PAGE_SIZE) || loading}
+                onClick={() => {
+                  const next = currentPage + 1
+                  setCurrentPage(next)
+                  loadPieces(next)
+                }}
+                className="text-xs"
+              >
+                التالي
+              </Button>
+            </div>
+          )}
 
           {loading ? (
             <div className="text-center py-6 sm:py-8 flex-1 flex items-center justify-center">

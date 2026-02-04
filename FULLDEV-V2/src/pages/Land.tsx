@@ -896,33 +896,35 @@ export function LandPage() {
     setDialogOpen(true)
   }
 
-  async function openPiecesDialog(batchId: string) {
+  function openPiecesDialog(batchId: string) {
     const batch = batches.find((b) => b.id === batchId)
     if (!batch) return
 
-    // Fetch batch image directly from database when opening dialog
-    let imageUrl: string | null = null
-    try {
-      const { data: imageData, error: imageErr } = await supabase
-        .from('land_batches')
-        .select('image_url')
-        .eq('id', batchId)
-        .single()
-      
-      if (!imageErr && imageData?.image_url) {
-        imageUrl = imageData.image_url
-      }
-    } catch (err) {
-      console.error('Error loading batch image:', err)
-    }
-
-    setSelectedBatchForPieces({ 
-      id: batchId, 
+    // Open dialog immediately so user sees it right away (no await)
+    setSelectedBatchForPieces({
+      id: batchId,
       name: batch.name,
       pricePerM2: batch.price_per_m2_cash,
-      imageUrl: imageUrl
+      imageUrl: null,
     })
     setPieceDialogOpen(true)
+
+    // Fetch batch image in background and update when ready (non-blocking)
+    supabase
+      .from('land_batches')
+      .select('image_url')
+      .eq('id', batchId)
+      .single()
+      .then(({ data: imageData, error: imageErr }) => {
+        if (!imageErr && imageData?.image_url) {
+          setSelectedBatchForPieces((prev) =>
+            prev && prev.id === batchId
+              ? { ...prev, imageUrl: imageData.image_url }
+              : prev
+          )
+        }
+      })
+      .catch((err) => console.error('Error loading batch image:', err))
   }
 
 
@@ -1342,6 +1344,8 @@ export function LandPage() {
     deadlineDate: string
     saleType: 'full' | 'installment' | 'promise'
     paymentOfferId?: string
+    /** When set, skip fetching payment_offers (faster sell) */
+    installmentPricePerM2?: number
     notes?: string
     /** When set, use fixed price per piece in same order as pieces (temporary fixed price) */
     fixedPricesPerPiece?: number[]
@@ -1378,17 +1382,20 @@ export function LandPage() {
       }
 
     try {
-      // Get payment offer if installment is selected
+      // Use price from dialog when provided (avoids extra DB round-trip); otherwise fetch for installment
       let installmentPricePerM2: number | null = null
-      if (saleData.saleType === 'installment' && saleData.paymentOfferId) {
-        const { data: offer, error: offerErr } = await supabase
-          .from('payment_offers')
-          .select('price_per_m2_installment')
-          .eq('id', saleData.paymentOfferId)
-          .single()
-        
-        if (!offerErr && offer) {
-          installmentPricePerM2 = offer.price_per_m2_installment
+      if (saleData.saleType === 'installment') {
+        if (saleData.installmentPricePerM2 != null && saleData.installmentPricePerM2 > 0) {
+          installmentPricePerM2 = saleData.installmentPricePerM2
+        } else if (saleData.paymentOfferId) {
+          const { data: offer, error: offerErr } = await supabase
+            .from('payment_offers')
+            .select('price_per_m2_installment')
+            .eq('id', saleData.paymentOfferId)
+            .single()
+          if (!offerErr && offer) {
+            installmentPricePerM2 = offer.price_per_m2_installment
+          }
         }
       }
 

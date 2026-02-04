@@ -55,6 +55,8 @@ interface MultiPieceSaleDialogProps {
     deadlineDate: string
     saleType: 'full' | 'installment' | 'promise'
     paymentOfferId?: string
+    /** When set (installment), Land can skip fetching payment_offers for faster sell */
+    installmentPricePerM2?: number
     notes?: string
     /** When set, use fixed prices: one per piece in same order as pieces (temporary fixed price) */
     fixedPricesPerPiece?: number[]
@@ -314,12 +316,14 @@ export function MultiPieceSaleDialog({
     setShowFinalConfirmDialog(false)
     setSaving(true)
     try {
+      const selectedOffer = paymentOffers.find((o) => o.id === selectedOfferId)
       await onConfirm({
         client,
         depositAmount: calculations.deposit,
         deadlineDate,
         saleType,
         paymentOfferId: saleType === 'installment' && selectedOfferId ? selectedOfferId : undefined,
+        installmentPricePerM2: saleType === 'installment' && selectedOffer ? selectedOffer.price_per_m2_installment : undefined,
         notes: notes.trim() || undefined,
         fixedPricesPerPiece: useFixedPrice && calculations.totalPrice > 0
           ? pieces.map((p) => parseFloat(fixedPriceByPieceId[p.id] || '0'))
