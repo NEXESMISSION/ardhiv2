@@ -10,7 +10,6 @@ import { Select } from './ui/select'
 import { Alert } from './ui/alert'
 import { Card } from './ui/card'
 import { Badge } from './ui/badge'
-import { IconButton } from './ui/icon-button'
 
 interface LandPiece {
   id: string
@@ -735,7 +734,7 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
               </Button>
             </div>
           ) : (
-            <div className="space-y-1.5 sm:space-y-2 flex-1 overflow-y-auto scrollbar-thin min-h-0">
+            <div className="grid grid-cols-2 gap-2 sm:gap-3 flex-1 overflow-y-auto scrollbar-thin min-h-0 content-start">
               {filteredPieces.map((piece, idx) => {
                 // Use stable status: prefer availabilityStatus if loaded, otherwise use piece.status
                 const displayStatus = piece.availabilityStatus?.status || piece.status
@@ -819,7 +818,7 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
                 return (
                   <Card 
                     key={piece.id} 
-                    className={`p-2 sm:p-2.5 lg:p-3 cursor-pointer transition-all ${
+                    className={`p-2 sm:p-2.5 lg:p-3 cursor-pointer transition-all flex flex-col ${
                       isReserved 
                         ? 'bg-orange-50 border-orange-200 hover:bg-orange-100' 
                         : isSold
@@ -835,7 +834,7 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
                     onTouchEnd={handleTouchEnd}
                     onClick={handleClick}
                   >
-                    <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-start justify-between gap-2 flex-1 min-w-0">
                       <div className="flex-1 space-y-0.5 sm:space-y-1 min-w-0">
                         <div className="flex flex-wrap items-center gap-1 sm:gap-1.5 lg:gap-2">
                           <Badge variant="default" size="sm" className="text-xs">#{idx + 1}</Badge>
@@ -871,8 +870,8 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
                           <p className="text-xs text-gray-500 truncate">📝 {piece.notes}</p>
                         )}
                       </div>
-                      <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                        {canSelect && (
+                      {canSelect && (
+                        <div onClick={(e) => e.stopPropagation()}>
                           <input
                             type="checkbox"
                             checked={isSelected}
@@ -885,45 +884,35 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
                               }
                               setSelectedPieces(newSelected)
                             }}
-                            className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                            className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500 flex-shrink-0"
                           />
-                        )}
-                        {isReserved && (
-                          <span className="text-xs text-orange-600 font-medium">
-                            محجوزة
-                          </span>
-                        )}
-                        {!isAvailable && !isReserved && !isSold && piece.availabilityStatus?.reason && (
-                          <span className="text-xs text-gray-500">
-                            {piece.availabilityStatus.reason}
-                          </span>
-                        )}
-                        <IconButton
-                          variant="danger"
-                          size="sm"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            handleDeletePiece(piece.id)
-                          }}
-                          onTouchEnd={(e) => {
-                            e.stopPropagation()
-                            e.preventDefault()
-                            handleDeletePiece(piece.id)
-                          }}
-                          title="حذف"
-                          className="p-1 sm:p-1.5 flex-shrink-0 touch-manipulation"
-                          style={{ touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent' }}
-                        >
-                          <svg className="w-3.5 h-3.5 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={2}
-                              d="M6 18L18 6M6 6l12 12"
-                            />
-                          </svg>
-                        </IconButton>
-                      </div>
+                        </div>
+                      )}
+                    </div>
+                    {isReserved && (
+                      <span className="text-xs text-orange-600 font-medium mt-1">محجوزة</span>
+                    )}
+                    {!isAvailable && !isReserved && !isSold && piece.availabilityStatus?.reason && (
+                      <span className="text-xs text-gray-500 mt-0.5 block">{piece.availabilityStatus.reason}</span>
+                    )}
+                    <div className="mt-2 pt-2 border-t border-gray-100 flex justify-end" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleDeletePiece(piece.id)
+                        }}
+                        onTouchEnd={(e) => {
+                          e.stopPropagation()
+                          e.preventDefault()
+                          handleDeletePiece(piece.id)
+                        }}
+                        title="حذف القطعة"
+                        className="text-xs text-red-600 hover:text-red-700 hover:underline py-1 px-2 rounded touch-manipulation"
+                        style={{ touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent' }}
+                      >
+                        حذف
+                      </button>
                     </div>
                   </Card>
                 )
