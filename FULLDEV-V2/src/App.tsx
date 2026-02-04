@@ -137,6 +137,12 @@ function AppContent() {
     }
   }, [systemUser, currentPage])
 
+  // Preload Home immediately when user is set so /#home is not empty on first paint
+  useEffect(() => {
+    if (!user) return
+    import('./pages/Home')
+  }, [user])
+
   // Prefetch confirmation & land chunks when idle so PWA navigation is instant
   useEffect(() => {
     if (!user) return
@@ -213,10 +219,11 @@ function AppContent() {
     )
   }
 
-  // Minimal fallback so shell shows instantly while page chunk loads (PWA: open in ms)
+  // Visible fallback so content area never looks empty while page chunk loads
   const PageFallback = () => (
-    <div className="flex-1 flex items-center justify-center min-h-[200px]" aria-hidden>
-      <div className="animate-spin rounded-full h-8 w-8 border-2 border-blue-500 border-t-transparent" />
+    <div className="flex-1 flex flex-col items-center justify-center min-h-[280px] gap-3" aria-hidden>
+      <div className="animate-spin rounded-full h-10 w-10 border-2 border-blue-500 border-t-transparent" />
+      <p className="text-sm text-gray-500">جاري تحميل الصفحة...</p>
     </div>
   )
 
