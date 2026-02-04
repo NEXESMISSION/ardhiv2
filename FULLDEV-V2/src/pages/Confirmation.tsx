@@ -297,6 +297,11 @@ export function ConfirmationPage() {
     if (page >= 1 && page <= totalPages) setCurrentPage(page)
   }
 
+  // Scroll to top when page changes for better UX
+  useEffect(() => {
+    window.scrollTo(0, 0)
+  }, [currentPage])
+
   // Filter grouped sales (client-side search on current page)
   const filteredGroupedSales = useMemo(() => {
     return groupedSales.filter(salesGroup => {

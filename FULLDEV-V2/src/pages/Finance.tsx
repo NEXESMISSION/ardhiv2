@@ -127,14 +127,16 @@ export function FinancePage() {
     try {
       const [salesResult, installmentsResult] = await Promise.all([
         supabase
-        .from('sales')
-        .select(buildSaleQuery())
-          .not('status', 'eq', 'cancelled') // Exclude cancelled sales
-          .order('created_at', { ascending: false }),
+          .from('sales')
+          .select(buildSaleQuery())
+          .not('status', 'eq', 'cancelled')
+          .order('created_at', { ascending: false })
+          .limit(2000),
         supabase
           .from('installment_payments')
           .select('*')
           .order('due_date', { ascending: true })
+          .limit(5000)
       ])
 
       if (salesResult.error) throw salesResult.error
@@ -590,20 +592,9 @@ export function FinancePage() {
     commission: 'العمولة',
   }
 
-  if (loading) {
-    return (
-      <div className="px-2 sm:px-4 lg:px-6 py-3 sm:py-4 lg:py-6">
-        <div className="text-center py-8 sm:py-12">
-          <div className="inline-block animate-spin rounded-full h-6 w-6 sm:h-8 sm:w-8 border-b-2 border-blue-600"></div>
-          <p className="mt-2 text-xs sm:text-sm text-gray-500">جاري التحميل...</p>
-        </div>
-      </div>
-    )
-  }
-
   return (
     <div className="px-2 sm:px-4 lg:px-6 py-3 sm:py-4 lg:py-6 space-y-3 sm:space-y-4 lg:space-y-6">
-      {/* Header */}
+      {/* Header - always visible for instant shell */}
       <div className="flex items-center justify-between">
         <h1 className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-900">المالية</h1>
       </div>
@@ -666,6 +657,15 @@ export function FinancePage() {
         </div>
       </div>
 
+      {loading ? (
+        <div className="flex items-center justify-center py-12 min-h-[200px]">
+          <div className="text-center">
+            <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mb-2" />
+            <p className="text-sm text-gray-500">جاري تحميل البيانات المالية...</p>
+          </div>
+        </div>
+      ) : (
+        <>
       {/* Main Statistics Cards - Comprehensive Overview */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3 lg:gap-4">
         {/* Total Revenue */}
@@ -1421,6 +1421,8 @@ export function FinancePage() {
             </div>
           </div>
         </Dialog>
+      )}
+        </>
       )}
     </div>
   )

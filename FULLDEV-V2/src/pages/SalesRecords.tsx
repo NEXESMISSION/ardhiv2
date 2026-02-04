@@ -172,6 +172,11 @@ export function SalesRecordsPage() {
     if (page >= 1 && page <= totalPages) setCurrentPage(page)
   }
 
+  // Scroll to top when page changes for better UX
+  useEffect(() => {
+    window.scrollTo(0, 0)
+  }, [currentPage])
+
   // Filter sales (client-side search on current page)
   const filteredSales = useMemo(() => {
     return sales.filter(sale => {

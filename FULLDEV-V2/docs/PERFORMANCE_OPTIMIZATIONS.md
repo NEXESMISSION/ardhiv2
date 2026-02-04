@@ -186,6 +186,13 @@ Ensure these indexes exist:
 
 ---
 
+## Pagination & optimizations (الأقساط + المالية)
+
+- **الأقساط (Installments):** Same pagination as Confirmation/Sales Records: 20 completed installment sales per page, "عرض X - Y من Z", السابق / 1 … N / التالي. Total count from background count query.
+- **المالية (Finance):** No pagination (stats need full filtered dataset). Optimizations: (1) Sales query limited to 2000, installment_payments to 5000 to avoid unbounded load. (2) Shell-first loading: header and time filters render immediately; only the stats/content area shows a compact spinner until data is ready.
+
+---
+
 ## Notes
 
 - **No caching was used** as requested by user

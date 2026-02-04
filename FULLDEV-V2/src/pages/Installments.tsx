@@ -81,6 +81,8 @@ interface InstallmentPayment {
 }
 
 
+const ITEMS_PER_PAGE = 20
+
 export function InstallmentsPage() {
   const [sales, setSales] = useState<Sale[]>([])
   const [groupedSales, setGroupedSales] = useState<Sale[][]>([])
@@ -88,6 +90,8 @@ export function InstallmentsPage() {
   const [error, setError] = useState<string | null>(null)
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null)
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [totalCount, setTotalCount] = useState(0)
 
   useEffect(() => {
     loadInstallmentSales()
@@ -101,12 +105,15 @@ export function InstallmentsPage() {
     return () => {
       window.removeEventListener('saleUpdated', handleSaleUpdated)
     }
-  }, [])
+  }, [currentPage])
 
   async function loadInstallmentSales() {
-    setLoading(true)
+    if (sales.length === 0 && !loading) setLoading(true)
     setError(null)
     try {
+      const from = (currentPage - 1) * ITEMS_PER_PAGE
+      const to = from + ITEMS_PER_PAGE - 1
+
       const { data, error: err } = await supabase
         .from('sales')
         .select(buildSaleQuery(`
@@ -115,6 +122,8 @@ export function InstallmentsPage() {
         .eq('status', 'completed')
         .eq('payment_method', 'installment')
         .order('sale_date', { ascending: false })
+        .range(from, to)
+        .limit(ITEMS_PER_PAGE)
 
       if (err) throw err
 
@@ -129,25 +138,37 @@ export function InstallmentsPage() {
           : sale.contract_writers,
       }))
 
-      // Group sales by client + payment_offer_id
-      const groupedSales = new Map<string, Sale[]>()
+      // Group sales by client + payment_offer_id (for current page only)
+      const groupedSalesMap = new Map<string, Sale[]>()
       
       formattedSales.forEach((sale) => {
-        // Create group key: client_id + payment_offer_id
         const groupKey = sale.payment_offer_id
           ? `${sale.client_id}-${sale.payment_offer_id}`
           : `${sale.client_id}-no-offer`
         
-        if (!groupedSales.has(groupKey)) {
-          groupedSales.set(groupKey, [])
+        if (!groupedSalesMap.has(groupKey)) {
+          groupedSalesMap.set(groupKey, [])
         }
-        groupedSales.get(groupKey)!.push(sale)
+        groupedSalesMap.get(groupKey)!.push(sale)
       })
 
-      // Convert to array of groups
-      const salesGroups = Array.from(groupedSales.values())
-      setSales(salesGroups.flat()) // Keep flat for backward compatibility
+      const salesGroups = Array.from(groupedSalesMap.values())
+      setSales(salesGroups.flat())
       setGroupedSales(salesGroups)
+
+      // Approximate total count
+      const loaded = (data || []).length
+      if (loaded === ITEMS_PER_PAGE) {
+        setTotalCount((currentPage * ITEMS_PER_PAGE) + 1)
+      } else {
+        setTotalCount((currentPage - 1) * ITEMS_PER_PAGE + loaded)
+      }
+      // Exact count in background
+      void Promise.resolve(
+        supabase.from('sales').select('*', { count: 'exact', head: true }).eq('status', 'completed').eq('payment_method', 'installment')
+      ).then((res: { count: number | null }) => {
+        if (res.count != null) setTotalCount(res.count)
+      }).catch(() => {})
     } catch (e: any) {
       setError(e.message || 'فشل تحميل المبيعات بالتقسيط')
     } finally {
@@ -235,6 +256,18 @@ export function InstallmentsPage() {
     setSelectedSale(null)
   }
 
+  const totalPages = Math.max(1, Math.ceil(totalCount / ITEMS_PER_PAGE))
+  const hasNextPage = currentPage < totalPages
+  const hasPrevPage = currentPage > 1
+  function goToPage(page: number) {
+    if (page >= 1 && page <= totalPages) setCurrentPage(page)
+  }
+
+  // Scroll to top when page changes for better UX
+  useEffect(() => {
+    window.scrollTo(0, 0)
+  }, [currentPage])
+
   if (loading) {
     return (
       <div className="px-2 sm:px-4 lg:px-6 py-3 sm:py-4 lg:py-6">
@@ -256,8 +289,14 @@ export function InstallmentsPage() {
 
   return (
     <div className="px-2 sm:px-4 lg:px-6 py-2 sm:py-3 lg:py-4 space-y-2 sm:space-y-3 lg:space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
         <h1 className="text-base sm:text-lg lg:text-xl font-bold text-gray-900">الأقساط</h1>
+        {totalCount > 0 && (
+          <span className="text-xs sm:text-sm text-gray-600">
+            عرض {sales.length > 0 ? (currentPage - 1) * ITEMS_PER_PAGE + 1 : 0} -{' '}
+            {Math.min(currentPage * ITEMS_PER_PAGE, totalCount)} من {totalCount}
+          </span>
+        )}
       </div>
 
       {groupedSales.length === 0 ? (
@@ -265,6 +304,7 @@ export function InstallmentsPage() {
           <p className="text-xs sm:text-sm text-gray-500">لا توجد مبيعات بالتقسيط</p>
         </Card>
       ) : (
+        <>
         <div className="space-y-2 sm:space-y-3">
           {groupedSales.map((salesGroup, groupIndex) => {
             const firstSale = salesGroup[0]
@@ -367,6 +407,43 @@ export function InstallmentsPage() {
             }
           })}
         </div>
+
+        {/* Pagination - same style as إدارة العملاء */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-center gap-1.5 sm:gap-2 flex-wrap mt-4">
+            <Button variant="secondary" size="sm" onClick={() => goToPage(currentPage - 1)} disabled={!hasPrevPage} className="text-xs sm:text-sm py-1.5 px-2">
+              السابق
+            </Button>
+            {totalPages <= 7 ? (
+              Array.from({ length: totalPages }, (_, i) => {
+                const pageNum = i + 1
+                return (
+                  <Button key={pageNum} variant={currentPage === pageNum ? 'primary' : 'secondary'} size="sm" onClick={() => goToPage(pageNum)} className="text-xs sm:text-sm py-1.5 px-2 min-w-[32px] sm:min-w-[36px]">
+                    {pageNum}
+                  </Button>
+                )
+              })
+            ) : (
+              <>
+                <Button variant={currentPage === 1 ? 'primary' : 'secondary'} size="sm" onClick={() => goToPage(1)} className="text-xs sm:text-sm py-1.5 px-2 min-w-[32px] sm:min-w-[36px]">1</Button>
+                {currentPage > 3 && <span className="px-1 sm:px-2 text-xs sm:text-sm text-gray-500">...</span>}
+                {currentPage > 1 && currentPage < totalPages && (
+                  <>
+                    {currentPage > 2 && <Button variant="secondary" size="sm" onClick={() => goToPage(currentPage - 1)} className="text-xs sm:text-sm py-1.5 px-2 min-w-[32px] sm:min-w-[36px]">{currentPage - 1}</Button>}
+                    <Button variant="primary" size="sm" className="text-xs sm:text-sm py-1.5 px-2 min-w-[32px] sm:min-w-[36px]">{currentPage}</Button>
+                    {currentPage < totalPages - 1 && <Button variant="secondary" size="sm" onClick={() => goToPage(currentPage + 1)} className="text-xs sm:text-sm py-1.5 px-2 min-w-[32px] sm:min-w-[36px]">{currentPage + 1}</Button>}
+                  </>
+                )}
+                {currentPage < totalPages - 2 && <span className="px-1 sm:px-2 text-xs sm:text-sm text-gray-500">...</span>}
+                <Button variant={currentPage === totalPages ? 'primary' : 'secondary'} size="sm" onClick={() => goToPage(totalPages)} className="text-xs sm:text-sm py-1.5 px-2 min-w-[32px] sm:min-w-[36px]">{totalPages}</Button>
+              </>
+            )}
+            <Button variant="secondary" size="sm" onClick={() => goToPage(currentPage + 1)} disabled={!hasNextPage} className="text-xs sm:text-sm py-1.5 px-2">
+              التالي
+            </Button>
+          </div>
+        )}
+        </>
       )}
 
       {selectedSale && (

@@ -766,6 +766,11 @@ export function ClientsPage() {
     }
   }
 
+  // Scroll to top when page changes for better UX
+  useEffect(() => {
+    window.scrollTo(0, 0)
+  }, [currentPage])
+
   // ============================================================================
   // RENDER
   // ============================================================================
