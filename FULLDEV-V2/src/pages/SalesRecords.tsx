@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -79,45 +79,82 @@ export function SalesRecordsPage() {
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [paymentMethodFilter, setPaymentMethodFilter] = useState<string>('all')
   const [batchFilter, setBatchFilter] = useState<string>('all')
+  const [currentPage, setCurrentPage] = useState(1)
+  const [totalCount, setTotalCount] = useState(0)
+  const [allBatches, setAllBatches] = useState<Array<{ id: string; name: string }>>([])
+  const itemsPerPage = 20
+  const prevFiltersRef = useRef({ statusFilter, paymentMethodFilter, batchFilter })
 
   useEffect(() => {
-    loadAllSales()
+    supabase.from('land_batches').select('id, name').order('name', { ascending: true }).then(({ data }) => {
+      setAllBatches(data || [])
+    })
+  }, [])
 
-    const handleSaleCreated = () => {
-      loadAllSales()
+  useEffect(() => {
+    const filtersChanged = prevFiltersRef.current.statusFilter !== statusFilter ||
+      prevFiltersRef.current.paymentMethodFilter !== paymentMethodFilter ||
+      prevFiltersRef.current.batchFilter !== batchFilter
+    if (filtersChanged) {
+      prevFiltersRef.current = { statusFilter, paymentMethodFilter, batchFilter }
+      setCurrentPage(1)
     }
+    setSelectedSales(new Set()) // clear selection when page or filters change
+    loadAllSales(filtersChanged ? 1 : currentPage)
+  }, [currentPage, statusFilter, paymentMethodFilter, batchFilter, allBatches.length])
 
-    const handleSaleUpdated = () => {
-      loadAllSales()
-    }
-
+  useEffect(() => {
+    const handleSaleCreated = () => loadAllSales()
+    const handleSaleUpdated = () => loadAllSales()
     window.addEventListener('saleCreated', handleSaleCreated)
     window.addEventListener('saleUpdated', handleSaleUpdated)
-
     return () => {
       window.removeEventListener('saleCreated', handleSaleCreated)
       window.removeEventListener('saleUpdated', handleSaleUpdated)
     }
   }, [])
 
-  async function loadAllSales() {
-    // Optimistic: don't show loading if we already have data
-    if (sales.length === 0) {
-    setLoading(true)
-    }
+  async function loadAllSales(overridePage?: number) {
+    const page = overridePage ?? currentPage
+    if (sales.length === 0 && !loading) setLoading(true)
     setError(null)
     try {
-      const { data, error: err } = await supabase
+      const from = (page - 1) * itemsPerPage
+      const to = from + itemsPerPage - 1
+      const batchId = batchFilter === 'all' ? null : allBatches.find(b => b.name === batchFilter)?.id
+
+      let query = supabase
         .from('sales')
         .select(buildSaleQuery())
         .order('created_at', { ascending: false })
-        .limit(1000) // Limit for performance
+        .range(from, to)
+        .limit(itemsPerPage)
+      if (statusFilter !== 'all') query = query.eq('status', statusFilter)
+      if (paymentMethodFilter !== 'all') query = query.eq('payment_method', paymentMethodFilter)
+      if (batchId) query = query.eq('batch_id', batchId)
+
+      const { data, error: err } = await query
 
       if (err) throw err
 
       const formattedSales = await formatSalesWithSellers(data || [])
 
       setSales(formattedSales)
+
+      const loaded = (data || []).length
+      if (loaded === itemsPerPage) {
+        setTotalCount((page * itemsPerPage) + 1)
+      } else {
+        setTotalCount((page - 1) * itemsPerPage + loaded)
+      }
+
+      let countQuery = supabase.from('sales').select('*', { count: 'exact', head: true })
+      if (statusFilter !== 'all') countQuery = countQuery.eq('status', statusFilter)
+      if (paymentMethodFilter !== 'all') countQuery = countQuery.eq('payment_method', paymentMethodFilter)
+      if (batchId) countQuery = countQuery.eq('batch_id', batchId)
+      void Promise.resolve(countQuery).then((res: { count: number | null }) => {
+        if (res.count != null) setTotalCount(res.count)
+      }).catch(() => {})
     } catch (e: any) {
       setError(e.message || 'فشل تحميل سجل المبيعات')
     } finally {
@@ -125,18 +162,17 @@ export function SalesRecordsPage() {
     }
   }
 
-  // Get unique batches for filter
-  const batches = useMemo(() => {
-    const batchSet = new Set<string>()
-    sales.forEach(sale => {
-      if (sale.batch?.name) {
-        batchSet.add(sale.batch.name)
-      }
-    })
-    return Array.from(batchSet).sort()
-  }, [sales])
+  // Batches for filter dropdown (from land_batches)
+  const batches = useMemo(() => allBatches.map(b => b.name).sort(), [allBatches])
 
-  // Filter sales
+  const totalPages = Math.max(1, Math.ceil(totalCount / itemsPerPage))
+  const hasNextPage = currentPage < totalPages
+  const hasPrevPage = currentPage > 1
+  function goToPage(page: number) {
+    if (page >= 1 && page <= totalPages) setCurrentPage(page)
+  }
+
+  // Filter sales (client-side search on current page)
   const filteredSales = useMemo(() => {
     return sales.filter(sale => {
       // Search filter
@@ -565,9 +601,14 @@ export function SalesRecordsPage() {
             ))}
           </Select>
         </div>
-        {(searchQuery || statusFilter !== 'all' || paymentMethodFilter !== 'all' || batchFilter !== 'all') && (
-          <div className="flex items-center justify-between text-xs text-gray-600">
-            <span>النتائج: {filteredSales.length} من {sales.length}</span>
+        <div className="flex items-center justify-between text-xs text-gray-600 flex-wrap gap-2">
+          {searchQuery ? (
+            <span>النتائج على هذه الصفحة: {filteredSales.length} من {sales.length}</span>
+          ) : (
+            <span>عرض {sales.length > 0 ? (currentPage - 1) * itemsPerPage + 1 : 0} -{' '}
+              {Math.min(currentPage * itemsPerPage, totalCount)} من {totalCount}</span>
+          )}
+          {(searchQuery || statusFilter !== 'all' || paymentMethodFilter !== 'all' || batchFilter !== 'all') && (
             <Button
               variant="secondary"
               size="sm"
@@ -581,8 +622,8 @@ export function SalesRecordsPage() {
             >
               إعادة تعيين
             </Button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {/* Bulk Actions Bar */}
@@ -767,6 +808,42 @@ export function SalesRecordsPage() {
             )
           })}
         </div>
+
+        {/* Pagination - same style as إدارة العملاء */}
+        {!searchQuery && totalPages > 1 && (
+          <div className="flex items-center justify-center gap-1.5 sm:gap-2 flex-wrap mt-4">
+            <Button variant="secondary" size="sm" onClick={() => goToPage(currentPage - 1)} disabled={!hasPrevPage} className="text-xs sm:text-sm py-1.5 px-2">
+              السابق
+            </Button>
+            {totalPages <= 7 ? (
+              Array.from({ length: totalPages }, (_, i) => {
+                const pageNum = i + 1
+                return (
+                  <Button key={pageNum} variant={currentPage === pageNum ? 'primary' : 'secondary'} size="sm" onClick={() => goToPage(pageNum)} className="text-xs sm:text-sm py-1.5 px-2 min-w-[32px] sm:min-w-[36px]">
+                    {pageNum}
+                  </Button>
+                )
+              })
+            ) : (
+              <>
+                <Button variant={currentPage === 1 ? 'primary' : 'secondary'} size="sm" onClick={() => goToPage(1)} className="text-xs sm:text-sm py-1.5 px-2 min-w-[32px] sm:min-w-[36px]">1</Button>
+                {currentPage > 3 && <span className="px-1 sm:px-2 text-xs sm:text-sm text-gray-500">...</span>}
+                {currentPage > 1 && currentPage < totalPages && (
+                  <>
+                    {currentPage > 2 && <Button variant="secondary" size="sm" onClick={() => goToPage(currentPage - 1)} className="text-xs sm:text-sm py-1.5 px-2 min-w-[32px] sm:min-w-[36px]">{currentPage - 1}</Button>}
+                    <Button variant="primary" size="sm" className="text-xs sm:text-sm py-1.5 px-2 min-w-[32px] sm:min-w-[36px]">{currentPage}</Button>
+                    {currentPage < totalPages - 1 && <Button variant="secondary" size="sm" onClick={() => goToPage(currentPage + 1)} className="text-xs sm:text-sm py-1.5 px-2 min-w-[32px] sm:min-w-[36px]">{currentPage + 1}</Button>}
+                  </>
+                )}
+                {currentPage < totalPages - 2 && <span className="px-1 sm:px-2 text-xs sm:text-sm text-gray-500">...</span>}
+                <Button variant={currentPage === totalPages ? 'primary' : 'secondary'} size="sm" onClick={() => goToPage(totalPages)} className="text-xs sm:text-sm py-1.5 px-2 min-w-[32px] sm:min-w-[36px]">{totalPages}</Button>
+              </>
+            )}
+            <Button variant="secondary" size="sm" onClick={() => goToPage(currentPage + 1)} disabled={!hasNextPage} className="text-xs sm:text-sm py-1.5 px-2">
+              التالي
+            </Button>
+          </div>
+        )}
         </>
       )}
 

@@ -38,6 +38,36 @@ const INITIAL_TIMEOUT = 3000 // 3 seconds - faster timeout
 const QUERY_TIMEOUT = 2000 // 2 seconds - faster timeout
 const RETRY_DELAYS = [300] // Faster retry delays
 
+const SYSTEM_USER_CACHE_KEY = 'app_system_user'
+
+function getCachedSystemUser(authUserId: string): SystemUser | null {
+  try {
+    const raw = localStorage.getItem(SYSTEM_USER_CACHE_KEY)
+    if (!raw) return null
+    const { authUserId: cachedId, user } = JSON.parse(raw) as { authUserId: string; user: SystemUser }
+    if (cachedId !== authUserId) return null
+    return user
+  } catch {
+    return null
+  }
+}
+
+function setCachedSystemUser(authUserId: string, user: SystemUser): void {
+  try {
+    localStorage.setItem(SYSTEM_USER_CACHE_KEY, JSON.stringify({ authUserId, user }))
+  } catch {
+    // ignore
+  }
+}
+
+function clearCachedSystemUser(): void {
+  try {
+    localStorage.removeItem(SYSTEM_USER_CACHE_KEY)
+  } catch {
+    // ignore
+  }
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [systemUser, setSystemUser] = useState<SystemUser | null>(null)
@@ -70,6 +100,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (session?.user) {
         setLoading(false)
+        // Restore from cache so nav/permissions work immediately while we revalidate
+        const cached = getCachedSystemUser(session.user.id)
+        if (cached) {
+          setSystemUser(cached)
+          systemUserRef.current = cached
+        }
         if (!loadingSystemUserRef.current) {
           loadSystemUser(session.user.id).catch(console.error)
         }
@@ -431,6 +467,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               if (fallbackResult.error) {
                 console.error('Fallback query also failed:', fallbackResult.error)
                 // If fallback also fails, treat as user not found
+                clearCachedSystemUser()
                 setSystemUser(null)
                 systemUserRef.current = null
                 setLoading(false)
@@ -460,6 +497,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 console.log('Fallback query succeeded with minimal data')
                 setSystemUser(minimalUser)
                 systemUserRef.current = minimalUser
+                setCachedSystemUser(authUserId, minimalUser)
                 setLoading(false)
                 loadingSystemUserRef.current = false
                 return { success: true, usedFallback: true }
@@ -469,6 +507,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             }
             
             // If fallback also failed, continue with normal error handling
+            clearCachedSystemUser()
             setSystemUser(null)
             systemUserRef.current = null
             setLoading(false)
@@ -490,6 +529,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               return { error, willRetry: true }
             } else {
               console.error('Max retries reached after network errors')
+              clearCachedSystemUser()
               setSystemUser(null)
               systemUserRef.current = null
               setLoading(false)
@@ -516,6 +556,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           console.error('This might be a deployment issue - check database schema')
         }
         
+        clearCachedSystemUser()
         setSystemUser(null)
         systemUserRef.current = null
         setLoading(false)
@@ -544,6 +585,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         console.warn('WHERE email = \'test@gmail.com\';')
         console.warn('')
         console.warn('Or see: docs/sql/fix_auth_user_id.sql')
+        clearCachedSystemUser()
         setSystemUser(null)
         systemUserRef.current = null
         setLoading(false)
@@ -581,7 +623,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
         setSystemUser(formattedUser)
         systemUserRef.current = formattedUser // Update ref
-        
+        setCachedSystemUser(authUserId, formattedUser)
+
         // CRITICAL: Always set loading to false when we have system user
         // Do this synchronously to prevent race conditions
         loadingSystemUserRef.current = false
@@ -639,6 +682,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
         }
         
+        clearCachedSystemUser()
         setSystemUser(null)
         systemUserRef.current = null
         setLoading(false)
@@ -817,6 +861,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       initialSessionLoadedRef.current = false
       
       // Clear any cached data
+      clearCachedSystemUser()
       window.location.hash = ''
     } catch (error: any) {
       // Handle errors gracefully - clear state even if signOut fails

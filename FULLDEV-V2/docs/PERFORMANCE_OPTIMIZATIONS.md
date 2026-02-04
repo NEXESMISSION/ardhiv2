@@ -178,6 +178,14 @@ Ensure these indexes exist:
 
 ---
 
+## Pagination (التأكيدات + سجل المبيعات)
+
+- **التأكيدات (Confirmation):** Same pagination style as إدارة العملاء (Clients): "عرض X - Y من Z" and السابق / 1 … N / التالي. Only 20 pending sales per page are loaded; batch filter is applied server-side; search is client-side on the current page. Total count is fetched in the background.
+- **سجل المبيعات (Sales Records):** Same UI and behavior: 20 items per page, server-side filters (status, payment method, batch), client-side search on current page. Batch list is loaded from `land_batches` so filters work with pagination.
+- Both pages use `.range(from, to)` and a separate count query so the app stays fast with large datasets.
+
+---
+
 ## Notes
 
 - **No caching was used** as requested by user

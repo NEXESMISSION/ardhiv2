@@ -103,14 +103,13 @@ export async function fetchSellers(userIds: string[]): Promise<Map<string, Selle
  * Format sale data with nested objects (handles Supabase array/object responses)
  */
 export function formatSaleData(sale: any): any {
+  const row = (arr: any) => Array.isArray(arr) ? arr[0] : arr
   return {
     ...sale,
-    client: Array.isArray(sale.clients) ? sale.clients[0] : sale.clients,
-    piece: Array.isArray(sale.land_pieces) ? sale.land_pieces[0] : sale.land_pieces,
-    batch: Array.isArray(sale.land_batches) ? sale.land_batches[0] : sale.land_batches,
-    payment_offer: Array.isArray(sale.payment_offers) 
-      ? sale.payment_offers[0] 
-      : sale.payment_offers,
+    client: row(sale.clients),
+    piece: row(sale.land_pieces),
+    batch: row(sale.land_batches),
+    payment_offer: row(sale.payment_offers),
   }
 }
 
@@ -118,31 +117,17 @@ export function formatSaleData(sale: any): any {
  * Format multiple sales and enrich with seller and confirmed_by information
  */
 export async function formatSalesWithSellers(sales: any[]): Promise<any[]> {
-  // Extract unique seller IDs and confirmed_by IDs
-  const sellerIds = sales
-    .map(sale => sale.sold_by)
-    .filter((id): id is string => id !== null && id !== undefined)
-  
-  const confirmedByIds = sales
-    .map(sale => sale.confirmed_by)
-    .filter((id): id is string => id !== null && id !== undefined)
-
-  // Fetch all sellers and confirmers in parallel
+  const formatted = sales.map((s) => formatSaleData(s))
+  const sellerIds = [...new Set(formatted.map((s) => s.sold_by).filter((id): id is string => id != null))]
+  const confirmedByIds = [...new Set(formatted.map((s) => s.confirmed_by).filter((id): id is string => id != null))]
   const [sellersMap, confirmersMap] = await Promise.all([
     fetchSellers(sellerIds),
-    fetchSellers(confirmedByIds)
+    fetchSellers(confirmedByIds),
   ])
-
-  // Format sales and add seller and confirmed_by information
-  return sales.map((sale) => {
-    const formatted = formatSaleData(sale)
-    if (sale.sold_by && sellersMap.has(sale.sold_by)) {
-      formatted.seller = sellersMap.get(sale.sold_by)
-    }
-    if (sale.confirmed_by && confirmersMap.has(sale.confirmed_by)) {
-      formatted.confirmedBy = confirmersMap.get(sale.confirmed_by)
-    }
-    return formatted
+  return formatted.map((s) => {
+    if (s.sold_by && sellersMap.has(s.sold_by)) s.seller = sellersMap.get(s.sold_by)
+    if (s.confirmed_by && confirmersMap.has(s.confirmed_by)) s.confirmedBy = confirmersMap.get(s.confirmed_by)
+    return s
   })
 }
 

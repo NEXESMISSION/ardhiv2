@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -103,22 +103,34 @@ export function ConfirmationPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [batchFilter, setBatchFilter] = useState<string>('all')
   const [allBatches, setAllBatches] = useState<Array<{ id: string; name: string }>>([])
+  const [currentPage, setCurrentPage] = useState(1)
+  const [totalCount, setTotalCount] = useState(0)
+  const itemsPerPage = 20
+  const prevBatchFilterRef = useRef<string>(batchFilter)
 
   useEffect(() => {
-    loadPendingSales()
     loadAllBatches()
-    
+    return () => {}
+  }, [])
+
+  useEffect(() => {
+    const pageToLoad = prevBatchFilterRef.current !== batchFilter ? 1 : currentPage
+    if (prevBatchFilterRef.current !== batchFilter) {
+      prevBatchFilterRef.current = batchFilter
+      setCurrentPage(1)
+    }
+    loadPendingSales(pageToLoad)
+  }, [currentPage, batchFilter, allBatches.length])
+
+  useEffect(() => {
     const handleSaleCreated = () => {
       loadPendingSales()
     }
-
     const handleSaleUpdated = () => {
       loadPendingSales()
     }
-
     window.addEventListener('saleCreated', handleSaleCreated)
     window.addEventListener('saleUpdated', handleSaleUpdated)
-
     return () => {
       window.removeEventListener('saleCreated', handleSaleCreated)
       window.removeEventListener('saleUpdated', handleSaleUpdated)
@@ -139,15 +151,25 @@ export function ConfirmationPage() {
     }
   }
 
-  async function loadPendingSales() {
-    setLoading(true)
+  async function loadPendingSales(overridePage?: number) {
+    const page = overridePage ?? currentPage
+    if (sales.length === 0 && !loading) setLoading(true)
     setError(null)
     try {
-      const { data, error: err } = await supabase
+      const from = (page - 1) * itemsPerPage
+      const to = from + itemsPerPage - 1
+      const batchId = batchFilter === 'all' ? null : allBatches.find(b => b.name === batchFilter)?.id
+
+      let query = supabase
         .from('sales')
         .select(buildSaleQuery())
         .eq('status', 'pending')
         .order('created_at', { ascending: false })
+        .range(from, to)
+        .limit(itemsPerPage)
+      if (batchId) query = query.eq('batch_id', batchId)
+
+      const { data, error: err } = await query
 
       if (err) throw err
 
@@ -241,19 +263,41 @@ export function ConfirmationPage() {
       const salesGroups = Array.from(groupedSales.values())
       setSales(formattedSales)
       setGroupedSales(salesGroups)
+
+      // Approximate total count from this page
+      const loaded = (data || []).length
+      if (loaded === itemsPerPage) {
+        setTotalCount((page * itemsPerPage) + 1)
+      } else {
+        setTotalCount((page - 1) * itemsPerPage + loaded)
+      }
+      // Exact count in background (same filters)
+      const countQuery = batchId
+        ? supabase.from('sales').select('*', { count: 'exact', head: true }).eq('status', 'pending').eq('batch_id', batchId)
+        : supabase.from('sales').select('*', { count: 'exact', head: true }).eq('status', 'pending')
+      void Promise.resolve(countQuery).then((res: { count: number | null }) => {
+        if (res.count != null) setTotalCount(res.count)
+      }).catch(() => {})
     } catch (e: any) {
       setError(e.message || 'فشل تحميل المبيعات المعلقة')
     } finally {
       setLoading(false)
-        }
-      }
+    }
+  }
 
   // Get unique batches for filter - use all batches from database
   const batches = useMemo(() => {
     return allBatches.map(b => b.name).sort()
   }, [allBatches])
 
-  // Filter grouped sales
+  const totalPages = Math.max(1, Math.ceil(totalCount / itemsPerPage))
+  const hasNextPage = currentPage < totalPages
+  const hasPrevPage = currentPage > 1
+  function goToPage(page: number) {
+    if (page >= 1 && page <= totalPages) setCurrentPage(page)
+  }
+
+  // Filter grouped sales (client-side search on current page)
   const filteredGroupedSales = useMemo(() => {
     return groupedSales.filter(salesGroup => {
       const firstSale = salesGroup[0]
@@ -358,20 +402,9 @@ export function ConfirmationPage() {
     }
   }
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-center">
-          <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mb-2"></div>
-          <p className="text-sm text-gray-500">جاري التحميل...</p>
-        </div>
-      </div>
-    )
-  }
-
   return (
     <div className="container mx-auto px-2 sm:px-4 lg:px-6 py-3 sm:py-4 lg:py-6 max-w-7xl">
-      {/* Header */}
+      {/* Header - always visible so page opens fast */}
       <div className="mb-3 sm:mb-4 lg:mb-6">
         <h1 className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-900 mb-1">التأكيدات</h1>
         <p className="text-xs sm:text-sm text-gray-600">المراجعة وتأكيد المبيعات المعلقة</p>
@@ -383,6 +416,15 @@ export function ConfirmationPage() {
         </div>
       )}
 
+      {loading ? (
+        <div className="flex items-center justify-center py-12">
+          <div className="text-center">
+            <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mb-2" />
+            <p className="text-sm text-gray-500">جاري تحميل المبيعات المعلقة...</p>
+          </div>
+        </div>
+      ) : (
+        <>
       {/* Filters - Compact */}
       {groupedSales.length > 0 && (
         <div className="bg-white border border-gray-200 rounded-lg p-2 sm:p-3 mb-3 space-y-2">
@@ -406,9 +448,14 @@ export function ConfirmationPage() {
               ))}
             </Select>
           </div>
-          {(searchQuery || batchFilter !== 'all') && (
-            <div className="flex items-center justify-between text-xs text-gray-600">
-              <span>النتائج: {filteredGroupedSales.length} من {groupedSales.length}</span>
+          <div className="flex items-center justify-between text-xs text-gray-600 flex-wrap gap-2">
+            {searchQuery ? (
+              <span>النتائج على هذه الصفحة: {filteredGroupedSales.length} من {groupedSales.length}</span>
+            ) : (
+              <span>عرض {groupedSales.length > 0 ? (currentPage - 1) * itemsPerPage + 1 : 0} -{' '}
+                {Math.min(currentPage * itemsPerPage, totalCount)} من {totalCount}</span>
+            )}
+            {(searchQuery || batchFilter !== 'all') && (
             <Button
               variant="secondary"
               size="sm"
@@ -420,8 +467,8 @@ export function ConfirmationPage() {
             >
                 إعادة تعيين
             </Button>
+            )}
           </div>
-          )}
                   </div>
       )}
 
@@ -665,6 +712,86 @@ export function ConfirmationPage() {
             })
           })}
         </div>
+      )}
+
+      {/* Pagination - same style as إدارة العملاء */}
+      {!searchQuery && totalPages > 1 && (
+        <div className="flex items-center justify-center gap-1.5 sm:gap-2 flex-wrap mt-4">
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => goToPage(currentPage - 1)}
+            disabled={!hasPrevPage}
+            className="text-xs sm:text-sm py-1.5 px-2"
+          >
+            السابق
+          </Button>
+          {totalPages <= 7 ? (
+            Array.from({ length: totalPages }, (_, i) => {
+              const pageNum = i + 1
+              return (
+                <Button
+                  key={pageNum}
+                  variant={currentPage === pageNum ? 'primary' : 'secondary'}
+                  size="sm"
+                  onClick={() => goToPage(pageNum)}
+                  className="text-xs sm:text-sm py-1.5 px-2 min-w-[32px] sm:min-w-[36px]"
+                >
+                  {pageNum}
+                </Button>
+              )
+            })
+          ) : (
+            <>
+              <Button
+                variant={currentPage === 1 ? 'primary' : 'secondary'}
+                size="sm"
+                onClick={() => goToPage(1)}
+                className="text-xs sm:text-sm py-1.5 px-2 min-w-[32px] sm:min-w-[36px]"
+              >
+                1
+              </Button>
+              {currentPage > 3 && <span className="px-1 sm:px-2 text-xs sm:text-sm text-gray-500">...</span>}
+              {currentPage > 1 && currentPage < totalPages && (
+                <>
+                  {currentPage > 2 && (
+                    <Button variant="secondary" size="sm" onClick={() => goToPage(currentPage - 1)} className="text-xs sm:text-sm py-1.5 px-2 min-w-[32px] sm:min-w-[36px]">
+                      {currentPage - 1}
+                    </Button>
+                  )}
+                  <Button variant="primary" size="sm" className="text-xs sm:text-sm py-1.5 px-2 min-w-[32px] sm:min-w-[36px]">
+                    {currentPage}
+                  </Button>
+                  {currentPage < totalPages - 1 && (
+                    <Button variant="secondary" size="sm" onClick={() => goToPage(currentPage + 1)} className="text-xs sm:text-sm py-1.5 px-2 min-w-[32px] sm:min-w-[36px]">
+                      {currentPage + 1}
+                    </Button>
+                  )}
+                </>
+              )}
+              {currentPage < totalPages - 2 && <span className="px-1 sm:px-2 text-xs sm:text-sm text-gray-500">...</span>}
+              <Button
+                variant={currentPage === totalPages ? 'primary' : 'secondary'}
+                size="sm"
+                onClick={() => goToPage(totalPages)}
+                className="text-xs sm:text-sm py-1.5 px-2 min-w-[32px] sm:min-w-[36px]"
+              >
+                {totalPages}
+              </Button>
+            </>
+          )}
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => goToPage(currentPage + 1)}
+            disabled={!hasNextPage}
+            className="text-xs sm:text-sm py-1.5 px-2"
+          >
+            التالي
+          </Button>
+        </div>
+      )}
+        </>
       )}
 
       {/* Confirm Sale Dialog */}
