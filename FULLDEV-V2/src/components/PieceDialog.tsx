@@ -58,8 +58,21 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
   const [currentPage, setCurrentPage] = useState(1)
   const [totalCount, setTotalCount] = useState(0)
   const currentPageRef = useRef(1)
+  const piecesListRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     currentPageRef.current = currentPage
+  }, [currentPage])
+
+  // Scroll to top of pieces when page changes (better UX: see new page from the top)
+  useEffect(() => {
+    if (currentPage <= 0) return
+    // Scroll the pieces grid to top
+    piecesListRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
+    // Also scroll the dialog body to top so user sees top of content (search, then pieces)
+    const dialogBody = piecesListRef.current?.closest('.overflow-y-auto')
+    if (dialogBody && dialogBody !== piecesListRef.current) {
+      dialogBody.scrollTo({ top: 0, behavior: 'smooth' })
+    }
   }, [currentPage])
 
   // Form state
@@ -662,7 +675,7 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
               </Button>
             </div>
           ) : (
-            <div className="grid grid-cols-2 gap-2 sm:gap-3 flex-1 overflow-y-auto scrollbar-thin min-h-0 content-start">
+            <div ref={piecesListRef} className="grid grid-cols-2 gap-2 sm:gap-3 flex-1 overflow-y-auto scrollbar-thin min-h-0 content-start">
               {filteredPieces.map((piece, idx) => {
                 // Use stable status: prefer availabilityStatus if loaded, otherwise use piece.status
                 const displayStatus = piece.availabilityStatus?.status || piece.status
