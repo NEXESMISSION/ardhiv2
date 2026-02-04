@@ -268,25 +268,6 @@ export function InstallmentsPage() {
     window.scrollTo(0, 0)
   }, [currentPage])
 
-  if (loading) {
-    return (
-      <div className="px-2 sm:px-4 lg:px-6 py-3 sm:py-4 lg:py-6">
-        <div className="text-center py-8 sm:py-12">
-          <div className="inline-block animate-spin rounded-full h-6 w-6 sm:h-8 sm:w-8 border-b-2 border-blue-600"></div>
-          <p className="mt-2 text-xs sm:text-sm text-gray-500">جاري التحميل...</p>
-        </div>
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className="px-2 sm:px-4 lg:px-6 py-3 sm:py-4 lg:py-6">
-        <Alert variant="error" className="text-xs sm:text-sm">{error}</Alert>
-      </div>
-    )
-  }
-
   return (
     <div className="px-2 sm:px-4 lg:px-6 py-2 sm:py-3 lg:py-4 space-y-2 sm:space-y-3 lg:space-y-4">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
@@ -299,7 +280,18 @@ export function InstallmentsPage() {
         )}
       </div>
 
-      {groupedSales.length === 0 ? (
+      {error && (
+        <Alert variant="error" className="text-xs sm:text-sm">{error}</Alert>
+      )}
+
+      {loading ? (
+        <div className="flex items-center justify-center py-8 min-h-[120px]">
+          <div className="text-center">
+            <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600" />
+            <p className="mt-2 text-xs text-gray-500">جاري التحميل...</p>
+          </div>
+        </div>
+      ) : groupedSales.length === 0 ? (
         <Card className="p-3 sm:p-4 lg:p-6 text-center">
           <p className="text-xs sm:text-sm text-gray-500">لا توجد مبيعات بالتقسيط</p>
         </Card>

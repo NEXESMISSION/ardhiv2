@@ -335,20 +335,9 @@ export function PhoneCallAppointmentsPage() {
     }
   }
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-center">
-          <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mb-2"></div>
-          <p className="text-sm text-gray-500">جاري التحميل...</p>
-        </div>
-      </div>
-    )
-  }
-
   return (
     <div className="container mx-auto px-2 sm:px-4 lg:px-6 py-3 sm:py-4 lg:py-6 max-w-7xl">
-      {/* Header */}
+      {/* Header - always visible */}
       <div className="mb-3 sm:mb-4 lg:mb-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-900 mb-1">مواعيد المكالمات</h1>
@@ -380,6 +369,15 @@ export function PhoneCallAppointmentsPage() {
         </div>
       )}
 
+      {loading ? (
+        <div className="flex items-center justify-center py-8 min-h-[160px]">
+          <div className="text-center">
+            <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600" />
+            <p className="mt-2 text-xs text-gray-500">جاري التحميل...</p>
+          </div>
+        </div>
+      ) : (
+        <>
       {/* Calendar */}
       <Card className="p-3 sm:p-4 lg:p-6 mb-4">
         {/* Calendar Header */}
@@ -476,6 +474,8 @@ export function PhoneCallAppointmentsPage() {
           })}
         </div>
       </Card>
+        </>
+      )}
 
       {/* Date Appointments Dialog */}
       {dialogSelectedDate && (

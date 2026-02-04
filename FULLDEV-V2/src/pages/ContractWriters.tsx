@@ -138,14 +138,6 @@ export function ContractWritersPage() {
     }
   }
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <p className="text-gray-500">جاري التحميل...</p>
-      </div>
-    )
-  }
-
   return (
     <div className="container mx-auto p-6">
       <div className="mb-6 flex items-center justify-between">
@@ -162,7 +154,14 @@ export function ContractWritersPage() {
         </div>
       )}
 
-      {writers.length === 0 ? (
+      {loading ? (
+        <div className="flex items-center justify-center py-8 min-h-[120px]">
+          <div className="text-center">
+            <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600" />
+            <p className="mt-2 text-xs text-gray-500">جاري التحميل...</p>
+          </div>
+        </div>
+      ) : writers.length === 0 ? (
         <Card className="p-8 text-center">
           <p className="text-gray-500 text-lg mb-4">لا يوجد محررين عقود</p>
           <Button onClick={openAddDialog}>إضافة محرر جديد</Button>

@@ -539,30 +539,15 @@ export function SalesRecordsPage() {
     return <Badge>{status}</Badge>
   }
 
-  if (loading) {
-    return (
-      <div className="px-2 sm:px-4 lg:px-6 py-3 sm:py-4 lg:py-6">
-        <div className="text-center py-8 sm:py-12">
-          <div className="inline-block animate-spin rounded-full h-6 w-6 sm:h-8 sm:w-8 border-b-2 border-blue-600"></div>
-          <p className="mt-2 text-xs sm:text-sm text-gray-500">جاري التحميل...</p>
-        </div>
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className="px-2 sm:px-4 lg:px-6 py-3 sm:py-4 lg:py-6">
-        <Alert variant="error">{error}</Alert>
-      </div>
-    )
-  }
-
   return (
     <div className="px-2 sm:px-4 lg:px-6 py-3 sm:py-4 lg:py-6 space-y-3 sm:space-y-4 lg:space-y-6">
       <div>
         <h1 className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-900">سجل المبيعات</h1>
       </div>
+
+      {error && (
+        <Alert variant="error">{error}</Alert>
+      )}
 
       {/* Filters - Compact */}
       <div className="bg-white border border-gray-200 rounded-lg p-2 sm:p-3 space-y-2">
@@ -631,6 +616,15 @@ export function SalesRecordsPage() {
         </div>
       </div>
 
+      {loading ? (
+        <div className="flex items-center justify-center py-8 min-h-[120px]">
+          <div className="text-center">
+            <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600" />
+            <p className="mt-2 text-xs text-gray-500">جاري التحميل...</p>
+          </div>
+        </div>
+      ) : (
+        <>
       {/* Bulk Actions Bar */}
       {selectedSales.size > 0 && (
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-2 sm:p-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
@@ -850,6 +844,8 @@ export function SalesRecordsPage() {
           </div>
         )}
         </>
+      )}
+      </>
       )}
 
       {/* Action Confirmation Dialog */}

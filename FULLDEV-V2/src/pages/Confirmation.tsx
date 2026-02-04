@@ -421,17 +421,8 @@ export function ConfirmationPage() {
         </div>
       )}
 
-      {loading ? (
-        <div className="flex items-center justify-center py-12">
-          <div className="text-center">
-            <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mb-2" />
-            <p className="text-sm text-gray-500">جاري تحميل المبيعات المعلقة...</p>
-          </div>
-        </div>
-      ) : (
-        <>
-      {/* Filters - Compact */}
-      {groupedSales.length > 0 && (
+      {/* Filters - always visible when we have batches */}
+      {allBatches.length > 0 && (
         <div className="bg-white border border-gray-200 rounded-lg p-2 sm:p-3 mb-3 space-y-2">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <Input
@@ -477,7 +468,14 @@ export function ConfirmationPage() {
                   </div>
       )}
 
-      {filteredGroupedSales.length === 0 ? (
+      {loading ? (
+        <div className="flex items-center justify-center py-8 min-h-[120px]">
+          <div className="text-center">
+            <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600" />
+            <p className="mt-2 text-xs text-gray-500">جاري التحميل...</p>
+          </div>
+        </div>
+      ) : filteredGroupedSales.length === 0 ? (
         <Card className="p-6 sm:p-8 text-center">
           <p className="text-sm sm:text-base text-gray-500">
             {groupedSales.length === 0 ? 'لا توجد مبيعات معلقة تحتاج للتأكيد' : 'لا توجد نتائج للبحث'}
@@ -795,8 +793,6 @@ export function ConfirmationPage() {
             التالي
           </Button>
         </div>
-      )}
-        </>
       )}
 
       {/* Confirm Sale Dialog */}
