@@ -57,6 +57,11 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
   const [searchQuery, setSearchQuery] = useState('')
   const [currentPage, setCurrentPage] = useState(1)
   const [totalCount, setTotalCount] = useState(0)
+  const [batchImageLoaded, setBatchImageLoaded] = useState(false)
+  const lastLoadedImageUrlRef = useRef<string | null>(null)
+  const currentBatchImageUrlRef = useRef<string | null>(null)
+  /** Ordered piece ids for this batch (natural sort: 1,2,3..10,11 and a,a2,b1,b2) so pagination shows correct order */
+  const orderedPieceIdsRef = useRef<string[]>([])
   const currentPageRef = useRef(1)
   const piecesListRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -84,19 +89,54 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
   const [notes, setNotes] = useState('')
   const [status, setStatus] = useState('Available')
 
-  // Reset search and selections when dialog closes
+  // Reset search and selections when dialog closes (keep lastLoadedImageUrlRef so cache shows instantly next time)
   useEffect(() => {
     if (!open) {
       setSearchQuery('')
-      setSelectedPieces(new Set()) // Clear selections only when dialog closes
+      setSelectedPieces(new Set())
+      setBatchImageLoaded(false)
     }
   }, [open])
+
+  // Batch image: show loading only when URL is new; if same URL already loaded (e.g. from cache), show image immediately
+  useEffect(() => {
+    currentBatchImageUrlRef.current = batchImageUrl ?? null
+    if (!batchImageUrl) {
+      setBatchImageLoaded(false)
+      return
+    }
+    if (batchImageUrl === lastLoadedImageUrlRef.current) {
+      setBatchImageLoaded(true)
+      return
+    }
+    setBatchImageLoaded(false)
+    const url = batchImageUrl
+    const img = new Image()
+    const done = () => {
+      if (url !== currentBatchImageUrlRef.current) return
+      lastLoadedImageUrlRef.current = url
+      setBatchImageLoaded(true)
+    }
+    img.onload = done
+    img.onerror = done
+    img.src = url
+    const t = setTimeout(() => {
+      if (img.complete) done()
+    }, 0)
+    return () => {
+      clearTimeout(t)
+      img.onload = null
+      img.onerror = null
+      img.src = ''
+    }
+  }, [batchImageUrl])
 
   // Load first page when dialog opens; listen for status changes
   useEffect(() => {
     if (open && batchId) {
       setCurrentPage(1)
       setTotalCount(0)
+      orderedPieceIdsRef.current = []
       loadPieces(1)
 
       let refreshTimeout: NodeJS.Timeout | null = null
@@ -183,46 +223,77 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
       setLoading(true)
     }
     try {
-      const from = (page - 1) * PIECES_PAGE_SIZE
-      const to = from + PIECES_PAGE_SIZE - 1
-      const { data, error: err, count } = await supabase
-        .from('land_pieces')
-        .select('id, batch_id, piece_number, surface_m2, notes, direct_full_payment_price, status, created_at, updated_at', { count: 'exact' })
-        .eq('batch_id', batchId)
-        .order('piece_number', { ascending: true })
-        .range(from, to)
+      let orderedIds = orderedPieceIdsRef.current
 
-      if (err) throw err
+      // Build naturally-ordered id list for this batch once (handles 1,2,3..10,11 and a,a2,b1,b2)
+      if (orderedIds.length === 0) {
+        const { data: allRows, error: listErr } = await supabase
+          .from('land_pieces')
+          .select('id, piece_number')
+          .eq('batch_id', batchId)
 
-      setTotalCount(count ?? 0)
+        if (listErr) throw listErr
+        if (!allRows || allRows.length === 0) {
+          setPieces([])
+          setTotalCount(0)
+          setLoading(false)
+          return
+        }
+
+        const sortedRows = [...allRows].sort((a, b) =>
+          naturalSort(a.piece_number || '', b.piece_number || '')
+        )
+        orderedIds = sortedRows.map((p) => p.id)
+        orderedPieceIdsRef.current = orderedIds
+        setTotalCount(orderedIds.length)
+      }
+
       setCurrentPage(page)
 
-      if (!data || data.length === 0) {
+      const start = (page - 1) * PIECES_PAGE_SIZE
+      const pageIds = orderedIds.slice(start, start + PIECES_PAGE_SIZE)
+
+      if (pageIds.length === 0) {
         setPieces([])
         setLoading(false)
         return
       }
 
-      const piecesWithInitialStatus = data.map((p) => ({
-        ...p,
-        availabilityStatus: {
-          isAvailable: p.status === 'Available',
-          status: p.status,
-          hasPendingSale: false,
-          hasCompletedSale: false,
-        }
-      }))
+      const { data: pageData, error: err } = await supabase
+        .from('land_pieces')
+        .select('id, batch_id, piece_number, surface_m2, notes, direct_full_payment_price, status, created_at, updated_at')
+        .in('id', pageIds)
 
-      setPieces(piecesWithInitialStatus)
+      if (err) throw err
+      if (!pageData || pageData.length === 0) {
+        setPieces([])
+        setLoading(false)
+        return
+      }
+
+      // Preserve natural order (Supabase .in() does not guarantee order)
+      const orderMap = new Map(pageIds.map((id, i) => [id, i]))
+      const sorted = [...pageData]
+        .sort((a, b) => (orderMap.get(a.id) ?? 0) - (orderMap.get(b.id) ?? 0))
+        .map((p) => ({
+          ...p,
+          availabilityStatus: {
+            isAvailable: p.status === 'Available',
+            status: p.status,
+            hasPendingSale: false,
+            hasCompletedSale: false,
+          },
+        }))
+
+      setPieces(sorted)
       setLoading(false)
 
       // Load availability status for current page only (background)
       Promise.resolve().then(async () => {
         try {
           const { getPiecesAvailabilityStatus } = await import('@/utils/pieceStatus')
-          const pieceIds = data.map((p) => p.id)
-          const availabilityMap = await getPiecesAvailabilityStatus(pieceIds)
-          setPieces(currentPieces => {
+          const availabilityMap = await getPiecesAvailabilityStatus(pageIds)
+          setPieces((currentPieces) => {
             if (currentPieces.length === 0 || currentPieces[0]?.batch_id !== batchId) {
               return currentPieces
             }
@@ -321,6 +392,7 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
       setDirectPrice('')
       setPricePerM2('')
       setNotes('')
+      orderedPieceIdsRef.current = []
       await loadPieces(currentPageRef.current)
       onPieceAdded()
       // Hide form after successful addition
@@ -353,6 +425,7 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
     try {
       const { error } = await supabase.from('land_pieces').delete().eq('id', pieceId)
       if (error) throw error
+      orderedPieceIdsRef.current = []
       await loadPieces(currentPageRef.current)
       onPieceAdded()
     } catch (e: any) {
@@ -401,28 +474,36 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
       size="xl"
     >
       <div className="space-y-3 sm:space-y-4 lg:space-y-6 flex flex-col h-full">
-        {/* Batch Image - Full Width */}
-        {batchImageUrl && (
-          <div className="mb-3 sm:mb-4">
-            <div 
-              className={`w-full h-48 sm:h-56 lg:h-64 rounded-lg overflow-hidden border-2 border-gray-200 shadow-sm bg-gradient-to-br from-blue-100 to-indigo-100 flex items-center justify-center ${onImageClick ? 'cursor-pointer hover:opacity-90 transition-opacity' : ''}`}
-              onClick={() => {
-                if (onImageClick && batchImageUrl) {
-                  onImageClick(batchImageUrl, batchName)
-                }
-              }}
-            >
-              <img
-                src={batchImageUrl}
-                alt={batchName}
-                className="w-full h-full object-cover"
-                onError={(e) => {
-                  (e.target as HTMLImageElement).style.display = 'none'
-                }}
-              />
+        {/* Batch Image - Placeholder with loading animation until image is ready */}
+        <div 
+          className={`mb-3 sm:mb-4 w-full h-48 sm:h-56 lg:h-64 rounded-lg overflow-hidden border-2 border-gray-200 shadow-sm bg-gradient-to-br from-blue-100 to-indigo-100 flex items-center justify-center relative ${batchImageUrl && onImageClick ? 'cursor-pointer hover:opacity-95 transition-opacity' : ''}`}
+          onClick={() => {
+            if (batchImageUrl && onImageClick) {
+              onImageClick(batchImageUrl, batchName)
+            }
+          }}
+        >
+          {(!batchImageUrl || !batchImageLoaded) && (
+            <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-blue-100 to-indigo-100" aria-hidden>
+              <div className="flex flex-col items-center gap-3">
+                <div className="w-12 h-12 rounded-full border-4 border-blue-200 border-t-blue-600 animate-spin" />
+                <span className="text-sm text-gray-500">جاري تحميل الصورة...</span>
+              </div>
             </div>
-          </div>
-        )}
+          )}
+          {batchImageUrl && (
+            <img
+              src={batchImageUrl}
+              alt={batchName}
+              className={`w-full h-full object-cover transition-opacity duration-300 ${batchImageLoaded ? 'opacity-100' : 'opacity-0'}`}
+              onLoad={() => setBatchImageLoaded(true)}
+              onError={(e) => {
+                (e.target as HTMLImageElement).style.display = 'none'
+                setBatchImageLoaded(true)
+              }}
+            />
+          )}
+        </div>
         
         {/* Add Piece Form Toggle */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 sm:gap-3">

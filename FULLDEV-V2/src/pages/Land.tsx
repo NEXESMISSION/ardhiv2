@@ -154,6 +154,8 @@ export function LandPage() {
   // Ref to track when we're transitioning from client selection to sale dialog
   // This prevents the onClose from clearing state during the transition
   const isTransitioningToSaleRef = useRef(false)
+  /** Cache batch image URLs so reopening the same batch shows image instantly */
+  const batchImageCacheRef = useRef<Record<string, string>>({})
 
   // DEBUG: Log state changes for sale dialog
   useEffect(() => {
@@ -900,16 +902,18 @@ export function LandPage() {
     const batch = batches.find((b) => b.id === batchId)
     if (!batch) return
 
-    // Open dialog immediately so user sees it right away (no await)
+    const cachedUrl = batchImageCacheRef.current[batchId] ?? null
+
     setSelectedBatchForPieces({
       id: batchId,
       name: batch.name,
       pricePerM2: batch.price_per_m2_cash,
-      imageUrl: null,
+      imageUrl: cachedUrl,
     })
     setPieceDialogOpen(true)
 
-    // Fetch batch image in background and update when ready (non-blocking)
+    if (cachedUrl) return
+
     supabase
       .from('land_batches')
       .select('image_url')
@@ -917,6 +921,7 @@ export function LandPage() {
       .single()
       .then(({ data: imageData, error: imageErr }) => {
         if (!imageErr && imageData?.image_url) {
+          batchImageCacheRef.current[batchId] = imageData.image_url
           setSelectedBatchForPieces((prev) =>
             prev && prev.id === batchId
               ? { ...prev, imageUrl: imageData.image_url }
@@ -1158,6 +1163,7 @@ export function LandPage() {
                 .from('land_batches')
                 .update({ image_url: finalImageUrl })
                 .eq('id', batch.id)
+              batchImageCacheRef.current[batch.id] = finalImageUrl
             }
           } catch (e: any) {
             console.error('Error processing image:', e)
@@ -1168,6 +1174,7 @@ export function LandPage() {
                 .from('land_batches')
                 .update({ image_url: finalImageUrl })
                 .eq('id', batch.id)
+              batchImageCacheRef.current[batch.id] = finalImageUrl
             }
           } finally {
             setUploadingImage(false)
