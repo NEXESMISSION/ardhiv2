@@ -160,7 +160,7 @@ export function EditSaleDialog({ open, onClose, sale, onSave, isOwner = true }: 
     }
   }, [open, sale])
 
-  async function loadPaymentOffers(batchId: string) {
+  async function loadPaymentOffers(batchId: string): Promise<PaymentOffer[]> {
     setLoadingOffers(true)
     try {
       const { data, error: err } = await supabase
@@ -171,16 +171,19 @@ export function EditSaleDialog({ open, onClose, sale, onSave, isOwner = true }: 
         .order('created_at', { ascending: false })
 
       if (err) throw err
-      setPaymentOffers(data || [])
-      
+      const list = (data || []) as PaymentOffer[]
+      setPaymentOffers(list)
+
       // Auto-select the current offer if available
-      if (sale.payment_offer_id && data?.some(o => o.id === sale.payment_offer_id)) {
+      if (sale.payment_offer_id && list.some(o => o?.id === sale.payment_offer_id)) {
         setPaymentOfferId(sale.payment_offer_id)
-      } else if (data && data.length > 0 && !paymentOfferId) {
-        setPaymentOfferId(data[0].id)
+      } else if (list.length > 0 && !paymentOfferId) {
+        setPaymentOfferId(list[0].id)
       }
+      return list
     } catch (e: any) {
       console.error('Error loading payment offers:', e)
+      return []
     } finally {
       setLoadingOffers(false)
     }
@@ -245,8 +248,19 @@ export function EditSaleDialog({ open, onClose, sale, onSave, isOwner = true }: 
         .select('id, name, price_per_m2_installment, advance_mode, advance_value, calc_mode, monthly_amount, months')
         .single()
       if (err) throw err
-      setPaymentOffers((prev) => [inserted as PaymentOffer, ...prev])
-      setPaymentOfferId(inserted.id)
+      if (!inserted?.id) {
+        // Insert may succeed but RLS can block .select() - reload offers from server
+        if (sale.batch_id) {
+          const list = await loadPaymentOffers(sale.batch_id)
+          const firstId = list[0]?.id
+          if (firstId) setPaymentOfferId(firstId)
+        }
+        resetAddOfferForm()
+        return
+      }
+      const newOffer = inserted as PaymentOffer
+      setPaymentOffers((prev) => [newOffer, ...prev.filter(Boolean)])
+      setPaymentOfferId(newOffer.id)
       resetAddOfferForm()
     } catch (e: any) {
       setAddOfferError(e.message || 'فشل إضافة العرض')
@@ -264,9 +278,10 @@ export function EditSaleDialog({ open, onClose, sale, onSave, isOwner = true }: 
 
   // Calculate installment details for preview. Uses form sale price as total when set (custom price), otherwise offer-based total.
   const installmentPreview = useMemo(() => {
-    if (paymentMethod !== 'installment' || !sale.piece) return null
-    
-    const selectedOffer = paymentOffers.find(o => o.id === paymentOfferId)
+    if (paymentMethod !== 'installment' || !sale?.piece) return null
+    if (!paymentOfferId) return null
+
+    const selectedOffer = paymentOffers.find(o => o != null && o.id === paymentOfferId)
     if (!selectedOffer) return null
 
     const deposit = parseFloat(depositAmount) || 0
@@ -319,7 +334,7 @@ export function EditSaleDialog({ open, onClose, sale, onSave, isOwner = true }: 
       monthlyPayment,
       numberOfMonths,
     }
-  }, [paymentMethod, paymentOfferId, depositAmount, salePrice, sale.piece, paymentOffers])
+  }, [paymentMethod, paymentOfferId, depositAmount, salePrice, sale?.piece, paymentOffers])
 
   async function handleSave() {
     setError(null)

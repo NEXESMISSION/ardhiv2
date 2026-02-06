@@ -478,8 +478,8 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
               </div>
             </div>
             <div className="flex items-center gap-2 sm:gap-3">
-              {/* Notification Icon - Show for all authenticated users */}
-              {systemUser && (
+              {/* Notification Icon - Show for owners only */}
+              {systemUser && isOwner && (
               <div className="relative" ref={notificationRef}>
                 <IconButton
                   variant="ghost"

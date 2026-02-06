@@ -1,4 +1,4 @@
-import { useState, useEffect, lazy, Suspense } from 'react'
+import { useState, useEffect, lazy, Suspense, useRef } from 'react'
 import './App.css'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import { Layout } from './components/Layout'
@@ -49,9 +49,41 @@ const pageToHash: Record<string, string> = {
   'users': '#users',
 }
 
+// Max time to show "loading profile" before showing app anyway (avoids infinite wait if systemUser fails)
+const SYSTEM_USER_MAX_WAIT_MS = 2500
+
 function AppContent() {
   const { user, systemUser, loading } = useAuth()
-  
+  const [allowAppWithoutSystemUser, setAllowAppWithoutSystemUser] = useState(false)
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Once we have user, give systemUser a short time to load; then show app anyway so we don't block forever
+  useEffect(() => {
+    if (!user) {
+      setAllowAppWithoutSystemUser(false)
+      return
+    }
+    if (systemUser) {
+      setAllowAppWithoutSystemUser(true)
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current)
+        timeoutRef.current = null
+      }
+      return
+    }
+    if (timeoutRef.current) return
+    timeoutRef.current = setTimeout(() => {
+      timeoutRef.current = null
+      setAllowAppWithoutSystemUser(true)
+    }, SYSTEM_USER_MAX_WAIT_MS)
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current)
+        timeoutRef.current = null
+      }
+    }
+  }, [user, systemUser])
+
   // Check if user has access to a page
   const hasAccessToPage = (pageId: string) => {
     // While systemUser is still loading, only home is visible so user sees something (no blank screen)
@@ -188,12 +220,21 @@ function AppContent() {
     }
   }
 
-  // If we have user (authenticated), show the app immediately
-  // systemUser will load in the background and update when ready
-  // This makes the app feel much faster on initial load
+  // Show one clear loading state until we're ready: session checked and (systemUser loaded or timeout)
+  // This avoids flashing empty page then main content
+  if (user && !systemUser && !allowAppWithoutSystemUser) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mb-4"></div>
+          <p className="text-gray-600 mb-2">جاري التحميل...</p>
+          <p className="text-sm text-gray-500">جاري تحميل بياناتك...</p>
+        </div>
+      </div>
+    )
+  }
   if (user) {
-    // Show the app - systemUser will load in background
-    // The useEffect in AuthContext will ensure loading is false
+    // Show the app (systemUser ready or we gave up waiting)
   } else if (loading) {
     // Show loading state only if we don't have user yet
     // Add a timeout to prevent infinite loading
