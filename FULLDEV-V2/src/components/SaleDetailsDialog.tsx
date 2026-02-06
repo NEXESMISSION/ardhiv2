@@ -179,6 +179,10 @@ export function SaleDetailsDialog({ open, onClose, sale }: SaleDetailsDialogProp
                 <span className="font-medium">{sale.payment_offer.name || 'بدون اسم'}</span>
               </div>
             )}
+            <div className="pt-2 mt-2 border-t border-purple-200">
+              <span className="text-gray-600 block mb-1">ملاحظات البيع (من مرحلة البيع):</span>
+              <p className="text-gray-800 font-medium whitespace-pre-wrap">{sale.notes?.trim() || '—'}</p>
+            </div>
           </div>
         </Card>
 
@@ -239,13 +243,6 @@ export function SaleDetailsDialog({ open, onClose, sale }: SaleDetailsDialogProp
           </div>
         </Card>
 
-        {/* Notes */}
-        {sale.notes && (
-          <Card className="p-2 sm:p-3 bg-gray-50 border-gray-200">
-            <h3 className="text-xs sm:text-sm font-semibold text-gray-900 mb-2">ملاحظات</h3>
-            <p className="text-xs sm:text-sm text-gray-700">{sale.notes}</p>
-          </Card>
-        )}
       </div>
     </Dialog>
   )

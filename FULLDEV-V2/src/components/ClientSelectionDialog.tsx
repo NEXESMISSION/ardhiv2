@@ -54,9 +54,11 @@ export function ClientSelectionDialog({ open, onClose, onClientSelected }: Clien
     }
   }, [open])
 
-  // Auto-search when CIN is entered (debounced)
+  // Auto-search when CIN or phone is entered (debounced) - 4+ chars for either
   useEffect(() => {
-    if (!open || !cin.trim() || cin.length < 4) {
+    const canSearchByCin = open && cin.trim().length >= 4
+    const canSearchByPhone = open && phone.trim().length >= 4
+    if (!canSearchByCin && !canSearchByPhone) {
       setSearchStatus('idle')
       setFoundClient(null)
       return
@@ -67,10 +69,15 @@ export function ClientSelectionDialog({ open, onClose, onClientSelected }: Clien
     }, 500) // Debounce: wait 500ms after user stops typing
 
     return () => clearTimeout(searchTimeout)
-  }, [cin, open])
+  }, [cin, phone, open])
 
   async function handleSearch() {
-    if (!cin.trim() || cin.length < 4) {
+    const cinTrim = cin.trim()
+    const phoneTrim = phone.trim()
+    const searchByCin = cinTrim.length >= 4
+    const searchByPhone = phoneTrim.length >= 4
+
+    if (!searchByCin && !searchByPhone) {
       setSearchStatus('idle')
       setFoundClient(null)
       return
@@ -81,11 +88,17 @@ export function ClientSelectionDialog({ open, onClose, onClientSelected }: Clien
     setFoundClient(null)
 
     try {
-      const { data, error: err } = await supabase
+      let query = supabase
         .from('clients')
         .select('id, id_number, name, phone, email, address, type')
-        .eq('id_number', cin.trim())
-        .maybeSingle()
+
+      if (searchByCin) {
+        query = query.eq('id_number', cinTrim)
+      } else {
+        query = query.eq('phone', phoneTrim)
+      }
+
+      const { data, error: err } = await query.maybeSingle()
 
       if (err) {
         throw err
@@ -380,9 +393,9 @@ export function ClientSelectionDialog({ open, onClose, onClientSelected }: Clien
             <p className="text-xs text-green-600">✓ تم العثور على العميل - تم تعبئة البيانات تلقائياً</p>
           </div>
         )}
-        {searchStatus === 'not-found' && cin.trim().length >= 4 && (
+        {searchStatus === 'not-found' && (cin.trim().length >= 4 || phone.trim().length >= 4) && (
           <div className="p-1.5 sm:p-2 bg-orange-50 border border-orange-200 rounded">
-            <p className="text-xs text-orange-600">⚠ العميل غير موجود - يمكنك ملء البيانات وإنشاء عميل جديد</p>
+            <p className="text-xs sm:text-sm text-orange-700 font-medium">لم يتم العثور على عميل بهذا رقم الهوية أو رقم الهاتف. يمكنك ملء البيانات أدناه وإنشاء عميل جديد.</p>
           </div>
         )}
 
@@ -402,7 +415,7 @@ export function ClientSelectionDialog({ open, onClose, onClientSelected }: Clien
                 size="sm"
                 className="text-xs sm:text-sm"
               />
-              <p className="text-xs text-gray-500">سيتم البحث تلقائياً عند إدخال 4 أرقام على الأقل</p>
+              <p className="text-xs text-gray-500">سيتم البحث تلقائياً عند إدخال 4 أرقام على الأقل (رقم الهوية أو الهاتف)</p>
             </div>
 
             <div className="space-y-1">
@@ -425,6 +438,7 @@ export function ClientSelectionDialog({ open, onClose, onClientSelected }: Clien
                 size="sm"
                 className="text-xs sm:text-sm"
               />
+              <p className="text-xs text-gray-500">سيتم البحث تلقائياً عند إدخال 4 أرقام على الأقل</p>
             </div>
 
             <div className="space-y-1">

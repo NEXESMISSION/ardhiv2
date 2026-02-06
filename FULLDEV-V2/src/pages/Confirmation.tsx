@@ -644,6 +644,13 @@ export function ConfirmationPage() {
                         <div className="text-lg font-bold text-orange-700">{formatPrice(remaining)} DT</div>
                   </div>
                     </div>
+                    {/* Sale note (from sell phase) - visible on card */}
+                    {sale.notes?.trim() && (
+                      <div className="mb-4 rounded-lg p-3 bg-gray-50 border border-gray-200">
+                        <div className="text-xs font-semibold text-gray-600 mb-1">ملاحظات البيع (من مرحلة البيع):</div>
+                        <p className="text-sm text-gray-800 whitespace-pre-wrap">{sale.notes.trim()}</p>
+                      </div>
+                    )}
               </div>
 
                   {/* Action Buttons - Modern Design */}

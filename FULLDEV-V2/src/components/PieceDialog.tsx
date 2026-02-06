@@ -55,9 +55,12 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
   const [selectedPieces, setSelectedPieces] = useState<Set<string>>(new Set())
   const [touchStart, setTouchStart] = useState<{ x: number; y: number; time: number; isScrolling?: boolean } | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<LandPiece[]>([])
+  const [searchLoading, setSearchLoading] = useState(false)
   const [currentPage, setCurrentPage] = useState(1)
   const [totalCount, setTotalCount] = useState(0)
   const [batchImageLoaded, setBatchImageLoaded] = useState(false)
+  const [batchImageUrlKnownNull, setBatchImageUrlKnownNull] = useState(false)
   const lastLoadedImageUrlRef = useRef<string | null>(null)
   const currentBatchImageUrlRef = useRef<string | null>(null)
   /** Ordered piece ids for this batch (natural sort: 1,2,3..10,11 and a,a2,b1,b2) so pagination shows correct order */
@@ -93,18 +96,31 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
   useEffect(() => {
     if (!open) {
       setSearchQuery('')
+      setSearchResults([])
       setSelectedPieces(new Set())
       setBatchImageLoaded(false)
+      setBatchImageUrlKnownNull(false)
     }
   }, [open])
 
-  // Batch image: show loading only when URL is new; if same URL already loaded (e.g. from cache), show image immediately
+  // When dialog opens with no URL, parent (Land) may still be fetching. Wait a short time before showing "لا توجد صورة للدفعة".
+  useEffect(() => {
+    if (!open || batchImageUrl) {
+      setBatchImageUrlKnownNull(false)
+      return
+    }
+    const t = setTimeout(() => setBatchImageUrlKnownNull(true), 1800)
+    return () => clearTimeout(t)
+  }, [open, batchImageUrl])
+
+  // Batch image: show loading only when URL is new; if same URL already loaded (e.g. from cache), show image immediately. Short timeout so we never stay stuck.
   useEffect(() => {
     currentBatchImageUrlRef.current = batchImageUrl ?? null
     if (!batchImageUrl) {
       setBatchImageLoaded(false)
       return
     }
+    setBatchImageUrlKnownNull(false)
     if (batchImageUrl === lastLoadedImageUrlRef.current) {
       setBatchImageLoaded(true)
       return
@@ -123,8 +139,10 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
     const t = setTimeout(() => {
       if (img.complete) done()
     }, 0)
+    const fallback = setTimeout(done, 5000)
     return () => {
       clearTimeout(t)
+      clearTimeout(fallback)
       img.onload = null
       img.onerror = null
       img.src = ''
@@ -174,6 +192,106 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
       }
     }
   }, [open, batchId])
+
+  // When user types in search, load all pieces in batch in chunks (Supabase .in() has limits), then filter client-side
+  const SEARCH_CHUNK_SIZE = 100
+  useEffect(() => {
+    if (!open || !batchId) return
+    const q = searchQuery.trim()
+    if (!q) {
+      setSearchResults([])
+      return
+    }
+    let cancelled = false
+    const timeout = setTimeout(async () => {
+      setSearchLoading(true)
+      try {
+        const query = q.toLowerCase()
+        const { data: allRows, error: listErr } = await supabase
+          .from('land_pieces')
+          .select('id, piece_number')
+          .eq('batch_id', batchId)
+        if (listErr) throw listErr
+        if (cancelled || !allRows?.length) {
+          setSearchResults([])
+          setSearchLoading(false)
+          return
+        }
+        setTotalCount((prev) => (prev === 0 ? allRows.length : prev))
+        const sortedRows = [...allRows].sort((a, b) =>
+          naturalSort(a.piece_number || '', b.piece_number || '')
+        )
+        const orderedIds = sortedRows.map((p) => p.id)
+        const allFetched: LandPiece[] = []
+        for (let i = 0; i < orderedIds.length; i += SEARCH_CHUNK_SIZE) {
+          if (cancelled) break
+          const chunk = orderedIds.slice(i, i + SEARCH_CHUNK_SIZE)
+          const { data: chunkData, error: err } = await supabase
+            .from('land_pieces')
+            .select('id, batch_id, piece_number, surface_m2, notes, direct_full_payment_price, status, created_at, updated_at')
+            .in('id', chunk)
+          if (err) throw err
+          const orderMap = new Map(chunk.map((id, idx) => [id, i + idx]))
+          const sortedChunk = [...(chunkData || [])].sort(
+            (a, b) => (orderMap.get(a.id) ?? 0) - (orderMap.get(b.id) ?? 0)
+          )
+          allFetched.push(...sortedChunk)
+        }
+        if (cancelled) return
+        const orderMapFull = new Map(orderedIds.map((id, idx) => [id, idx]))
+        const sorted = [...allFetched].sort(
+          (a, b) => (orderMapFull.get(a.id) ?? 0) - (orderMapFull.get(b.id) ?? 0)
+        )
+        const withStatus = sorted.map((p) => ({
+          ...p,
+          availabilityStatus: {
+            isAvailable: p.status === 'Available',
+            status: p.status,
+            hasPendingSale: false,
+            hasCompletedSale: false,
+          },
+        }))
+        const filtered = withStatus.filter((piece) => {
+          const pieceNumberMatch = piece.piece_number?.toLowerCase().includes(query)
+          const surfaceMatch = piece.surface_m2?.toString().includes(query)
+          const notesMatch = piece.notes?.toLowerCase().includes(query)
+          const statusMatch = piece.status?.toLowerCase().includes(query)
+          return pieceNumberMatch || surfaceMatch || notesMatch || statusMatch
+        })
+        if (cancelled) return
+        setSearchResults(filtered)
+        if (filtered.length > 0) {
+          const ids = filtered.map((p) => p.id)
+          Promise.resolve().then(async () => {
+            try {
+              const { getPiecesAvailabilityStatus } = await import('@/utils/pieceStatus')
+              const availabilityMap = await getPiecesAvailabilityStatus(ids)
+              setSearchResults((current) =>
+                current.map((p) => {
+                  const accurateStatus = availabilityMap.get(p.id)
+                  if (accurateStatus) return { ...p, availabilityStatus: accurateStatus }
+                  return p
+                })
+              )
+            } catch (e) {
+              console.error('Error loading availability for search results:', e)
+            }
+          })
+        }
+      } catch (e) {
+        if (!cancelled) {
+          console.error('Error searching pieces:', e)
+          setSearchResults([])
+        }
+      } finally {
+        if (!cancelled) setSearchLoading(false)
+      }
+    }, 300)
+    return () => {
+      cancelled = true
+      clearTimeout(timeout)
+    }
+  }, [open, batchId, searchQuery])
 
   // Natural sort function for alphanumeric piece numbers (e.g., "a1", "a2", "a10", "b1", "a1b2")
   function naturalSort(a: string, b: string): number {
@@ -433,28 +551,14 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
     }
   }
 
-  const totalSurface = pieces.reduce((sum, p) => sum + (p.surface_m2 || 0), 0)
+  // When searching, show search results (all matching pieces in batch); otherwise show current page
+  const piecesToShow = searchQuery.trim() ? searchResults : pieces
+  const totalSurface = piecesToShow.reduce((sum, p) => sum + (p.surface_m2 || 0), 0)
+  const isLoadingList = searchQuery.trim() ? searchLoading : loading
 
-  // Filter pieces based on search query
-  const filteredPieces = useMemo(() => {
-    if (!searchQuery.trim()) {
-      return pieces
-    }
-
-    const query = searchQuery.toLowerCase().trim()
-    return pieces.filter((piece) => {
-      const pieceNumberMatch = piece.piece_number?.toLowerCase().includes(query)
-      const surfaceMatch = piece.surface_m2?.toString().includes(query)
-      const notesMatch = piece.notes?.toLowerCase().includes(query)
-      const statusMatch = piece.status?.toLowerCase().includes(query)
-      
-      return pieceNumberMatch || surfaceMatch || notesMatch || statusMatch
-    })
-  }, [pieces, searchQuery])
-
-  // Calculate piece prices
+  // Calculate piece prices (for both current page and search results)
   const piecePrices = useMemo(() => {
-    return pieces.reduce((acc, piece) => {
+    return piecesToShow.reduce((acc, piece) => {
       const calc = calculatePiecePrice({
         surfaceM2: piece.surface_m2,
         batchPricePerM2: batchPricePerM2,
@@ -464,7 +568,7 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
       acc[piece.id] = calc
       return acc
     }, {} as Record<string, ReturnType<typeof calculatePiecePrice>>)
-  }, [pieces, batchPricePerM2])
+  }, [piecesToShow, batchPricePerM2])
 
   return (
     <Dialog
@@ -483,12 +587,25 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
             }
           }}
         >
-          {(!batchImageUrl || !batchImageLoaded) && (
+          {batchImageUrl && !batchImageLoaded && (
             <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-blue-100 to-indigo-100" aria-hidden>
               <div className="flex flex-col items-center gap-3">
                 <div className="w-12 h-12 rounded-full border-4 border-blue-200 border-t-blue-600 animate-spin" />
                 <span className="text-sm text-gray-500">جاري تحميل الصورة...</span>
               </div>
+            </div>
+          )}
+          {!batchImageUrl && !batchImageUrlKnownNull && (
+            <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-blue-100 to-indigo-100" aria-hidden>
+              <div className="flex flex-col items-center gap-3">
+                <div className="w-10 h-10 rounded-full border-4 border-blue-200 border-t-blue-600 animate-spin" />
+                <span className="text-sm text-gray-500">جاري تحميل الصورة...</span>
+              </div>
+            </div>
+          )}
+          {!batchImageUrl && batchImageUrlKnownNull && (
+            <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-blue-100 to-indigo-100" aria-hidden>
+              <span className="text-sm text-gray-500">لا توجد صورة للدفعة</span>
             </div>
           )}
           {batchImageUrl && (
@@ -730,18 +847,18 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
             </Badge>
             {searchQuery && (
               <Badge variant="secondary" size="sm" className="text-xs sm:text-sm">
-                عرض {filteredPieces.length} من {pieces.length} قطعة
+                عرض {piecesToShow.length} من {totalCount} قطعة
               </Badge>
             )}
           </div>
 
-          {loading ? (
+          {isLoadingList ? (
             <div className="text-center py-6 sm:py-8 flex-1 flex items-center justify-center">
               <div className="inline-block animate-spin rounded-full h-6 w-6 sm:h-8 sm:w-8 border-b-2 border-blue-600"></div>
             </div>
-          ) : pieces.length === 0 ? (
+          ) : !searchQuery.trim() && pieces.length === 0 ? (
             <p className="text-center text-xs sm:text-sm text-gray-500 py-6 sm:py-8 flex-1 flex items-center justify-center">لا توجد قطع</p>
-          ) : filteredPieces.length === 0 ? (
+          ) : searchQuery.trim() && piecesToShow.length === 0 ? (
             <div className="text-center py-6 sm:py-8 flex-1 flex flex-col items-center justify-center">
               <p className="text-xs sm:text-sm text-gray-500 mb-2">
                 لا توجد نتائج للبحث عن "{searchQuery}"
@@ -757,7 +874,7 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
             </div>
           ) : (
             <div ref={piecesListRef} className="grid grid-cols-2 gap-2 sm:gap-3 flex-1 overflow-y-auto scrollbar-thin min-h-0 content-start">
-              {filteredPieces.map((piece, idx) => {
+              {piecesToShow.map((piece, idx) => {
                 // Use stable status: prefer availabilityStatus if loaded, otherwise use piece.status
                 const displayStatus = piece.availabilityStatus?.status || piece.status
                 const isAvailable = piece.availabilityStatus?.isAvailable === true || 
@@ -917,6 +1034,7 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
                     {!isAvailable && !isReserved && !isSold && piece.availabilityStatus?.reason && (
                       <span className="text-xs text-gray-500 mt-0.5 block">{piece.availabilityStatus.reason}</span>
                     )}
+                    {isOwner && (
                     <div className="mt-2 pt-2 border-t border-gray-100 flex justify-end" onClick={(e) => e.stopPropagation()}>
                       <button
                         type="button"
@@ -936,13 +1054,14 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
                         حذف
                       </button>
                     </div>
+                    )}
                   </Card>
                 )
               })}
             </div>
           )}
 
-          {!loading && pieces.length > 0 && totalCount > PIECES_PAGE_SIZE && (
+          {!searchQuery.trim() && !loading && pieces.length > 0 && totalCount > PIECES_PAGE_SIZE && (
             <div className="flex items-center justify-center gap-2 flex-wrap py-3 mt-3 border-t border-gray-200 flex-shrink-0">
               <span className="text-xs text-gray-500 mr-1">
                 صفحة {currentPage} من {Math.ceil(totalCount / PIECES_PAGE_SIZE)}

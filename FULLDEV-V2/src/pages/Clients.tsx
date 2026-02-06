@@ -129,6 +129,12 @@ export function ClientsPage() {
   const [nameSearchMatches, setNameSearchMatches] = useState<Array<{ id: string; name: string; id_number: string }>>([])
 
   // ============================================================================
+  // STATE: Phone auto-check (exists or available) - like CIN
+  // ============================================================================
+  const [phoneCheck, setPhoneCheck] = useState<'idle' | 'checking' | 'exists' | 'available'>('idle')
+  const [phoneExistingName, setPhoneExistingName] = useState<string | null>(null)
+
+  // ============================================================================
   // EFFECTS
   // ============================================================================
   useEffect(() => {
@@ -340,6 +346,56 @@ export function ClientsPage() {
 
     return () => clearTimeout(timeoutId)
   }, [name, editingClientId])
+
+  // Auto-check if phone already exists when user types 4+ digits (like CIN)
+  useEffect(() => {
+    const trimmed = phone.trim()
+    if (trimmed.length < 4) {
+      setPhoneCheck('idle')
+      setPhoneExistingName(null)
+      return
+    }
+
+    if (editingClientId) {
+      const current = clients.find(c => c.id === editingClientId)
+      if (current && current.phone === trimmed) {
+        setPhoneCheck('available')
+        setPhoneExistingName(null)
+        return
+      }
+    }
+
+    const timeoutId = setTimeout(async () => {
+      setPhoneCheck('checking')
+      setPhoneExistingName(null)
+      try {
+        let query = supabase
+          .from('clients')
+          .select('id, name')
+          .eq('phone', trimmed)
+        if (editingClientId) {
+          query = query.neq('id', editingClientId)
+        }
+        const { data, error: err } = await query.maybeSingle()
+
+        if (err) {
+          setPhoneCheck('idle')
+          return
+        }
+        if (data) {
+          setPhoneCheck('exists')
+          setPhoneExistingName(data.name || null)
+        } else {
+          setPhoneCheck('available')
+          setPhoneExistingName(null)
+        }
+      } catch {
+        setPhoneCheck('idle')
+      }
+    }, 400)
+
+    return () => clearTimeout(timeoutId)
+  }, [phone, editingClientId, clients])
 
   // ============================================================================
   // DATA LOADING FUNCTIONS
@@ -564,6 +620,8 @@ export function ClientsPage() {
     setSuccess(null)
     setIdNumberCheck('idle')
     setIdNumberExistingName(null)
+    setPhoneCheck('idle')
+    setPhoneExistingName(null)
     setNameSearchStatus('idle')
     setNameSearchMatches([])
   }
@@ -1198,13 +1256,12 @@ export function ClientsPage() {
                 </p>
               )}
               {idNumberCheck === 'exists' && (
-                <p className="text-xs text-red-600">
-                  رقم الهوية مستخدم بالفعل
-                  {idNumberExistingName ? ` (العميل: ${idNumberExistingName})` : ''}
+                <p className="text-xs sm:text-sm text-red-700 font-medium">
+                  رقم الهوية مستخدم بالفعل{idNumberExistingName ? ` (العميل: ${idNumberExistingName})` : ''}. استخدم رقم هوية آخر أو عدّل بيانات العميل الموجود.
                 </p>
               )}
               {idNumberCheck === 'available' && (
-                <p className="text-xs sm:text-sm text-green-600">✓ رقم الهوية متاح</p>
+                <p className="text-xs sm:text-sm text-green-600 font-medium">✓ رقم الهوية متاح — يمكنك الحفظ</p>
               )}
             </div>
 
@@ -1239,7 +1296,7 @@ export function ClientsPage() {
                 </div>
               )}
               {nameSearchStatus === 'none' && name.trim().length >= 2 && (
-                <p className="text-xs text-green-600">لا يوجد عميل بهذا الاسم في السجل.</p>
+                <p className="text-xs sm:text-sm text-green-600 font-medium">✓ لا يوجد عميل بهذا الاسم في السجل — يمكنك إنشاء عميل جديد</p>
               )}
             </div>
             </div>
@@ -1253,8 +1310,25 @@ export function ClientsPage() {
                 value={phone}
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPhone(e.target.value)}
                 placeholder="مثال: 5822092120192614/10/593"
-                className="text-base min-h-[2.75rem] transition-all focus:shadow-md"
+                className={`text-base min-h-[2.75rem] transition-all focus:shadow-md ${
+                  phoneCheck === 'exists' ? 'border-red-500 focus:ring-red-500' : ''
+                } ${phoneCheck === 'available' ? 'border-green-500 focus:ring-green-500' : ''}`}
               />
+              <p className="text-xs sm:text-sm text-gray-600">عند إدخال 4 أرقام أو أكثر نتحقق إن كان هذا الرقم مسجّلاً لعميل آخر (مثل التحقق من رقم الهوية)</p>
+              {phoneCheck === 'checking' && (
+                <p className="text-xs text-amber-600 flex items-center gap-1">
+                  <span className="inline-block w-3 h-3 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
+                  جاري التحقق...
+                </p>
+              )}
+              {phoneCheck === 'exists' && (
+                <p className="text-xs sm:text-sm text-red-700 font-medium">
+                  رقم الهاتف مستخدم بالفعل{phoneExistingName ? ` (العميل: ${phoneExistingName})` : ''}. استخدم رقماً آخر أو عدّل بيانات العميل الموجود.
+                </p>
+              )}
+              {phoneCheck === 'available' && (
+                <p className="text-xs sm:text-sm text-green-600 font-medium">✓ رقم الهاتف متاح — يمكنك الحفظ</p>
+              )}
             </div>
 
             <div className="space-y-2">
