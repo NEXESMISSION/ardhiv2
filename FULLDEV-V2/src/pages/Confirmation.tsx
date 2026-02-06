@@ -21,6 +21,7 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { DeadlineCountdown } from '@/components/DeadlineCountdown'
 import { notifyOwners } from '@/utils/notifications'
 import { buildSaleQuery, formatSalesWithSellers } from '@/utils/salesQueries'
+import { useAuth } from '@/contexts/AuthContext'
 
 interface Sale {
   id: string
@@ -77,6 +78,7 @@ interface Sale {
 
 
 export function ConfirmationPage() {
+  const { isOwner } = useAuth()
   const [sales, setSales] = useState<Sale[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -851,6 +853,7 @@ export function ConfirmationPage() {
             setShowSuccessDialog(true)
             window.dispatchEvent(new CustomEvent('saleUpdated'))
           }}
+          isOwner={isOwner}
         />
       )}
 

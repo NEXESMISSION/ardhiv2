@@ -60,9 +60,10 @@ interface EditSaleDialogProps {
   onClose: () => void
   sale: Sale
   onSave: () => void
+  isOwner?: boolean
 }
 
-export function EditSaleDialog({ open, onClose, sale, onSave }: EditSaleDialogProps) {
+export function EditSaleDialog({ open, onClose, sale, onSave, isOwner = true }: EditSaleDialogProps) {
   const [salePrice, setSalePrice] = useState('')
   const [depositAmount, setDepositAmount] = useState('')
   const [paymentMethod, setPaymentMethod] = useState<'full' | 'installment' | 'promise'>('full')
@@ -77,6 +78,18 @@ export function EditSaleDialog({ open, onClose, sale, onSave }: EditSaleDialogPr
   const [loadingSale, setLoadingSale] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // Add new offer (inline in edit sale dialog)
+  const [showAddOffer, setShowAddOffer] = useState(false)
+  const [savingNewOffer, setSavingNewOffer] = useState(false)
+  const [addOfferError, setAddOfferError] = useState<string | null>(null)
+  const [newOfferName, setNewOfferName] = useState('')
+  const [newOfferPricePerM2, setNewOfferPricePerM2] = useState('')
+  const [newOfferAdvanceMode, setNewOfferAdvanceMode] = useState<'fixed' | 'percent'>('fixed')
+  const [newOfferAdvanceValue, setNewOfferAdvanceValue] = useState('')
+  const [newOfferCalcMode, setNewOfferCalcMode] = useState<'monthlyAmount' | 'months'>('monthlyAmount')
+  const [newOfferMonthlyAmount, setNewOfferMonthlyAmount] = useState('')
+  const [newOfferMonths, setNewOfferMonths] = useState('')
 
   // Track when dialog opens and which sale we inited from
   const prevOpenRef = useRef(false)
@@ -142,6 +155,8 @@ export function EditSaleDialog({ open, onClose, sale, onSave }: EditSaleDialogPr
       prevOpenRef.current = false
       initialOfferRef.current = null
       initedSaleIdRef.current = null
+      setShowAddOffer(false)
+      setAddOfferError(null)
     }
   }, [open, sale])
 
@@ -168,6 +183,75 @@ export function EditSaleDialog({ open, onClose, sale, onSave }: EditSaleDialogPr
       console.error('Error loading payment offers:', e)
     } finally {
       setLoadingOffers(false)
+    }
+  }
+
+  function resetAddOfferForm() {
+    setShowAddOffer(false)
+    setAddOfferError(null)
+    setNewOfferName('')
+    setNewOfferPricePerM2('')
+    setNewOfferAdvanceMode('fixed')
+    setNewOfferAdvanceValue('')
+    setNewOfferCalcMode('monthlyAmount')
+    setNewOfferMonthlyAmount('')
+    setNewOfferMonths('')
+  }
+
+  async function handleAddNewOffer() {
+    if (!sale.batch_id) {
+      setAddOfferError('لا توجد دفعة مرتبطة بهذا البيع')
+      return
+    }
+    const pricePerM2 = parseFloat(newOfferPricePerM2)
+    if (isNaN(pricePerM2) || pricePerM2 <= 0) {
+      setAddOfferError('سعر المتر المربع يجب أن يكون رقماً أكبر من صفر')
+      return
+    }
+    const advanceVal = parseFloat(newOfferAdvanceValue)
+    if (isNaN(advanceVal) || advanceVal < 0) {
+      setAddOfferError('قيمة التسبقة يجب أن تكون رقماً موجباً')
+      return
+    }
+    if (newOfferCalcMode === 'monthlyAmount') {
+      const m = parseFloat(newOfferMonthlyAmount)
+      if (isNaN(m) || m <= 0) {
+        setAddOfferError('المبلغ الشهري يجب أن يكون رقماً أكبر من صفر')
+        return
+      }
+    } else {
+      const m = parseInt(newOfferMonths, 10)
+      if (isNaN(m) || m <= 0) {
+        setAddOfferError('عدد الأشهر يجب أن يكون رقماً صحيحاً أكبر من صفر')
+        return
+      }
+    }
+    setSavingNewOffer(true)
+    setAddOfferError(null)
+    try {
+      const payload = {
+        batch_id: sale.batch_id,
+        name: newOfferName.trim() || null,
+        price_per_m2_installment: pricePerM2,
+        advance_mode: newOfferAdvanceMode,
+        advance_value: advanceVal,
+        calc_mode: newOfferCalcMode,
+        monthly_amount: newOfferCalcMode === 'monthlyAmount' ? parseFloat(newOfferMonthlyAmount) : null,
+        months: newOfferCalcMode === 'months' ? parseInt(newOfferMonths, 10) : null,
+      }
+      const { data: inserted, error: err } = await supabase
+        .from('payment_offers')
+        .insert(payload)
+        .select('id, name, price_per_m2_installment, advance_mode, advance_value, calc_mode, monthly_amount, months')
+        .single()
+      if (err) throw err
+      setPaymentOffers((prev) => [inserted as PaymentOffer, ...prev])
+      setPaymentOfferId(inserted.id)
+      resetAddOfferForm()
+    } catch (e: any) {
+      setAddOfferError(e.message || 'فشل إضافة العرض')
+    } finally {
+      setSavingNewOffer(false)
     }
   }
 
@@ -509,9 +593,13 @@ export function EditSaleDialog({ open, onClose, sale, onSave }: EditSaleDialogPr
             <Label className="text-xs sm:text-sm">عرض التقسيط *</Label>
             {loadingOffers ? (
               <p className="text-xs sm:text-sm text-gray-500">جاري تحميل العروض...</p>
-            ) : paymentOffers.length === 0 ? (
-              <Alert variant="error" className="text-xs sm:text-sm">لا توجد عروض تقسيط متاحة لهذه الدفعة</Alert>
-            ) : (
+            ) : paymentOffers.length === 0 && !showAddOffer ? (
+              isOwner ? (
+                <Alert variant="error" className="text-xs sm:text-sm">لا توجد عروض تقسيط متاحة لهذه الدفعة. اضغط أدناه لإضافة عرض جديد.</Alert>
+              ) : (
+                <Alert variant="error" className="text-xs sm:text-sm">لا توجد عروض تقسيط متاحة لهذه الدفعة.</Alert>
+              )
+            ) : !showAddOffer ? (
               <select
                 value={paymentOfferId}
                 onChange={(e) => setPaymentOfferId(e.target.value)}
@@ -524,6 +612,133 @@ export function EditSaleDialog({ open, onClose, sale, onSave }: EditSaleDialogPr
                   </option>
                 ))}
               </select>
+            ) : null}
+            {paymentMethod === 'installment' && sale.batch_id && isOwner && (
+              <>
+                {!showAddOffer ? (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setShowAddOffer(true)}
+                    className="text-xs sm:text-sm"
+                  >
+                    + إضافة عرض تقسيط جديد
+                  </Button>
+                ) : (
+                  <Card className="p-3 bg-blue-50 border-blue-200 space-y-3">
+                    <h4 className="text-xs sm:text-sm font-semibold text-blue-900">إضافة عرض تقسيط جديد</h4>
+                    {addOfferError && (
+                      <Alert variant="error" className="text-xs sm:text-sm">{addOfferError}</Alert>
+                    )}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <div className="space-y-1">
+                        <Label className="text-xs">اسم العرض</Label>
+                        <Input
+                          value={newOfferName}
+                          onChange={(e) => setNewOfferName(e.target.value)}
+                          placeholder="مثال: offre 500"
+                          size="sm"
+                          className="text-xs sm:text-sm"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">سعر المتر (د/م²) *</Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={newOfferPricePerM2}
+                          onChange={(e) => setNewOfferPricePerM2(e.target.value)}
+                          placeholder="15"
+                          size="sm"
+                          className="text-xs sm:text-sm"
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <div className="space-y-1">
+                        <Label className="text-xs">نوع التسبقة</Label>
+                        <select
+                          value={newOfferAdvanceMode}
+                          onChange={(e) => setNewOfferAdvanceMode(e.target.value as 'fixed' | 'percent')}
+                          className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs sm:text-sm"
+                        >
+                          <option value="fixed">مبلغ ثابت (دت)</option>
+                          <option value="percent">نسبة مئوية (%)</option>
+                        </select>
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">قيمة التسبقة *</Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          step={newOfferAdvanceMode === 'percent' ? '1' : '0.01'}
+                          value={newOfferAdvanceValue}
+                          onChange={(e) => setNewOfferAdvanceValue(e.target.value)}
+                          placeholder={newOfferAdvanceMode === 'percent' ? '10' : '500'}
+                          size="sm"
+                          className="text-xs sm:text-sm"
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs">طريقة الحساب</Label>
+                      <select
+                        value={newOfferCalcMode}
+                        onChange={(e) => setNewOfferCalcMode(e.target.value as 'monthlyAmount' | 'months')}
+                        className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs sm:text-sm"
+                      >
+                        <option value="monthlyAmount">المبلغ الشهري</option>
+                        <option value="months">عدد الأشهر</option>
+                      </select>
+                      {newOfferCalcMode === 'monthlyAmount' ? (
+                        <Input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={newOfferMonthlyAmount}
+                          onChange={(e) => setNewOfferMonthlyAmount(e.target.value)}
+                          placeholder="70"
+                          size="sm"
+                          className="text-xs sm:text-sm"
+                        />
+                      ) : (
+                        <Input
+                          type="number"
+                          min="1"
+                          value={newOfferMonths}
+                          onChange={(e) => setNewOfferMonths(e.target.value)}
+                          placeholder="96"
+                          size="sm"
+                          className="text-xs sm:text-sm"
+                        />
+                      )}
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={handleAddNewOffer}
+                        disabled={savingNewOffer}
+                        className="text-xs sm:text-sm"
+                      >
+                        {savingNewOffer ? 'جاري الإضافة...' : 'إضافة العرض'}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={resetAddOfferForm}
+                        disabled={savingNewOffer}
+                        className="text-xs sm:text-sm"
+                      >
+                        إلغاء
+                      </Button>
+                    </div>
+                  </Card>
+                )}
+              </>
             )}
             
             {/* Installment Preview */}
