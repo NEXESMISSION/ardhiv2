@@ -2,12 +2,17 @@
 @tailwind components;
 @tailwind utilities;
 
-/* PWA safe area: notch, home indicator, system UI (viewport-fit=cover in index.html) */
+/* PWA safe area: notch, home indicator, system UI (viewport-fit=cover in index.html).
+   Use --pwa-padding-* for consistent top/bottom/side padding: at least 16px, or device inset when larger. */
 :root {
   --safe-area-inset-top: env(safe-area-inset-top, 0px);
   --safe-area-inset-bottom: env(safe-area-inset-bottom, 0px);
   --safe-area-inset-left: env(safe-area-inset-left, 0px);
   --safe-area-inset-right: env(safe-area-inset-right, 0px);
+  --pwa-padding-top: max(16px, var(--safe-area-inset-top));
+  --pwa-padding-bottom: max(16px, var(--safe-area-inset-bottom));
+  --pwa-padding-left: max(12px, var(--safe-area-inset-left));
+  --pwa-padding-right: max(12px, var(--safe-area-inset-right));
 }
 
 @layer base {
@@ -27,14 +32,14 @@ html, body {
     direction: rtl;
   }
 
-  /* Main app container: pad content so it's not under notch/home indicator */
+  /* Main app container: pad content so it's not under notch/home indicator (all pages) */
   #root {
     min-height: 100vh;
     min-height: 100dvh;
-    padding-top: var(--safe-area-inset-top);
-    padding-right: var(--safe-area-inset-right);
-    padding-bottom: var(--safe-area-inset-bottom);
-    padding-left: var(--safe-area-inset-left);
+    padding-top: var(--pwa-padding-top);
+    padding-right: var(--pwa-padding-right);
+    padding-bottom: var(--pwa-padding-bottom);
+    padding-left: var(--pwa-padding-left);
     box-sizing: border-box;
   }
 
@@ -72,18 +77,18 @@ html, body {
 }
 
 @layer utilities {
-  /* PWA: safe area padding for fixed overlays (dialogs, modals) - keeps content clear of notch/indicator */
+  /* PWA: safe area padding for dialogs/popups - same as #root so content is never under notch/indicator */
   .safe-area-padding {
-    padding-top: max(0.5rem, var(--safe-area-inset-top));
-    padding-right: max(0.5rem, var(--safe-area-inset-right));
-    padding-bottom: max(0.5rem, var(--safe-area-inset-bottom));
-    padding-left: max(0.5rem, var(--safe-area-inset-left));
+    padding-top: var(--pwa-padding-top);
+    padding-right: var(--pwa-padding-right);
+    padding-bottom: var(--pwa-padding-bottom);
+    padding-left: var(--pwa-padding-left);
   }
   .safe-area-top {
-    padding-top: var(--safe-area-inset-top);
+    padding-top: var(--pwa-padding-top);
   }
   .safe-area-bottom {
-    padding-bottom: var(--safe-area-inset-bottom);
+    padding-bottom: var(--pwa-padding-bottom);
   }
 
   /* Shine animation for gold badge - left to right */

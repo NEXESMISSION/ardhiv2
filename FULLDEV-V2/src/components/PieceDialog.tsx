@@ -62,6 +62,7 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
   const [batchImageLoaded, setBatchImageLoaded] = useState(false)
   const [batchImageUrlKnownNull, setBatchImageUrlKnownNull] = useState(false)
   const [localBatchImageUrl, setLocalBatchImageUrl] = useState<string | null>(null)
+  const [localFetchSettled, setLocalFetchSettled] = useState(false)
   const lastLoadedImageUrlRef = useRef<string | null>(null)
   const currentBatchImageUrlRef = useRef<string | null>(null)
   /** Ordered piece ids for this batch (natural sort: 1,2,3..10,11 and a,a2,b1,b2) so pagination shows correct order */
@@ -105,6 +106,7 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
       setBatchImageLoaded(false)
       setBatchImageUrlKnownNull(false)
       setLocalBatchImageUrl(null)
+      setLocalFetchSettled(false)
     }
   }, [open])
 
@@ -114,8 +116,10 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
     const fromParent = batchImageUrl?.trim()
     if (fromParent) {
       setLocalBatchImageUrl(null)
+      setLocalFetchSettled(true)
       return
     }
+    setLocalFetchSettled(false)
     let cancelled = false
     supabase
       .from('land_batches')
@@ -127,18 +131,22 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
         if (!error && data?.image_url?.trim()) setLocalBatchImageUrl(data.image_url.trim())
       })
       .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setLocalFetchSettled(true)
+      })
     return () => { cancelled = true }
   }, [open, batchId, batchImageUrl])
 
-  // Show "لا توجد صورة للدفعة" only after we've had time to get URL (parent + our fetch) and still none
+  // Show "لا توجد صورة للدفعة" only after our fetch has settled and we still have no URL (avoids showing it while fetch in flight)
   useEffect(() => {
     if (!open || effectiveBatchImageUrl) {
       setBatchImageUrlKnownNull(false)
       return
     }
-    const t = setTimeout(() => setBatchImageUrlKnownNull(true), 3500)
+    if (!localFetchSettled) return
+    const t = setTimeout(() => setBatchImageUrlKnownNull(true), 400)
     return () => clearTimeout(t)
-  }, [open, effectiveBatchImageUrl])
+  }, [open, effectiveBatchImageUrl, localFetchSettled])
 
   // Batch image: show loading only when URL is new; if same URL already loaded (e.g. from cache), show image immediately. Short timeout so we never stay stuck.
   useEffect(() => {

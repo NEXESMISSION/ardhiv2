@@ -921,12 +921,16 @@ export function LandPage() {
       .single()
       .then(({ data: imageData, error: imageErr }) => {
         if (!imageErr && imageData?.image_url) {
-          batchImageCacheRef.current[batchId] = imageData.image_url
+          const url = imageData.image_url
+          batchImageCacheRef.current[batchId] = url
           setSelectedBatchForPieces((prev) =>
             prev && prev.id === batchId
-              ? { ...prev, imageUrl: imageData.image_url }
+              ? { ...prev, imageUrl: url }
               : prev
           )
+          // Preload image so PieceDialog shows it instantly (browser cache)
+          const img = new Image()
+          img.src = url
         }
       })
       .catch((err) => console.error('Error loading batch image:', err))
