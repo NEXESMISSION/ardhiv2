@@ -33,14 +33,10 @@ html, body {
     direction: rtl;
   }
 
-  /* Main app container: pad content so it's not under notch/home indicator (all pages) */
+  /* #root: full viewport, no padding here (padding on Layout wrapper so PWA layout doesn't break) */
   #root {
     min-height: 100vh;
     min-height: 100dvh;
-    padding-top: var(--pwa-padding-top);
-    padding-right: var(--pwa-padding-right);
-    padding-bottom: var(--pwa-padding-bottom);
-    padding-left: var(--pwa-padding-left);
     box-sizing: border-box;
   }
 

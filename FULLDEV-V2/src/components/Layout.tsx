@@ -433,7 +433,7 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex">
+    <div className="min-h-screen bg-gray-50 flex safe-area-padding">
       {/* PWA update banner: new version available after deploy */}
       {pwaUpdateAvailable && (
         <div className="fixed top-0 left-0 right-0 z-[200] bg-blue-600 text-white px-3 py-2 flex items-center justify-center gap-3 shadow-lg safe-area-top">
