@@ -49,7 +49,8 @@ export function Dialog({
       <div
         className={`
           bg-white rounded-lg sm:rounded-xl shadow-2xl w-full ${sizes[size]}
-          max-h-[95vh] sm:max-h-[90vh] flex flex-col animate-in zoom-in-95 slide-in-from-bottom-4
+          max-h-[85vh] sm:max-h-[82vh] flex flex-col animate-in zoom-in-95 slide-in-from-bottom-4
+          my-6 sm:my-8
         `}
       >
         {/* Header */}

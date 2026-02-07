@@ -508,7 +508,7 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
                 {/* Notifications Full-Screen Modal */}
                 {notificationsOpen && (
                   <div data-modal="true" role="dialog" aria-modal="true" className="fixed inset-0 z-50 flex items-center justify-center safe-area-padding pwa-popup-safe-top pwa-popup-safe-bottom bg-black/50 backdrop-blur-sm" onClick={() => setNotificationsOpen(false)}>
-                    <div className="w-full h-full max-w-7xl max-h-[95vh] bg-white rounded-lg shadow-2xl flex flex-col m-2 sm:m-3" onClick={(e) => e.stopPropagation()}>
+                    <div className="w-full h-full max-w-7xl max-h-[82vh] bg-white rounded-lg shadow-2xl flex flex-col my-6 sm:my-8 mx-4 sm:mx-6" onClick={(e) => e.stopPropagation()}>
                       {/* Header */}
                       <div className="p-4 sm:p-6 border-b border-gray-200 flex items-center justify-between bg-gradient-to-r from-blue-50 to-indigo-50 flex-shrink-0">
                         <h3 className="text-lg sm:text-xl font-bold text-gray-900">الإشعارات</h3>
