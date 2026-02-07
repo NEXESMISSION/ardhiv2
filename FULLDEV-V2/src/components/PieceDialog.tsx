@@ -61,6 +61,7 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
   const [totalCount, setTotalCount] = useState(0)
   const [batchImageLoaded, setBatchImageLoaded] = useState(false)
   const [batchImageUrlKnownNull, setBatchImageUrlKnownNull] = useState(false)
+  const [localBatchImageUrl, setLocalBatchImageUrl] = useState<string | null>(null)
   const lastLoadedImageUrlRef = useRef<string | null>(null)
   const currentBatchImageUrlRef = useRef<string | null>(null)
   /** Ordered piece ids for this batch (natural sort: 1,2,3..10,11 and a,a2,b1,b2) so pagination shows correct order */
@@ -92,6 +93,9 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
   const [notes, setNotes] = useState('')
   const [status, setStatus] = useState('Available')
 
+  // Effective URL: from parent or from our own fetch (fallback when parent hasn't loaded it yet)
+  const effectiveBatchImageUrl = batchImageUrl?.trim() || localBatchImageUrl?.trim() || null
+
   // Reset search and selections when dialog closes (keep lastLoadedImageUrlRef so cache shows instantly next time)
   useEffect(() => {
     if (!open) {
@@ -100,33 +104,56 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
       setSelectedPieces(new Set())
       setBatchImageLoaded(false)
       setBatchImageUrlKnownNull(false)
+      setLocalBatchImageUrl(null)
     }
   }, [open])
 
-  // When dialog opens with no URL, parent (Land) may still be fetching. Wait a short time before showing "لا توجد صورة للدفعة".
+  // When dialog opens with no URL from parent, fetch image_url ourselves so we don't show "لا توجد صورة" when image exists
   useEffect(() => {
-    if (!open || batchImageUrl) {
+    if (!open || !batchId) return
+    const fromParent = batchImageUrl?.trim()
+    if (fromParent) {
+      setLocalBatchImageUrl(null)
+      return
+    }
+    let cancelled = false
+    supabase
+      .from('land_batches')
+      .select('image_url')
+      .eq('id', batchId)
+      .single()
+      .then(({ data, error }) => {
+        if (cancelled) return
+        if (!error && data?.image_url?.trim()) setLocalBatchImageUrl(data.image_url.trim())
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [open, batchId, batchImageUrl])
+
+  // Show "لا توجد صورة للدفعة" only after we've had time to get URL (parent + our fetch) and still none
+  useEffect(() => {
+    if (!open || effectiveBatchImageUrl) {
       setBatchImageUrlKnownNull(false)
       return
     }
-    const t = setTimeout(() => setBatchImageUrlKnownNull(true), 1800)
+    const t = setTimeout(() => setBatchImageUrlKnownNull(true), 3500)
     return () => clearTimeout(t)
-  }, [open, batchImageUrl])
+  }, [open, effectiveBatchImageUrl])
 
   // Batch image: show loading only when URL is new; if same URL already loaded (e.g. from cache), show image immediately. Short timeout so we never stay stuck.
   useEffect(() => {
-    currentBatchImageUrlRef.current = batchImageUrl ?? null
-    if (!batchImageUrl) {
+    const url = effectiveBatchImageUrl
+    currentBatchImageUrlRef.current = url
+    if (!url) {
       setBatchImageLoaded(false)
       return
     }
     setBatchImageUrlKnownNull(false)
-    if (batchImageUrl === lastLoadedImageUrlRef.current) {
+    if (url === lastLoadedImageUrlRef.current) {
       setBatchImageLoaded(true)
       return
     }
     setBatchImageLoaded(false)
-    const url = batchImageUrl
     const img = new Image()
     const done = () => {
       if (url !== currentBatchImageUrlRef.current) return
@@ -147,7 +174,7 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
       img.onerror = null
       img.src = ''
     }
-  }, [batchImageUrl])
+  }, [effectiveBatchImageUrl])
 
   // Load first page when dialog opens; listen for status changes
   useEffect(() => {
@@ -580,14 +607,14 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
       <div className="space-y-3 sm:space-y-4 lg:space-y-6 flex flex-col h-full">
         {/* Batch Image - Placeholder with loading animation until image is ready */}
         <div 
-          className={`mb-3 sm:mb-4 w-full h-48 sm:h-56 lg:h-64 rounded-lg overflow-hidden border-2 border-gray-200 shadow-sm bg-gradient-to-br from-blue-100 to-indigo-100 flex items-center justify-center relative ${batchImageUrl && onImageClick ? 'cursor-pointer hover:opacity-95 transition-opacity' : ''}`}
+          className={`mb-3 sm:mb-4 w-full h-48 sm:h-56 lg:h-64 rounded-lg overflow-hidden border-2 border-gray-200 shadow-sm bg-gradient-to-br from-blue-100 to-indigo-100 flex items-center justify-center relative ${effectiveBatchImageUrl && onImageClick ? 'cursor-pointer hover:opacity-95 transition-opacity' : ''}`}
           onClick={() => {
-            if (batchImageUrl && onImageClick) {
-              onImageClick(batchImageUrl, batchName)
+            if (effectiveBatchImageUrl && onImageClick) {
+              onImageClick(effectiveBatchImageUrl, batchName)
             }
           }}
         >
-          {batchImageUrl && !batchImageLoaded && (
+          {effectiveBatchImageUrl && !batchImageLoaded && (
             <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-blue-100 to-indigo-100" aria-hidden>
               <div className="flex flex-col items-center gap-3">
                 <div className="w-12 h-12 rounded-full border-4 border-blue-200 border-t-blue-600 animate-spin" />
@@ -595,7 +622,7 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
               </div>
             </div>
           )}
-          {!batchImageUrl && !batchImageUrlKnownNull && (
+          {!effectiveBatchImageUrl && !batchImageUrlKnownNull && (
             <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-blue-100 to-indigo-100" aria-hidden>
               <div className="flex flex-col items-center gap-3">
                 <div className="w-10 h-10 rounded-full border-4 border-blue-200 border-t-blue-600 animate-spin" />
@@ -603,14 +630,14 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
               </div>
             </div>
           )}
-          {!batchImageUrl && batchImageUrlKnownNull && (
+          {!effectiveBatchImageUrl && batchImageUrlKnownNull && (
             <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-blue-100 to-indigo-100" aria-hidden>
               <span className="text-sm text-gray-500">لا توجد صورة للدفعة</span>
             </div>
           )}
-          {batchImageUrl && (
+          {effectiveBatchImageUrl && (
             <img
-              src={batchImageUrl}
+              src={effectiveBatchImageUrl}
               alt={batchName}
               className={`w-full h-full object-cover transition-opacity duration-300 ${batchImageLoaded ? 'opacity-100' : 'opacity-0'}`}
               onLoad={() => setBatchImageLoaded(true)}

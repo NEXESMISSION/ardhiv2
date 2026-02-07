@@ -71,10 +71,11 @@ export function Sidebar({ currentPage, onNavigate, isOpen, onToggle }: SidebarPr
           fixed top-0 left-0 h-full w-64 bg-white shadow-lg z-50
           transform transition-transform duration-300 ease-in-out
           lg:relative lg:translate-x-0 lg:z-auto lg:shadow-none lg:border-l-0 lg:border-r lg:border-gray-200
+          safe-area-top safe-area-bottom
           ${isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
         `}
       >
-        <div className="flex flex-col h-full">
+        <div className="flex flex-col h-full min-h-0">
           {/* Header */}
           <div className="p-2 sm:p-3 lg:p-4 border-b border-gray-200 flex items-center justify-between">
             <h2 className="text-sm sm:text-base lg:text-xl font-bold text-gray-900">النظام</h2>

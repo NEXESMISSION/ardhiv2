@@ -3212,7 +3212,7 @@ export function LandPage() {
         {/* Image Viewer Dialog */}
         {viewingImage && (
           <div
-            className={`fixed inset-0 z-[60] bg-black/90 backdrop-blur-sm ${
+            className={`fixed inset-0 z-[60] bg-black/90 backdrop-blur-sm safe-area-padding ${
               imageViewerOpen ? 'animate-in fade-in' : 'hidden'
             }`}
             onClick={() => {

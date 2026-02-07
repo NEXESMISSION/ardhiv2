@@ -436,7 +436,7 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
     <div className="min-h-screen bg-gray-50 flex">
       {/* PWA update banner: new version available after deploy */}
       {pwaUpdateAvailable && (
-        <div className="fixed top-0 left-0 right-0 z-[200] bg-blue-600 text-white px-3 py-2 flex items-center justify-center gap-3 shadow-lg">
+        <div className="fixed top-0 left-0 right-0 z-[200] bg-blue-600 text-white px-3 py-2 flex items-center justify-center gap-3 shadow-lg safe-area-top">
           <span className="text-sm font-medium">يتوفر إصدار جديد. أعد التحميل لاستخدامه.</span>
           <button
             type="button"
@@ -507,8 +507,8 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
 
                 {/* Notifications Full-Screen Modal */}
                 {notificationsOpen && (
-                  <div data-modal="true" role="dialog" aria-modal="true" className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setNotificationsOpen(false)}>
-                    <div className="w-full h-full max-w-7xl max-h-[95vh] bg-white rounded-lg shadow-2xl flex flex-col m-4" onClick={(e) => e.stopPropagation()}>
+                  <div data-modal="true" role="dialog" aria-modal="true" className="fixed inset-0 z-50 flex items-center justify-center safe-area-padding bg-black/50 backdrop-blur-sm" onClick={() => setNotificationsOpen(false)}>
+                    <div className="w-full h-full max-w-7xl max-h-[95vh] bg-white rounded-lg shadow-2xl flex flex-col m-2 sm:m-3" onClick={(e) => e.stopPropagation()}>
                       {/* Header */}
                       <div className="p-4 sm:p-6 border-b border-gray-200 flex items-center justify-between bg-gradient-to-r from-blue-50 to-indigo-50 flex-shrink-0">
                         <h3 className="text-lg sm:text-xl font-bold text-gray-900">الإشعارات</h3>
