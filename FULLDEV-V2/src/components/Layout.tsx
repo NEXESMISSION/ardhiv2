@@ -433,7 +433,7 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex safe-area-padding">
+    <div className="min-h-screen min-h-[100dvh] bg-gray-50 flex w-full safe-area-padding">
       {/* PWA update banner: new version available after deploy */}
       {pwaUpdateAvailable && (
         <div className="fixed top-0 left-0 right-0 z-[200] bg-blue-600 text-white px-3 py-2 flex items-center justify-center gap-3 shadow-lg safe-area-top">
@@ -456,7 +456,7 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
       />
 
       {/* Main Content - pull-down or long-press to hard refresh (PWA & browser) */}
-      <HardRefreshWrapper className="flex-1 lg:mr-0 transition-all duration-300 min-w-0 flex flex-col min-h-screen">
+      <HardRefreshWrapper className="flex-1 lg:mr-0 transition-all duration-300 min-w-0 flex flex-col min-h-screen min-h-0">
       <div className="flex-1 flex flex-col min-h-0">
         {/* Top Bar with Menu Toggle and Back Button */}
         <div className="sticky top-0 z-20 bg-white border-b border-gray-200 shadow-sm">

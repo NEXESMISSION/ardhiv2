@@ -268,21 +268,25 @@ function AppContent() {
     </div>
   )
 
-  // Show protected pages if authenticated; lazy chunks load on demand
+  // Show protected pages if authenticated; lazy chunks load on demand.
+  // If no page matches (e.g. no access), show home so PWA never shows blank main.
+  const pageContent =
+    (currentPage === 'home' && <HomePage onNavigate={handleNavigate} />) ||
+    (hasAccessToPage('land') && currentPage === 'land' && <LandPage />) ||
+    (hasAccessToPage('clients') && currentPage === 'clients' && <ClientsPage />) ||
+    (hasAccessToPage('confirmation') && currentPage === 'confirmation' && <ConfirmationPage />) ||
+    (hasAccessToPage('finance') && currentPage === 'finance' && <FinancePage />) ||
+    (hasAccessToPage('contract-writers') && currentPage === 'contract-writers' && <ContractWritersPage />) ||
+    (hasAccessToPage('installments') && currentPage === 'installments' && <InstallmentsPage />) ||
+    (hasAccessToPage('sales-records') && currentPage === 'sales-records' && <SalesRecordsPage />) ||
+    (hasAccessToPage('appointments') && currentPage === 'appointments' && <AppointmentsPage />) ||
+    (hasAccessToPage('phone-call-appointments') && currentPage === 'phone-call-appointments' && <PhoneCallAppointmentsPage />) ||
+    (hasAccessToPage('users') && currentPage === 'users' && <UsersPage />)
+
   return (
     <Layout currentPage={currentPage} onNavigate={handleNavigate}>
       <Suspense fallback={<PageFallback />}>
-        {currentPage === 'home' && <HomePage onNavigate={handleNavigate} />}
-        {hasAccessToPage('land') && currentPage === 'land' && <LandPage />}
-        {hasAccessToPage('clients') && currentPage === 'clients' && <ClientsPage />}
-        {hasAccessToPage('confirmation') && currentPage === 'confirmation' && <ConfirmationPage />}
-        {hasAccessToPage('finance') && currentPage === 'finance' && <FinancePage />}
-        {hasAccessToPage('contract-writers') && currentPage === 'contract-writers' && <ContractWritersPage />}
-        {hasAccessToPage('installments') && currentPage === 'installments' && <InstallmentsPage />}
-        {hasAccessToPage('sales-records') && currentPage === 'sales-records' && <SalesRecordsPage />}
-        {hasAccessToPage('appointments') && currentPage === 'appointments' && <AppointmentsPage />}
-        {hasAccessToPage('phone-call-appointments') && currentPage === 'phone-call-appointments' && <PhoneCallAppointmentsPage />}
-        {hasAccessToPage('users') && currentPage === 'users' && <UsersPage />}
+        {pageContent || <HomePage onNavigate={handleNavigate} />}
       </Suspense>
     </Layout>
   )
