@@ -91,6 +91,13 @@ html, body {
   .safe-area-bottom {
     padding-bottom: var(--pwa-padding-bottom);
   }
+  /* Popups: guarantee top and bottom inset so header/content never under notch or home indicator */
+  .pwa-popup-safe-top {
+    padding-top: var(--pwa-padding-top) !important;
+  }
+  .pwa-popup-safe-bottom {
+    padding-bottom: var(--pwa-padding-bottom) !important;
+  }
 
   /* Shine animation for gold badge - left to right */
   @keyframes shine {

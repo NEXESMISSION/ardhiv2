@@ -131,7 +131,7 @@ export function HardRefreshWrapper({ children, className = '' }: HardRefreshWrap
       )}
 
       {isRefreshing && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center safe-area-padding bg-white/90">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center safe-area-padding pwa-popup-safe-top pwa-popup-safe-bottom bg-white/90">
           <div className="flex flex-col items-center gap-3">
             <div className="h-12 w-12 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
             <p className="text-sm font-semibold text-gray-800">جاري التحديث...</p>

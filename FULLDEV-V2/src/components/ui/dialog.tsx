@@ -44,7 +44,7 @@ export function Dialog({
       data-modal="true"
       role="dialog"
       aria-modal="true"
-      className="fixed inset-0 z-50 flex items-center justify-center safe-area-padding bg-black/50 backdrop-blur-sm animate-in fade-in"
+      className="fixed inset-0 z-50 flex items-center justify-center safe-area-padding pwa-popup-safe-top pwa-popup-safe-bottom bg-black/50 backdrop-blur-sm animate-in fade-in"
     >
       <div
         className={`

@@ -3216,7 +3216,7 @@ export function LandPage() {
         {/* Image Viewer Dialog */}
         {viewingImage && (
           <div
-            className={`fixed inset-0 z-[60] bg-black/90 backdrop-blur-sm safe-area-padding ${
+            className={`fixed inset-0 z-[60] bg-black/90 backdrop-blur-sm safe-area-padding pwa-popup-safe-top pwa-popup-safe-bottom ${
               imageViewerOpen ? 'animate-in fade-in' : 'hidden'
             }`}
             onClick={() => {
