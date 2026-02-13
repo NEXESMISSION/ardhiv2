@@ -41,6 +41,17 @@
     <title>الادارة - نظام إدارة الأراضي</title>
   </head>
   <body>
+    <!-- PWA/Android: set hash before React so first paint has correct route (avoids blank after login) -->
+    <script>
+      (function() {
+        var h = window.location.hash;
+        if (!h || h === '#' || h === '') {
+          var standalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+          if (standalone || /Android|webOS|iPhone|iPad|iPod/i.test(navigator.userAgent))
+            window.location.hash = '#login';
+        }
+      })();
+    </script>
     <div id="root">
       <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#f9fafb;font-family:system-ui,sans-serif;" aria-hidden="true" id="app-loading">
         <div style="text-align:center;">

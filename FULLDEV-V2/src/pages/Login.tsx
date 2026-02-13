@@ -8,6 +8,16 @@ import { Alert } from '@/components/ui/alert'
 import { IconButton } from '@/components/ui/icon-button'
 import { translateAuthError } from '@/utils/authErrors'
 
+declare global {
+  interface WindowEventMap {
+    beforeinstallprompt: BeforeInstallPromptEvent
+  }
+}
+interface BeforeInstallPromptEvent extends Event {
+  prompt(): Promise<void>
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>
+}
+
 export function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -15,8 +25,31 @@ export function LoginPage() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [rememberMe, setRememberMe] = useState(false)
+  const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null)
+  const [isStandalone, setIsStandalone] = useState(false)
   const emailInputRef = useRef<HTMLInputElement>(null)
   const { signIn } = useAuth()
+
+  // PWA: detect standalone (already installed) and install prompt (Android/Chrome)
+  useEffect(() => {
+    const standalone = window.matchMedia('(display-mode: standalone)').matches ||
+      (window.navigator as any).standalone === true
+    setIsStandalone(standalone)
+
+    const onBeforeInstall = (e: BeforeInstallPromptEvent) => {
+      e.preventDefault()
+      setInstallPrompt(e)
+    }
+    window.addEventListener('beforeinstallprompt', onBeforeInstall)
+    return () => window.removeEventListener('beforeinstallprompt', onBeforeInstall)
+  }, [])
+
+  const handleInstallClick = async () => {
+    if (!installPrompt) return
+    await installPrompt.prompt()
+    const { outcome } = await installPrompt.userChoice
+    if (outcome === 'accepted') setInstallPrompt(null)
+  }
 
   // Auto-focus email input on mount
   useEffect(() => {
@@ -125,8 +158,13 @@ export function LoginPage() {
           emailInputRef.current?.focus()
         }, 300)
       } else {
-        // Success - redirect will happen automatically via useEffect
-        // Clear form
+        // Success - in PWA/standalone (Android) force full navigation so app shell shows correctly
+        const standalone = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone === true
+        if (standalone) {
+          const base = window.location.origin + (window.location.pathname || '/')
+          window.location.href = base + '#home'
+          return
+        }
         setEmail('')
         setPassword('')
       }
@@ -303,6 +341,31 @@ export function LoginPage() {
               )}
             </Button>
           </form>
+
+          {/* PWA Install - show only in browser (not when already installed) and when prompt available or Android */}
+          {!isStandalone && (
+            <div className="mt-6 pt-6 border-t border-gray-200">
+              <p className="text-xs sm:text-sm text-gray-600 mb-3 text-center">
+                تثبيت التطبيق على الهاتف (أندرويد)
+              </p>
+              {installPrompt ? (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="w-full flex items-center justify-center gap-2"
+                  onClick={handleInstallClick}
+                >
+                  <span>📲</span>
+                  <span>تثبيت التطبيق</span>
+                </Button>
+              ) : (
+                <div className="text-center text-xs text-gray-500 space-y-1">
+                  <p>في متصفح Chrome: القائمة ⋮ → إضافة إلى الشاشة الرئيسية</p>
+                  <p className="text-[11px]">أو: الإعدادات → تثبيت التطبيق</p>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </Card>
     </div>
