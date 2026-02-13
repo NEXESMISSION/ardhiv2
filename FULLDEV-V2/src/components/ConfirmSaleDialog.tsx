@@ -15,6 +15,7 @@ import { calculateInstallmentWithDeposit } from '@/utils/installmentCalculator'
 import { generateInstallmentSchedule } from '@/utils/installmentSchedule'
 import { useAuth } from '@/contexts/AuthContext'
 import { notifyOwners, notifyCurrentUser } from '@/utils/notifications'
+import { getContractWritersCached, getContractWriters, type ContractWriterCached } from '@/utils/contractWritersCache'
 
 interface Sale {
   id: string
@@ -68,12 +69,6 @@ interface Sale {
   }
 }
 
-interface ContractWriter {
-  id: string
-  name: string
-  type: string
-}
-
 interface ConfirmSaleDialogProps {
   open: boolean
   onClose: () => void
@@ -87,7 +82,7 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
   const [paymentMethod, setPaymentMethod] = useState('cash')
   const [contractWriterId, setContractWriterId] = useState('')
   const [notes, setNotes] = useState('')
-  const [contractWriters, setContractWriters] = useState<ContractWriter[]>([])
+  const [contractWriters, setContractWriters] = useState<ContractWriterCached[]>([])
   const [loadingWriters, setLoadingWriters] = useState(false)
   const [confirming, setConfirming] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -165,6 +160,8 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
       setShowSuccessDialog(false)
       setShowErrorDialog(false)
       setShowAppointmentDialog(false)
+      const cached = getContractWritersCached()
+      if (cached?.length) setContractWriters(cached)
       loadContractWriters()
     }
   }, [open, sale])
@@ -201,15 +198,16 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
   }
 
   async function loadContractWriters() {
+    const cached = getContractWritersCached()
+    if (cached?.length) {
+      setContractWriters(cached)
+      setLoadingWriters(false)
+      return
+    }
     setLoadingWriters(true)
     try {
-      const { data, error: err } = await supabase
-        .from('contract_writers')
-        .select('*')
-        .order('name', { ascending: true })
-
-      if (err) throw err
-      setContractWriters(data || [])
+      const data = await getContractWriters()
+      setContractWriters(data)
     } catch (e: any) {
       console.error('Error loading contract writers:', e)
     } finally {
@@ -477,11 +475,13 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
       }
 
       // Full completion (for full payment, installment, or promise with full payment)
+      // confirmed_at = when we confirm → used as "date sold" in Finance today / Confirmation History
       const updateData: any = {
         status: 'completed',
         contract_writer_id: contractWriterId || null,
         notes: notes.trim() || null,
         confirmed_by: systemUser?.id || null,
+        confirmed_at: new Date().toISOString(),
       }
 
       // For promise sales: only set commission if it doesn't exist yet (first time)

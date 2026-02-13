@@ -21,6 +21,7 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { DeadlineCountdown } from '@/components/DeadlineCountdown'
 import { notifyOwners } from '@/utils/notifications'
 import { buildSaleQuery, formatSalesWithSellers } from '@/utils/salesQueries'
+import { prefetchContractWriters } from '@/utils/contractWritersCache'
 import { useAuth } from '@/contexts/AuthContext'
 
 interface Sale {
@@ -112,6 +113,7 @@ export function ConfirmationPage() {
 
   useEffect(() => {
     loadAllBatches()
+    prefetchContractWriters()
     return () => {}
   }, [])
 
@@ -126,10 +128,16 @@ export function ConfirmationPage() {
 
   useEffect(() => {
     const handleSaleCreated = () => {
-      loadPendingSales()
+      setSearchQuery('')
+      setBatchFilter('all')
+      setCurrentPage(1)
+      loadPendingSales(1)
     }
     const handleSaleUpdated = () => {
-      loadPendingSales()
+      setSearchQuery('')
+      setBatchFilter('all')
+      setCurrentPage(1)
+      loadPendingSales(1)
     }
     window.addEventListener('saleCreated', handleSaleCreated)
     window.addEventListener('saleUpdated', handleSaleUpdated)
@@ -166,7 +174,8 @@ export function ConfirmationPage() {
         .from('sales')
         .select(buildSaleQuery())
         .eq('status', 'pending')
-        .order('created_at', { ascending: false })
+        .order('sale_date', { ascending: false })
+        .order('updated_at', { ascending: false })
         .range(from, to)
         .limit(itemsPerPage)
       if (batchId) query = query.eq('batch_id', batchId)

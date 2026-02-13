@@ -5,7 +5,7 @@ import { Button } from './ui/button'
 import { HardRefreshWrapper } from './HardRefreshWrapper'
 import { useAuth } from '@/contexts/AuthContext'
 import { supabase } from '@/lib/supabase'
-import { getNotifications, getUnreadCount, markAsRead, markAllAsRead, deleteNotification, formatTimeAgo, type Notification } from '@/utils/notifications'
+import { getNotifications, getUnreadCount, markAsRead, markAllAsRead, deleteNotification, formatTimeAgo, type Notification, type NotificationDateFilter } from '@/utils/notifications'
 import { getPaymentTypeLabel } from '@/utils/paymentTerms'
 
 interface LayoutProps {
@@ -19,6 +19,7 @@ const pageNames: Record<string, string> = {
   'land': 'الأراضي',
   'clients': 'العملاء',
   'confirmation': 'التأكيدات',
+  'confirmation-history': 'سجل التأكيدات',
   'finance': 'المالية',
   'contract-writers': 'محررين العقد',
   'installments': 'الأقساط',
@@ -41,11 +42,18 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
   const [hasMore, setHasMore] = useState(true)
   const [newNotificationReceived, setNewNotificationReceived] = useState(false)
   const [pwaUpdateAvailable, setPwaUpdateAvailable] = useState(false)
+  const [notificationDateFilter, setNotificationDateFilter] = useState<NotificationDateFilter>('all')
+  const [notificationSpecificDate, setNotificationSpecificDate] = useState('') // YYYY-MM-DD for "specific day"
   const subscriptionRef = useRef<any>(null)
   const notificationIdsRef = useRef<Set<string>>(new Set())
   const INITIAL_LIMIT = 20
   const LOAD_MORE_LIMIT = 10
-  
+
+  const effectiveDateFilter: NotificationDateFilter =
+    notificationDateFilter === 'date' && notificationSpecificDate
+      ? notificationSpecificDate
+      : notificationDateFilter
+
   // Computed: displayed notifications are a slice of all notifications
   const displayedNotifications = notifications.slice(0, displayedCount)
 
@@ -89,7 +97,7 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
         const limit = reset ? INITIAL_LIMIT : LOAD_MORE_LIMIT
         
         const [notifs, count] = await Promise.all([
-          getNotifications(userId, limit, offset),
+          getNotifications(userId, limit, offset, 'all'),
           getUnreadCount(userId),
         ])
 
@@ -362,9 +370,8 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
     
     setLoadingMore(true)
     try {
-      // Load next batch of notifications
       const offset = notifications.length
-      const notifs = await getNotifications(systemUser.id, LOAD_MORE_LIMIT, offset)
+      const notifs = await getNotifications(systemUser.id, LOAD_MORE_LIMIT, offset, effectiveDateFilter)
       
       if (notifs.length > 0) {
         // Append new notifications (avoid duplicates)
@@ -400,10 +407,28 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
     setNotificationsOpen(false)
   }
 
+  // When notifications modal is open, load (or reload) with current date filter
+  useEffect(() => {
+    if (!notificationsOpen || !systemUser?.id) return
+    let mounted = true
+    setLoadingNotifications(true)
+    getNotifications(systemUser.id, INITIAL_LIMIT, 0, effectiveDateFilter)
+      .then((notifs) => {
+        if (!mounted) return
+        setNotifications(notifs)
+        setDisplayedCount(INITIAL_LIMIT)
+        setHasMore(notifs.length >= INITIAL_LIMIT)
+        return getUnreadCount(systemUser.id)
+      })
+      .then((count) => mounted && count !== undefined && setUnreadCount(count))
+      .catch((err) => mounted && console.error('Error loading notifications by filter:', err))
+      .finally(() => mounted && setLoadingNotifications(false))
+    return () => { mounted = false }
+  }, [notificationsOpen, effectiveDateFilter, systemUser?.id])
+
   // Reset displayed count when dialog opens - show only first 20
   useEffect(() => {
     if (notificationsOpen) {
-      // Reset to show only first 20 when dialog opens
       setDisplayedCount(INITIAL_LIMIT)
       setHasMore(notifications.length > INITIAL_LIMIT)
     }
@@ -433,7 +458,7 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
   }
 
   return (
-    <div className="min-h-screen min-h-[100dvh] bg-gray-50 flex w-full safe-area-padding">
+    <div className="min-h-screen pwa-layout-min-height bg-gray-50 flex w-full safe-area-padding">
       {/* PWA update banner: new version available after deploy */}
       {pwaUpdateAvailable && (
         <div className="fixed top-0 left-0 right-0 z-[200] bg-blue-600 text-white px-3 py-2 flex items-center justify-center gap-3 shadow-lg safe-area-top">
@@ -456,7 +481,7 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
       />
 
       {/* Main Content - pull-down or long-press to hard refresh (PWA & browser) */}
-      <HardRefreshWrapper className="flex-1 lg:mr-0 transition-all duration-300 min-w-0 flex flex-col min-h-screen min-h-0">
+      <HardRefreshWrapper className="flex-1 lg:mr-0 transition-all duration-300 min-w-0 flex flex-col min-h-screen min-h-0 pwa-layout-min-height">
       <div className="flex-1 flex flex-col min-h-0">
         {/* Top Bar with Menu Toggle and Back Button */}
         <div className="sticky top-0 z-20 bg-white border-b border-gray-200 shadow-sm">
@@ -497,10 +522,10 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
                   </svg>
                   {unreadCount > 0 && (
-                    <span className={`absolute top-0 right-0 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white ${
-                      newNotificationReceived ? 'animate-pulse scale-125' : 'animate-pulse'
-                    }`}>
-                      {unreadCount > 9 ? '9+' : unreadCount}
+                    <span className={`absolute top-0 right-0 flex min-w-[18px] h-[18px] px-1 items-center justify-center rounded-full bg-red-500 font-bold text-white ${
+                      unreadCount >= 10 ? 'text-[9px]' : 'text-[10px]'
+                    } ${newNotificationReceived ? 'animate-pulse scale-125' : 'animate-pulse'}`}>
+                      {unreadCount}
                     </span>
                   )}
                 </IconButton>
@@ -531,6 +556,46 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                             </svg>
                           </button>
+                        </div>
+                      </div>
+
+                      {/* Date filter */}
+                      <div className="flex flex-wrap items-center gap-2 p-3 sm:p-4 border-b border-gray-200 bg-gray-50 flex-shrink-0">
+                        <span className="text-xs sm:text-sm text-gray-600 ml-1">التصفية:</span>
+                        {(['all', 'today', 'yesterday', 'this_week'] as const).map((key) => (
+                          <button
+                            key={key}
+                            type="button"
+                            onClick={() => {
+                              setNotificationDateFilter(key)
+                              if (key !== 'date') setNotificationSpecificDate('')
+                            }}
+                            className={`px-2.5 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-colors ${
+                              effectiveDateFilter === key
+                                ? 'bg-blue-600 text-white'
+                                : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-100'
+                            }`}
+                          >
+                            {key === 'all' ? 'الكل' : key === 'today' ? 'اليوم' : key === 'yesterday' ? 'أمس' : 'هذا الأسبوع'}
+                          </button>
+                        ))}
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="date"
+                            value={notificationSpecificDate}
+                            onChange={(e) => {
+                              const v = e.target.value
+                              setNotificationSpecificDate(v)
+                              if (v) setNotificationDateFilter('date')
+                            }}
+                            className={`rounded-lg border px-2 py-1.5 text-xs sm:text-sm text-gray-800 bg-white ${
+                              notificationDateFilter === 'date' && notificationSpecificDate
+                                ? 'border-blue-600 ring-1 ring-blue-600'
+                                : 'border-gray-300'
+                            }`}
+                            title="يوم محدد"
+                          />
+                          <span className="text-xs text-gray-500 hidden sm:inline">يوم محدد</span>
                         </div>
                       </div>
                       
@@ -650,8 +715,8 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
           </div>
         </div>
 
-        {/* Page Content */}
-        <main className="w-full flex-1 min-h-0">{children}</main>
+        {/* Page Content - min-h ensures something visible on Android PWA when chunk loads */}
+        <main className="w-full flex-1 min-h-0 min-h-[180px]">{children}</main>
       </div>
       </HardRefreshWrapper>
     </div>

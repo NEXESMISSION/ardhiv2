@@ -62,25 +62,35 @@ export function HomePage({ onNavigate }: HomePageProps) {
     { id: 'installments', label: 'الأقساط', icon: '💳', description: 'متابعة الأقساط والمدفوعات' },
     { id: 'finance', label: 'المالية', icon: '💰', description: 'الإدارة المالية والتقارير' },
     { id: 'sales-records', label: 'سجل المبيعات', icon: '📋', description: 'سجل جميع المبيعات' },
+    { id: 'confirmation-history', label: 'سجل التأكيدات', icon: '📜', description: 'سجل تأكيدات المبيعات' },
     { id: 'contract-writers', label: 'محررين العقد', icon: '📝', description: 'إدارة محرري العقود' },
     { id: 'users', label: 'المستخدمين', icon: '👤', description: 'إدارة المستخدمين والعمال' },
   ]
-  
-  // Filter pages based on user permissions
+
+  // Filter pages based on user permissions (confirmation-history: show if user has confirmation)
   let pages = systemUser?.role === 'owner'
     ? allPages
-    : allPages.filter(page => systemUser?.allowed_pages?.includes(page.id) ?? false)
+    : allPages.filter(page => {
+        if (page.id === 'confirmation-history') return systemUser?.allowed_pages?.includes('confirmation') ?? false
+        return systemUser?.allowed_pages?.includes(page.id) ?? false
+      })
   
-  // Sort by allowed_pages order if user is not owner
+  // Sort by allowed_pages order if user is not owner (سجل التأكيدات next to السجل)
   if (systemUser?.role !== 'owner' && systemUser?.allowed_pages) {
     const pageOrder = systemUser.allowed_pages
+    const orderOf = (id: string) => {
+      if (id === 'confirmation-history') {
+        const salesIdx = pageOrder.indexOf('sales-records')
+        return salesIdx >= 0 ? salesIdx + 0.5 : pageOrder.indexOf('confirmation')
+      }
+      return pageOrder.indexOf(id)
+    }
     pages = pages.sort((a, b) => {
-      const aIndex = pageOrder.indexOf(a.id)
-      const bIndex = pageOrder.indexOf(b.id)
-      // If not in allowed_pages, put at end
-      if (aIndex === -1) return 1
-      if (bIndex === -1) return -1
-      return aIndex - bIndex
+      const aOrder = orderOf(a.id)
+      const bOrder = orderOf(b.id)
+      if (aOrder === -1) return 1
+      if (bOrder === -1) return -1
+      return aOrder - bOrder
     })
   }
   const [touchStarts, setTouchStarts] = useState<Record<string, { x: number; y: number; time: number; isScrolling?: boolean }>>({})

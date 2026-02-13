@@ -25,30 +25,36 @@ export function Sidebar({ currentPage, onNavigate, isOpen, onToggle }: SidebarPr
     { id: 'installments', label: 'الأقساط', icon: '💳' },
     { id: 'finance', label: 'المالية', icon: '💰' },
     { id: 'sales-records', label: 'السجل', icon: '📋' },
+    { id: 'confirmation-history', label: 'سجل التأكيدات', icon: '📜' },
     { id: 'contract-writers', label: 'محررين العقد', icon: '📝' },
     { id: 'users', label: 'المستخدمين', icon: '👤' },
   ]
   
   // Filter and sort menu items based on user permissions
-  let menuItems = systemUser?.role === 'owner' 
+  let menuItems = systemUser?.role === 'owner'
     ? allMenuItems
     : allMenuItems.filter(item => {
-        // Home is always accessible
         if (item.id === 'home') return true
-        // Check if user has access to this page
+        // Confirmation history: show if user has confirmation
+        if (item.id === 'confirmation-history') return systemUser?.allowed_pages?.includes('confirmation') ?? false
         return systemUser?.allowed_pages?.includes(item.id) ?? false
       })
-  
-  // Sort by allowed_pages order if user is not owner
+
+  // Sort by allowed_pages order if user is not owner (سجل التأكيدات next to السجل: use sales-records order + 1)
   if (systemUser?.role !== 'owner' && systemUser?.allowed_pages) {
     const pageOrder = systemUser.allowed_pages
+    const orderOf = (id: string) => {
+      if (id === 'confirmation-history') {
+        const salesIdx = pageOrder.indexOf('sales-records')
+        return salesIdx >= 0 ? salesIdx + 0.5 : pageOrder.indexOf('confirmation')
+      }
+      return pageOrder.indexOf(id)
+    }
     menuItems = menuItems.sort((a, b) => {
-      // Home always first
       if (a.id === 'home') return -1
       if (b.id === 'home') return 1
-      const aIndex = pageOrder.indexOf(a.id)
-      const bIndex = pageOrder.indexOf(b.id)
-      // If not in allowed_pages, put at end
+      const aIndex = orderOf(a.id)
+      const bIndex = orderOf(b.id)
       if (aIndex === -1) return 1
       if (bIndex === -1) return -1
       return aIndex - bIndex

@@ -17,7 +17,7 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 // TYPES
 // ============================================================================
 
-interface Worker {
+interface UserRow {
   id: string
   email: string
   name: string | null
@@ -25,7 +25,7 @@ interface Worker {
   place: string | null
   title: string | null
   notes: string | null
-  role: 'worker'
+  role: 'owner' | 'worker'
   allowed_pages: string[] | null
   allowed_batches: string[] | null
   allowed_pieces: string[] | null
@@ -46,7 +46,7 @@ export function UsersPage() {
   // ============================================================================
   // STATE: List View
   // ============================================================================
-  const [workers, setWorkers] = useState<Worker[]>([])
+  const [users, setUsers] = useState<UserRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -78,7 +78,7 @@ export function UsersPage() {
   const [loadingPieces, setLoadingPieces] = useState<Set<string>>(new Set())
   const [expandedBatches, setExpandedBatches] = useState<Set<string>>(new Set())
   
-  // Available pages for permissions
+  // Available pages for permissions (سجل التأكيدات next to السجل by default)
   const availablePages = [
     { id: 'home', label: 'الرئيسية', icon: '🏠' },
     { id: 'land', label: 'دفعات الأراضي', icon: '🏞️' },
@@ -88,7 +88,8 @@ export function UsersPage() {
     { id: 'phone-call-appointments', label: 'مواعيد المكالمات', icon: '📞' },
     { id: 'installments', label: 'الأقساط', icon: '💳' },
     { id: 'finance', label: 'المالية', icon: '💰' },
-    { id: 'sales-records', label: 'سجل المبيعات', icon: '📋' },
+    { id: 'sales-records', label: 'السجل', icon: '📋' },
+    { id: 'confirmation-history', label: 'سجل التأكيدات', icon: '📜' },
     { id: 'contract-writers', label: 'محررين العقد', icon: '📝' },
     { id: 'users', label: 'المستخدمين', icon: '👤' },
   ]
@@ -270,24 +271,21 @@ export function UsersPage() {
   }
 
   async function loadWorkers() {
-    // Optimistic: don't set loading if we already have data
-    if (workers.length === 0) {
-      setLoading(true)
-    }
+    if (users.length === 0) setLoading(true)
     setError(null)
     try {
       const { data, error: err } = await supabase
         .from('users')
         .select('id,email,name,phone,place,title,notes,role,allowed_pages,allowed_batches,allowed_pieces,display_order,image_url,created_at,updated_at,created_by')
-        .eq('role', 'worker')
+        .order('role', { ascending: true })
         .order('display_order', { ascending: true, nullsFirst: false })
         .order('created_at', { ascending: false })
-        .limit(1000) // Limit for performance
+        .limit(1000)
 
       if (err) throw err
-      setWorkers(data || [])
+      setUsers(data || [])
     } catch (e: any) {
-      console.error('Error loading workers:', e)
+      console.error('Error loading users:', e)
       setError('فشل تحميل المستخدمين')
     } finally {
       setLoading(false)
@@ -304,8 +302,8 @@ export function UsersPage() {
       await loadBatchesForPermissions()
     }
     // Get max display_order and add 1 for new user
-    const maxOrder = workers.length > 0 
-      ? Math.max(...workers.map(w => w.display_order || 0), 0)
+    const maxOrder = users.length > 0
+      ? Math.max(...users.map(w => w.display_order || 0), 0)
       : 0
     setFormData({
       email: '',
@@ -329,28 +327,27 @@ export function UsersPage() {
     setDialogOpen(true)
   }
 
-  async function openEditDialog(worker: Worker) {
-    setEditingWorkerId(worker.id)
-    // Load batches if not already loaded
+  async function openEditDialog(userRow: UserRow) {
+    setEditingWorkerId(userRow.id)
     if (availableBatches.length === 0 && !loadingBatches) {
       await loadBatchesForPermissions()
     }
     setFormData({
-      email: worker.email,
-      name: worker.name || '',
-      password: '', // Don't show existing password
-      phone: worker.phone || '',
-      place: worker.place || '',
-      title: worker.title || '',
-      notes: worker.notes || '',
-      display_order: worker.display_order || 0,
-      allowed_pages: worker.allowed_pages || availablePages.map(p => p.id),
-      allowed_batches: worker.allowed_batches || availableBatches.map(b => b.id),
-      allowed_pieces: worker.allowed_pieces || [],
-      image_url: worker.image_url,
+      email: userRow.email,
+      name: userRow.name || '',
+      password: '',
+      phone: userRow.phone || '',
+      place: userRow.place || '',
+      title: userRow.title || '',
+      notes: userRow.notes || '',
+      display_order: userRow.display_order || 0,
+      allowed_pages: userRow.allowed_pages || availablePages.map(p => p.id),
+      allowed_batches: userRow.allowed_batches || availableBatches.map(b => b.id),
+      allowed_pieces: userRow.allowed_pieces || [],
+      image_url: userRow.image_url,
     })
     setImageFile(null)
-    setImagePreview(worker.image_url)
+    setImagePreview(userRow.image_url)
     setShowPassword(false)
     setError(null)
     setSuccess(null)
@@ -506,7 +503,7 @@ export function UsersPage() {
         // Update password if provided
         if (formData.password.trim()) {
           // Get the worker to find auth_user_id
-          const worker = workers.find(w => w.id === editingWorkerId)
+          const worker = users.find(w => w.id === editingWorkerId)
           if (worker) {
             // Find auth user by email
             const { data: authUsers, error: authError } = await supabaseAdmin.auth.admin.listUsers()
@@ -531,7 +528,6 @@ export function UsersPage() {
 
         if (err) throw err
         
-        // Reload workers list to show updated data
         await loadWorkers()
         
         // If updating current user, refresh their systemUser data
@@ -623,7 +619,7 @@ export function UsersPage() {
     setDeleting(true)
     try {
       // Get worker to find auth_user_id
-      const worker = workers.find(w => w.id === workerToDelete)
+      const worker = users.find(w => w.id === workerToDelete)
       if (!worker) {
         throw new Error('المستخدم غير موجود')
       }
@@ -718,7 +714,7 @@ export function UsersPage() {
               <p className="mt-2 text-xs sm:text-sm text-gray-600">جاري التحميل...</p>
             </CardContent>
           </Card>
-        ) : workers.length === 0 ? (
+        ) : users.length === 0 ? (
           <Card className="text-center py-8 sm:py-12">
             <CardContent>
               <p className="text-xs sm:text-sm text-gray-500 mb-3 sm:mb-4">لا يوجد مستخدمين حتى الآن</p>
@@ -729,55 +725,59 @@ export function UsersPage() {
           </Card>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 lg:gap-6">
-            {workers.map((worker) => (
-              <Card key={worker.id} className="hover:shadow-md transition-shadow">
+            {users.map((userRow) => (
+              <Card key={userRow.id} className="hover:shadow-md transition-shadow">
                 <CardHeader className="p-3 sm:p-4">
                   <div className="flex items-start justify-between">
                     <div className="flex-1 min-w-0">
                       <CardTitle className="text-sm sm:text-base lg:text-lg mb-1 truncate">
-                        {worker.email}
+                        {userRow.email}
                       </CardTitle>
-                      {worker.title && (
-                        <Badge variant="info" size="sm" className="text-xs mb-1">
-                          {worker.title}
-                        </Badge>
+                      <div className="flex flex-wrap items-center gap-1 mb-1">
+                        {userRow.title && (
+                          <Badge variant="info" size="sm" className="text-xs">
+                            {userRow.title}
+                          </Badge>
+                        )}
+                      </div>
+                      {userRow.phone && (
+                        <p className="text-xs sm:text-sm text-gray-600 truncate">📞 {userRow.phone}</p>
                       )}
-                      {worker.phone && (
-                        <p className="text-xs sm:text-sm text-gray-600 truncate">📞 {worker.phone}</p>
-                      )}
-                      {worker.place && (
-                        <p className="text-xs sm:text-sm text-gray-600 truncate">📍 {worker.place}</p>
+                      {userRow.place && (
+                        <p className="text-xs sm:text-sm text-gray-600 truncate">📍 {userRow.place}</p>
                       )}
                     </div>
                   </div>
                 </CardHeader>
                 <CardContent className="p-3 sm:p-4 pt-0">
-                  {worker.notes && (
-                    <p className="text-xs sm:text-sm text-gray-600 mb-3 line-clamp-2">{worker.notes}</p>
+                  {userRow.notes && (
+                    <p className="text-xs sm:text-sm text-gray-600 mb-3 line-clamp-2">{userRow.notes}</p>
                   )}
                   <div className="flex items-center gap-2">
                     <div className="text-xs text-gray-500 font-medium px-2 py-1 bg-gray-100 rounded">
-                      #{worker.display_order || 0}
+                      #{userRow.display_order ?? 0}
                     </div>
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => openEditDialog(worker)}
+                      onClick={() => openEditDialog(userRow)}
                       className="text-xs sm:text-sm flex-1"
                     >
                       تعديل
                     </Button>
-                    <IconButton
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleDeleteClick(worker.id)}
-                      title="حذف"
-                      className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                      </svg>
-                    </IconButton>
+                    {userRow.role !== 'owner' && (
+                      <IconButton
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleDeleteClick(userRow.id)}
+                        title="حذف"
+                        className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                      </IconButton>
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -990,39 +990,98 @@ export function UsersPage() {
 
             <div>
               <Label>صلاحيات الوصول للصفحات</Label>
-              <div className="mt-2 space-y-2 max-h-60 overflow-y-auto border border-gray-200 rounded-lg p-3">
-                {availablePages.map((page) => (
-                  <label
-                    key={page.id}
-                    className="flex items-center gap-2 p-2 hover:bg-gray-50 rounded cursor-pointer"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={formData.allowed_pages.includes(page.id)}
-                      onChange={(e) => {
-                        if (e.target.checked) {
-                          setFormData({
-                            ...formData,
-                            allowed_pages: [...formData.allowed_pages, page.id],
-                          })
-                        } else {
-                          setFormData({
-                            ...formData,
-                            allowed_pages: formData.allowed_pages.filter((p) => p !== page.id),
-                          })
-                        }
-                      }}
-                      disabled={saving}
-                      className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
-                    />
-                    <span className="text-lg mr-1">{page.icon}</span>
-                    <span className="text-sm text-gray-700">{page.label}</span>
-                  </label>
-                ))}
-              </div>
-              <p className="mt-1 text-xs text-gray-500">
-                اختر الصفحات التي يمكن للمستخدم الوصول إليها
+              <p className="mt-1 mb-2 text-xs text-gray-500">
+                الترتيب أدناه = ترتيب ظهور الصفحات في القائمة الجانبية. استخدم الأسهم لتغيير الترتيب.
               </p>
+              <div className="mt-2 space-y-1 max-h-48 overflow-y-auto border border-gray-200 rounded-lg p-2 bg-gray-50">
+                {formData.allowed_pages.length === 0 ? (
+                  <p className="text-xs text-gray-500 p-2">لم تُضف أي صفحة بعد. أضف من القائمة أدناه.</p>
+                ) : (
+                  formData.allowed_pages.map((pageId, index) => {
+                    const page = availablePages.find(p => p.id === pageId)
+                    if (!page) return null
+                    return (
+                      <div
+                        key={pageId}
+                        className="flex items-center gap-2 p-2 bg-white border border-gray-200 rounded"
+                      >
+                        <span className="text-lg">{page.icon}</span>
+                        <span className="text-sm text-gray-800 flex-1">{page.label}</span>
+                        <div className="flex items-center gap-0.5">
+                          <IconButton
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              if (index <= 0) return
+                              const next = [...formData.allowed_pages]
+                              const t = next[index]
+                              next[index] = next[index - 1]
+                              next[index - 1] = t
+                              setFormData({ ...formData, allowed_pages: next })
+                            }}
+                            disabled={saving || index === 0}
+                            title="تحريك لأعلى"
+                            className="p-1"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" /></svg>
+                          </IconButton>
+                          <IconButton
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              if (index >= formData.allowed_pages.length - 1) return
+                              const next = [...formData.allowed_pages]
+                              const t = next[index]
+                              next[index] = next[index + 1]
+                              next[index + 1] = t
+                              setFormData({ ...formData, allowed_pages: next })
+                            }}
+                            disabled={saving || index === formData.allowed_pages.length - 1}
+                            title="تحريك لأسفل"
+                            className="p-1"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                          </IconButton>
+                          <IconButton
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setFormData({ ...formData, allowed_pages: formData.allowed_pages.filter(p => p !== pageId) })}
+                            disabled={saving}
+                            title="إزالة"
+                            className="p-1 text-red-600 hover:bg-red-50"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                          </IconButton>
+                        </div>
+                      </div>
+                    )
+                  })
+                )}
+              </div>
+              <p className="mt-2 text-xs font-medium text-gray-600">إضافة صفحة</p>
+              <div className="mt-1 flex flex-wrap gap-1">
+                {availablePages
+                  .filter(p => !formData.allowed_pages.includes(p.id))
+                  .map((page) => (
+                    <Button
+                      key={page.id}
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => setFormData({ ...formData, allowed_pages: [...formData.allowed_pages, page.id] })}
+                      disabled={saving}
+                      className="text-xs"
+                    >
+                      {page.icon} {page.label}
+                    </Button>
+                  ))}
+                {availablePages.filter(p => !formData.allowed_pages.includes(p.id)).length === 0 && (
+                  <span className="text-xs text-gray-500">جميع الصفحات مضافة</span>
+                )}
+              </div>
             </div>
 
             <div>

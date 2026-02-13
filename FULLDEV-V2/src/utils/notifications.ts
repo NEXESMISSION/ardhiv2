@@ -348,14 +348,52 @@ export async function notifyCurrentUser(
   return false
 }
 
+/** Date filter for notifications: 'all' | 'today' | 'yesterday' | 'this_week' | 'YYYY-MM-DD' (specific day) */
+export type NotificationDateFilter = 'all' | 'today' | 'yesterday' | 'this_week' | string
+
+function getDateRange(filter: NotificationDateFilter): { from: string; to: string } | null {
+  const now = new Date()
+  const to = new Date(now)
+  to.setHours(23, 59, 59, 999)
+  let from = new Date(now)
+
+  if (filter === 'all') return null
+  if (filter === 'today') {
+    from.setHours(0, 0, 0, 0)
+    return { from: from.toISOString(), to: to.toISOString() }
+  }
+  if (filter === 'yesterday') {
+    from.setDate(from.getDate() - 1)
+    from.setHours(0, 0, 0, 0)
+    to.setDate(to.getDate() - 1)
+    to.setHours(23, 59, 59, 999)
+    return { from: from.toISOString(), to: to.toISOString() }
+  }
+  if (filter === 'this_week') {
+    const day = from.getDay()
+    const start = new Date(from)
+    start.setDate(from.getDate() - (day === 0 ? 6 : day - 1))
+    start.setHours(0, 0, 0, 0)
+    return { from: start.toISOString(), to: to.toISOString() }
+  }
+  // Specific day: YYYY-MM-DD (local date)
+  if (/^\d{4}-\d{2}-\d{2}$/.test(filter)) {
+    const [y, m, d] = filter.split('-').map(Number)
+    from = new Date(y, m - 1, d, 0, 0, 0, 0)
+    const toDay = new Date(y, m - 1, d, 23, 59, 59, 999)
+    return { from: from.toISOString(), to: toDay.toISOString() }
+  }
+  return null
+}
+
 /**
- * Get notifications for the current user with pagination support
- * Optimized with proper error handling
+ * Get notifications for the current user with pagination and optional date filter
  */
 export async function getNotifications(
-  userId: string, 
-  limit: number = 20, 
-  offset: number = 0
+  userId: string,
+  limit: number = 20,
+  offset: number = 0,
+  dateFilter: NotificationDateFilter = 'all'
 ): Promise<Notification[]> {
   if (!userId) {
     console.error('getNotifications: Missing userId')
@@ -363,13 +401,19 @@ export async function getNotifications(
   }
 
   try {
-    const { data, error } = await supabase
+    let query = supabase
       .from('notifications')
       .select('*')
       .eq('user_id', userId)
       .order('created_at', { ascending: false })
-      .range(offset, offset + limit - 1) // Use range for pagination
-      .limit(Math.min(limit, 100)) // Cap at 100 for performance
+
+    const range = getDateRange(dateFilter)
+    if (range) {
+      query = query.gte('created_at', range.from).lte('created_at', range.to)
+    }
+
+    const { data, error } = await query
+      .range(offset, offset + Math.min(limit, 100) - 1)
 
     if (error) {
       console.error('Error fetching notifications:', error)

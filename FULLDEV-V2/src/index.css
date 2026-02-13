@@ -42,11 +42,13 @@ html, body {
     direction: rtl;
   }
 
-  /* #root: fill viewport so PWA flex layout always has a height */
+  /* #root: fill viewport so PWA flex layout always has a height.
+     Android PWA: use 100vh first so unsupported 100dvh doesn't leave height 0. */
   #root {
     min-height: 100vh;
     min-height: 100dvh;
     height: 100%;
+    min-height: -webkit-fill-available; /* Android Chrome PWA fallback */
     box-sizing: border-box;
   }
 
@@ -103,6 +105,12 @@ html, body {
   }
   .pwa-popup-safe-bottom {
     padding-bottom: var(--pwa-padding-bottom) !important;
+  }
+
+  /* PWA layout: 100vh first so Android/older WebViews get a height when dvh is 0 or unsupported */
+  .pwa-layout-min-height {
+    min-height: 100vh;
+    min-height: 100dvh;
   }
 
   /* Shine animation for gold badge - left to right */

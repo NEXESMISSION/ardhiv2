@@ -28,6 +28,7 @@ interface Sale {
   company_fee_amount: number | null
   sold_by: string | null
   confirmed_by: string | null
+  confirmed_at: string | null
   created_at: string
   client?: {
     id: string
@@ -182,8 +183,12 @@ export function FinancePage() {
       }
     }
 
+    // For completed sales, use confirmed_at as "date we sold" so Finance "today" = what we confirmed today
+    const saleEffectiveDate = (s: Sale) =>
+      s.status === 'completed' && s.confirmed_at ? s.confirmed_at : (s.sale_date || s.created_at)
+
     return {
-      sales: sales.filter((s) => filterDate(s.sale_date || s.created_at)),
+      sales: sales.filter((s) => filterDate(saleEffectiveDate(s))),
       installments: installmentPayments.filter((i) => {
         if (dateFilter) {
           const filterDateObj = new Date(dateFilter)
@@ -361,6 +366,8 @@ export function FinancePage() {
       commission: { amount: 0, count: 0, pieces: 0, batches: new Set(), details: [] },
     }
 
+    const effectiveDate = (s: Sale) => s.status === 'completed' && s.confirmed_at ? s.confirmed_at : (s.sale_date || s.created_at)
+
     // Process deposits - Only from completed or pending sales (not cancelled)
     filteredData.sales
       .filter((s) => s.status !== 'cancelled')
@@ -373,7 +380,7 @@ export function FinancePage() {
           types.deposits.details.push({
             sale,
             amount: sale.deposit_amount,
-            date: sale.sale_date || sale.created_at,
+            date: effectiveDate(sale),
           })
         }
       })
@@ -409,7 +416,7 @@ export function FinancePage() {
           types.full.details.push({
             sale,
             amount: fullPayment,
-            date: sale.sale_date || sale.created_at,
+            date: effectiveDate(sale),
         })
         }
     })
@@ -439,7 +446,7 @@ export function FinancePage() {
           types.advance.details.push({
             sale,
             amount: advanceAfterDeposit,
-            date: sale.sale_date || sale.created_at,
+            date: effectiveDate(sale),
           })
         }
       })
@@ -457,7 +464,7 @@ export function FinancePage() {
           types.promise.details.push({
             sale,
             amount: promisePayment,
-            date: sale.sale_date || sale.created_at,
+            date: effectiveDate(sale),
           })
         }
     })
@@ -473,7 +480,7 @@ export function FinancePage() {
         types.commission.details.push({
           sale,
           amount: sale.company_fee_amount || 0,
-          date: sale.sale_date || sale.created_at,
+          date: effectiveDate(sale),
         })
       })
 
@@ -1081,7 +1088,8 @@ export function FinancePage() {
                 filteredData.sales
                   .filter(s => s.status === 'completed')
                   .forEach(sale => {
-                    const month = new Date(sale.sale_date || sale.created_at).toLocaleDateString('en-US', { year: 'numeric', month: 'short' })
+                    const dateStr = sale.confirmed_at || sale.sale_date || sale.created_at
+                    const month = new Date(dateStr).toLocaleDateString('en-US', { year: 'numeric', month: 'short' })
                     if (!monthlyData.has(month)) {
                       monthlyData.set(month, { revenue: 0, collected: 0 })
                     }

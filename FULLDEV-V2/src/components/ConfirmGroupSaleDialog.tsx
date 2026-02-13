@@ -14,6 +14,7 @@ import { calculateInstallmentWithDeposit } from '@/utils/installmentCalculator'
 import { generateInstallmentSchedule } from '@/utils/installmentSchedule'
 import { useAuth } from '@/contexts/AuthContext'
 import { notifyOwners, notifyCurrentUser } from '@/utils/notifications'
+import { getContractWritersCached, getContractWriters, type ContractWriterCached } from '@/utils/contractWritersCache'
 
 interface Sale {
   id: string
@@ -56,12 +57,6 @@ interface Sale {
   }
 }
 
-interface ContractWriter {
-  id: string
-  name: string
-  type: string
-}
-
 interface ConfirmGroupSaleDialogProps {
   open: boolean
   onClose: () => void
@@ -80,7 +75,7 @@ export function ConfirmGroupSaleDialog({
   const [paymentMethod, setPaymentMethod] = useState('cash')
   const [contractWriterId, setContractWriterId] = useState('')
   const [notes, setNotes] = useState('')
-  const [contractWriters, setContractWriters] = useState<ContractWriter[]>([])
+  const [contractWriters, setContractWriters] = useState<ContractWriterCached[]>([])
   const [loadingWriters, setLoadingWriters] = useState(false)
   const [confirming, setConfirming] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -126,20 +121,23 @@ export function ConfirmGroupSaleDialog({
       setShowFinalConfirmDialog(false)
       setShowSuccessDialog(false)
       setShowErrorDialog(false)
+      const cached = getContractWritersCached()
+      if (cached?.length) setContractWriters(cached)
       loadContractWriters()
     }
   }, [open, sales])
 
   async function loadContractWriters() {
+    const cached = getContractWritersCached()
+    if (cached?.length) {
+      setContractWriters(cached)
+      setLoadingWriters(false)
+      return
+    }
     setLoadingWriters(true)
     try {
-      const { data, error: err } = await supabase
-        .from('contract_writers')
-        .select('*')
-        .order('name', { ascending: true })
-
-      if (err) throw err
-      setContractWriters(data || [])
+      const data = await getContractWriters()
+      setContractWriters(data)
     } catch (e: any) {
       console.error('Error loading contract writers:', e)
     } finally {
@@ -412,13 +410,14 @@ export function ConfirmGroupSaleDialog({
       }
 
       // Full completion - update all sales
-      // Ensure all IDs are valid UUID strings
+      // confirmed_at = when we confirm → used as "date sold" in Finance today / Confirmation History
       const saleIds = sales.map(s => typeof s.id === 'string' ? s.id : String(s.id))
       const baseUpdateData: any = {
         status: 'completed',
         contract_writer_id: contractWriterId || null,
         notes: notes.trim() || null,
         confirmed_by: systemUser?.id || null,
+        confirmed_at: new Date().toISOString(),
       }
 
       if (isPromise) {

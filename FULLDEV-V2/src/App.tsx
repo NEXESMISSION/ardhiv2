@@ -1,7 +1,33 @@
-import { useState, useEffect, lazy, Suspense, useRef } from 'react'
+import { useState, useEffect, lazy, Suspense, useRef, Component, type ReactNode } from 'react'
 import './App.css'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import { Layout } from './components/Layout'
+
+/** Catches chunk load errors (e.g. Android PWA) and shows retry instead of blank */
+class PageErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
+  state = { hasError: false }
+  static getDerivedStateFromError = () => ({ hasError: true })
+  componentDidCatch(error: unknown) {
+    console.error('Page load error (PWA/chunk):', error)
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex-1 flex flex-col items-center justify-center min-h-[280px] gap-4 p-6">
+          <p className="text-gray-600 text-center">فشل تحميل الصفحة</p>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium"
+          >
+            إعادة المحاولة
+          </button>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
 
 // Lazy-load all pages so initial bundle is small and app opens in milliseconds (PWA-friendly)
 const LoginPage = lazy(() => import('./pages/Login').then(m => ({ default: m.LoginPage })))
@@ -9,6 +35,7 @@ const HomePage = lazy(() => import('./pages/Home').then(m => ({ default: m.HomeP
 const LandPage = lazy(() => import('./pages/Land').then(m => ({ default: m.LandPage })))
 const ClientsPage = lazy(() => import('./pages/Clients').then(m => ({ default: m.ClientsPage })))
 const ConfirmationPage = lazy(() => import('./pages/Confirmation').then(m => ({ default: m.ConfirmationPage })))
+const ConfirmationHistoryPage = lazy(() => import('./pages/ConfirmationHistory').then(m => ({ default: m.ConfirmationHistoryPage })))
 const FinancePage = lazy(() => import('./pages/Finance').then(m => ({ default: m.FinancePage })))
 const ContractWritersPage = lazy(() => import('./pages/ContractWriters').then(m => ({ default: m.ContractWritersPage })))
 const InstallmentsPage = lazy(() => import('./pages/Installments').then(m => ({ default: m.InstallmentsPage })))
@@ -25,6 +52,7 @@ const pageHashMap: Record<string, string> = {
   '#land': 'land',
   '#clients': 'clients',
   '#confirmation': 'confirmation',
+  '#confirmation-history': 'confirmation-history',
   '#finance': 'finance',
   '#contract-writers': 'contract-writers',
   '#installments': 'installments',
@@ -40,6 +68,7 @@ const pageToHash: Record<string, string> = {
   'land': '#land',
   'clients': '#clients',
   'confirmation': '#confirmation',
+  'confirmation-history': '#confirmation-history',
   'finance': '#finance',
   'contract-writers': '#contract-writers',
   'installments': '#installments',
@@ -92,6 +121,8 @@ function AppContent() {
     if (systemUser.role === 'owner') return true
     // Home is always accessible
     if (pageId === 'home') return true
+    // Confirmation history: same access as confirmation
+    if (pageId === 'confirmation-history') return systemUser.allowed_pages?.includes('confirmation') ?? false
     // Check if user has access to this page
     return systemUser.allowed_pages?.includes(pageId) ?? false
   }
@@ -128,14 +159,12 @@ function AppContent() {
     }
   }, [])
 
-  // Set initial hash if not present (only on mount, before any navigation)
+  // Set initial hash if not present (Android PWA: open with session must show #home, not #login)
   useEffect(() => {
     const hash = window.location.hash
-    // Only set default hash if there's no hash at all (not even '#' or '#home')
     if (!hash || hash === '' || hash === '#') {
-      // Don't trigger navigation, just set the hash silently
-      if (user && systemUser) {
-      window.history.replaceState(null, '', '#home')
+      if (user) {
+        window.history.replaceState(null, '', '#home')
         setCurrentPage('home')
       } else if (!loading) {
         window.history.replaceState(null, '', '#login')
@@ -152,13 +181,14 @@ function AppContent() {
     }
   }, [user, loading, currentPage])
 
-  // Redirect to home if authenticated and on login page
+  // Redirect to home if authenticated and on login page (incl. when systemUser not yet loaded - Android PWA)
   useEffect(() => {
-    if (!loading && user && systemUser && currentPage === 'login') {
+    if (!user || currentPage !== 'login') return
+    if (systemUser || allowAppWithoutSystemUser) {
       window.location.hash = '#home'
       setCurrentPage('home')
     }
-  }, [user, systemUser, loading, currentPage])
+  }, [user, systemUser, allowAppWithoutSystemUser, currentPage])
 
   // Redirect to home if user doesn't have access to current page
   useEffect(() => {
@@ -275,9 +305,10 @@ function AppContent() {
     (hasAccessToPage('land') && currentPage === 'land' && <LandPage />) ||
     (hasAccessToPage('clients') && currentPage === 'clients' && <ClientsPage />) ||
     (hasAccessToPage('confirmation') && currentPage === 'confirmation' && <ConfirmationPage />) ||
+    (hasAccessToPage('confirmation-history') && currentPage === 'confirmation-history' && <ConfirmationHistoryPage onNavigate={handleNavigate} />) ||
     (hasAccessToPage('finance') && currentPage === 'finance' && <FinancePage />) ||
     (hasAccessToPage('contract-writers') && currentPage === 'contract-writers' && <ContractWritersPage />) ||
-    (hasAccessToPage('installments') && currentPage === 'installments' && <InstallmentsPage />) ||
+    (hasAccessToPage('installments') && currentPage === 'installments' && <InstallmentsPage onNavigate={handleNavigate} />) ||
     (hasAccessToPage('sales-records') && currentPage === 'sales-records' && <SalesRecordsPage />) ||
     (hasAccessToPage('appointments') && currentPage === 'appointments' && <AppointmentsPage />) ||
     (hasAccessToPage('phone-call-appointments') && currentPage === 'phone-call-appointments' && <PhoneCallAppointmentsPage />) ||
@@ -285,9 +316,11 @@ function AppContent() {
 
   return (
     <Layout currentPage={currentPage} onNavigate={handleNavigate}>
-      <Suspense fallback={<PageFallback />}>
-        {pageContent || <HomePage onNavigate={handleNavigate} />}
-      </Suspense>
+      <PageErrorBoundary>
+        <Suspense fallback={<PageFallback />}>
+          {pageContent || <HomePage onNavigate={handleNavigate} />}
+        </Suspense>
+      </PageErrorBoundary>
     </Layout>
   )
 }

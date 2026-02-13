@@ -83,7 +83,11 @@ interface InstallmentPayment {
 
 const ITEMS_PER_PAGE = 20
 
-export function InstallmentsPage() {
+interface InstallmentsPageProps {
+  onNavigate?: (page: string) => void
+}
+
+export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
   const [sales, setSales] = useState<Sale[]>([])
   const [groupedSales, setGroupedSales] = useState<Sale[][]>([])
   const [loading, setLoading] = useState(true)
@@ -271,7 +275,14 @@ export function InstallmentsPage() {
   return (
     <div className="px-2 sm:px-4 lg:px-6 py-2 sm:py-3 lg:py-4 space-y-2 sm:space-y-3 lg:space-y-4">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-        <h1 className="text-base sm:text-lg lg:text-xl font-bold text-gray-900">الأقساط</h1>
+        <div className="flex flex-wrap items-center gap-2">
+          <h1 className="text-base sm:text-lg lg:text-xl font-bold text-gray-900">الأقساط</h1>
+          {onNavigate && (
+            <Button type="button" variant="secondary" size="sm" onClick={() => onNavigate('confirmation')}>
+              انتقل إلى التأكيدات
+            </Button>
+          )}
+        </div>
         {totalCount > 0 && (
           <span className="text-xs sm:text-sm text-gray-600">
             عرض {sales.length > 0 ? (currentPage - 1) * ITEMS_PER_PAGE + 1 : 0} -{' '}
