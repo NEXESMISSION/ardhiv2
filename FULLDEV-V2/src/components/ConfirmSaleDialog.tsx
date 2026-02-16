@@ -14,6 +14,7 @@ import { formatPrice, formatDate } from '@/utils/priceCalculator'
 import { calculateInstallmentWithDeposit } from '@/utils/installmentCalculator'
 import { generateInstallmentSchedule } from '@/utils/installmentSchedule'
 import { useAuth } from '@/contexts/AuthContext'
+import { useLanguage } from '@/i18n/context'
 import { notifyOwners, notifyCurrentUser } from '@/utils/notifications'
 import { getContractWritersCached, getContractWriters, type ContractWriterCached } from '@/utils/contractWritersCache'
 
@@ -76,8 +77,13 @@ interface ConfirmSaleDialogProps {
   onConfirm: () => void
 }
 
+function replaceVars(str: string, vars: Record<string, string | number>): string {
+  return Object.entries(vars).reduce((s, [k, v]) => s.replace(new RegExp(`\\{\\{${k}\\}\\}`, 'g'), String(v)), str)
+}
+
 export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSaleDialogProps) {
   const { systemUser } = useAuth()
+  const { t } = useLanguage()
   const [installmentStartDate, setInstallmentStartDate] = useState('')
   const [paymentMethod, setPaymentMethod] = useState('cash')
   const [contractWriterId, setContractWriterId] = useState('')
@@ -326,7 +332,7 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
     setError(null)
 
     if (sale.payment_method === 'installment' && !installmentStartDate) {
-      setError('يرجى تحديد تاريخ بداية الأقساط')
+      setError(t('confirmation.dialogErrorInstallmentDate'))
       return
     }
 
@@ -336,7 +342,7 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
       const amount = parseFloat(cleanedAmount)
       
       if (!cleanedAmount || cleanedAmount === '' || isNaN(amount) || amount <= 0) {
-        setError('يرجى إدخال المبلغ المستلم الآن')
+        setError(t('confirmation.dialogErrorAmountRequired'))
         return
       }
       if (amount > calculations.confirmationAmount) {
@@ -375,7 +381,7 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
         .single()
       
       if (preCheckError || !preCheckSale) {
-        throw new Error('فشل التحقق من حالة البيع')
+        throw new Error(t('confirmation.dialogErrorVerifySale'))
       }
       
       if (preCheckSale.status !== 'pending') {
@@ -386,7 +392,7 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
       }
     } catch (earlyError: any) {
       setConfirming(false)
-      setErrorMessage(earlyError.message || 'فشل التحقق من البيع')
+      setErrorMessage(earlyError.message || t('confirmation.dialogErrorVerifySale'))
       setShowErrorDialog(true)
       return
     }
@@ -614,7 +620,7 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
       }
 
       // Show success and close immediately; run notifications in background so confirm feels fast
-      setSuccessMessage('تم تأكيد البيع بنجاح!')
+      setSuccessMessage(t('confirmation.dialogSuccessConfirm'))
       setShowSuccessDialog(true)
       onConfirm()
       onClose()
@@ -628,10 +634,10 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
             .eq('id', sale.id)
             .single()
           if (finalCheckError || !finalSaleCheck || finalSaleCheck.status !== 'completed') return
-          const clientName = sale.client?.name || 'عميل غير معروف'
-          const pieceNumber = sale.piece?.piece_number || 'غير معروف'
-          const batchName = sale.batch?.name || 'غير معروف'
-          const confirmedByName = systemUser?.name || 'غير معروف'
+const clientName = sale.client?.name || t('confirmation.clientUnknown')
+      const pieceNumber = sale.piece?.piece_number || t('confirmation.unknown')
+      const batchName = sale.batch?.name || t('confirmation.unknown')
+      const confirmedByName = systemUser?.name || t('confirmation.unknown')
           const confirmedByPlace = systemUser?.place || null
           let notificationMessage = ''
           let notificationTitle = ''
@@ -656,7 +662,7 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
         }
       })()
     } catch (e: any) {
-      setErrorMessage(e.message || 'فشل تأكيد البيع')
+      setErrorMessage(e.message || t('confirmation.dialogErrorConfirmSale'))
       setShowErrorDialog(true)
     } finally {
       setConfirming(false)
@@ -694,7 +700,7 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
       setShowSuccessDialog(true)
       onConfirm() // Refresh the list
     } catch (e: any) {
-      setErrorMessage(e.message || 'فشل تحديد الموعد')
+      setErrorMessage(e.message || t('confirmation.dialogErrorConfirmSale'))
       setShowErrorDialog(true)
     }
   }
@@ -733,7 +739,7 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
           </Button>
           <div className="flex gap-3">
             <Button variant="secondary" onClick={onClose} disabled={confirming}>
-              إلغاء
+              {t('confirmation.cancel')}
             </Button>
             <Button 
               onClick={handleConfirmClick} 
@@ -741,16 +747,16 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
               className="bg-green-600 hover:bg-green-700 active:bg-green-800 focus-visible:ring-green-500"
             >
             {confirming 
-              ? 'جاري التأكيد...' 
+              ? t('confirmation.dialogConfirming') 
               : isPromise && sale.partial_payment_amount
-                ? 'استكمال الوعد بالبيع'
+                ? t('confirmation.confirmPromisePartial')
                 : isPromise
-                  ? 'تأكيد وعد بالبيع'
+                  ? t('confirmation.confirmPromise')
                   : isInstallment
-                    ? 'تأكيد بيع بالتقسيط'
+                    ? t('confirmation.confirmInstallment')
                     : isFull
-                      ? 'تأكيد بيع نقدي'
-                      : 'تأكيد البيع'}
+                      ? t('confirmation.confirmFull')
+                      : t('confirmation.confirmSale')}
             </Button>
           </div>
         </div>
@@ -1021,7 +1027,7 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
                 {promisePaymentAmount && !isNaN(parseFloat(promisePaymentAmount)) && (
                   <div className="mt-1.5 sm:mt-2 p-1.5 sm:p-2 bg-white rounded border border-orange-300">
                     <p className="text-xs sm:text-sm">
-                      <span className="font-medium">المبلغ المتبقي بعد هذا الدفع:</span>{' '}
+                      <span className="font-medium">{t('confirmation.dialogRemainingAfterPayment')}</span>{' '}
                       <span className="font-semibold text-orange-600">
                         {formatPrice(calculations.confirmationAmount - parseFloat(promisePaymentAmount))} DT
                       </span>
@@ -1039,7 +1045,7 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
           <Textarea
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
-            placeholder="ملاحظات إضافية..."
+            placeholder={t('confirmation.dialogNotesPlaceholder')}
             rows={2}
             size="sm"
             className="text-xs sm:text-sm"
@@ -1072,8 +1078,8 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
               })()
             : `هل أنت مستعد للتأكيد؟\n\nستحصل على المبلغ: ${formatPrice(calculations.confirmationAmount)} DT`
         }
-        confirmText={isPromise ? 'تأكيد الوعد بالبيع' : 'تأكيد'}
-        cancelText="إلغاء"
+        confirmText={isPromise ? t('confirmation.dialogConfirmPromise') : t('common.confirm')}
+        cancelText={t('confirmation.cancel')}
         variant="warning"
         disabled={confirming}
         loading={confirming}
@@ -1122,7 +1128,7 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
         open={showSuccessDialog}
         onClose={handleSuccessClose}
         type="success"
-        title="نجح التأكيد"
+        title={t('confirmation.dialogSuccessTitle')}
         message={successMessage}
       />
 
@@ -1131,7 +1137,7 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
         open={showErrorDialog}
         onClose={handleErrorClose}
         type="error"
-        title="فشل التأكيد"
+        title={t('confirmation.dialogErrorTitle')}
         message={errorMessage}
       />
 
@@ -1139,12 +1145,12 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
       <Dialog
         open={showAppointmentDialog}
         onClose={() => setShowAppointmentDialog(false)}
-        title="تحديد موعد"
+        title={t('confirmation.dialogSetAppointmentTitle')}
         size="md"
         footer={
           <div className="flex justify-end gap-3">
             <Button variant="secondary" onClick={() => setShowAppointmentDialog(false)}>
-              إلغاء
+              {t('confirmation.cancel')}
             </Button>
             <Button 
               onClick={handleAppointmentConfirm} 
@@ -1170,8 +1176,8 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
           </div>
           {sale && (
             <div className="text-xs sm:text-sm text-gray-600">
-              <p><span className="font-medium">العميل:</span> {sale.client?.name || 'غير محدد'}</p>
-              <p><span className="font-medium">القطعة:</span> {sale.piece?.piece_number || 'غير محدد'}</p>
+              <p><span className="font-medium">{t('confirmation.clientLabel')}:</span> {sale.client?.name || t('confirmation.unknown')}</p>
+              <p><span className="font-medium">{t('confirmation.dialogPieceLabel')}:</span> {sale.piece?.piece_number || t('confirmation.unknown')}</p>
             </div>
           )}
         </div>

@@ -4,6 +4,7 @@ import { IconButton } from './ui/icon-button'
 import { Button } from './ui/button'
 import { HardRefreshWrapper } from './HardRefreshWrapper'
 import { useAuth } from '@/contexts/AuthContext'
+import { useLanguage } from '@/i18n/context'
 import { supabase } from '@/lib/supabase'
 import { getNotifications, getUnreadCount, markAsRead, markAllAsRead, deleteNotification, formatTimeAgo, type Notification, type NotificationDateFilter } from '@/utils/notifications'
 import { getPaymentTypeLabel } from '@/utils/paymentTerms'
@@ -14,22 +15,10 @@ interface LayoutProps {
   onNavigate: (page: string) => void
 }
 
-const pageNames: Record<string, string> = {
-  'home': 'الرئيسية',
-  'land': 'الأراضي',
-  'clients': 'العملاء',
-  'confirmation': 'التأكيدات',
-  'confirmation-history': 'سجل التأكيدات',
-  'finance': 'المالية',
-  'contract-writers': 'محررين العقد',
-  'installments': 'الأقساط',
-  'sales-records': 'سجل المبيعات',
-  'appointments': 'موعد اتمام البيع',
-  'phone-call-appointments': 'مواعيد المكالمات',
-}
-
 export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
+  const { t, language, setLanguage } = useLanguage()
   const { systemUser, isOwner } = useAuth()
+  const pageTitle = t(`pageNames.${currentPage}`) || currentPage
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [previousPage, setPreviousPage] = useState<string | null>(null)
   const [notificationsOpen, setNotificationsOpen] = useState(false)
@@ -229,22 +218,24 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
         )
         .subscribe((status) => {
           if (status === 'SUBSCRIBED') {
-            console.log('Notification subscription active')
+            // Subscription ready; no console log to avoid noise
             // Clear any pending reconnection
             if (reconnectTimeout) {
               clearTimeout(reconnectTimeout)
               reconnectTimeout = null
             }
-          } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
             console.warn('Notification subscription error:', status)
-            // Attempt reconnection after delay
             if (mounted && !reconnectTimeout) {
               reconnectTimeout = setTimeout(() => {
-                if (mounted) {
-                  setupSubscription()
-                }
+                if (mounted) setupSubscription()
               }, 5000)
             }
+          } else if (status === 'CLOSED' && mounted && !reconnectTimeout) {
+            // Unexpected close while still mounted (e.g. server) — reconnect. Ignore when unmounting.
+            reconnectTimeout = setTimeout(() => {
+              if (mounted) setupSubscription()
+            }, 5000)
           }
         })
 
@@ -462,13 +453,13 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
       {/* PWA update banner: new version available after deploy */}
       {pwaUpdateAvailable && (
         <div className="fixed top-0 left-0 right-0 z-[200] bg-blue-600 text-white px-3 py-2 flex items-center justify-center gap-3 shadow-lg safe-area-top">
-          <span className="text-sm font-medium">يتوفر إصدار جديد. أعد التحميل لاستخدامه.</span>
+          <span className="text-sm font-medium">{t('header.newVersion')}</span>
           <button
             type="button"
             onClick={handlePwaRefresh}
             className="px-3 py-1.5 bg-white text-blue-600 rounded-md text-sm font-semibold hover:bg-blue-50"
           >
-            أعد التحميل
+            {t('header.refresh')}
           </button>
         </div>
       )}
@@ -492,17 +483,22 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
                 size="sm"
                 onClick={() => setSidebarOpen(!sidebarOpen)}
                 className="p-1.5 sm:p-2 flex-shrink-0"
-                title="القائمة"
+                title={t('header.menu')}
               >
                 <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
                 </svg>
               </IconButton>
               <div className="text-xs sm:text-sm font-semibold text-gray-700 truncate">
-                {pageNames[currentPage] || currentPage}
+                {pageTitle}
               </div>
             </div>
             <div className="flex items-center gap-2 sm:gap-3">
+              {/* Language: FR | AR */}
+              <div className="flex rounded-lg overflow-hidden border border-gray-200 bg-gray-50">
+                <button type="button" onClick={() => setLanguage('fr')} className={`px-2 py-1 text-xs font-medium ${language === 'fr' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>FR</button>
+                <button type="button" onClick={() => setLanguage('ar')} className={`px-2 py-1 text-xs font-medium ${language === 'ar' ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}>ع</button>
+              </div>
               {/* Notification Icon - Show for owners only */}
               {systemUser && isOwner && (
               <div className="relative" ref={notificationRef}>
@@ -516,7 +512,7 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
                   className={`p-1.5 sm:p-2 flex-shrink-0 relative transition-all ${
                     newNotificationReceived ? 'animate-bounce' : ''
                   }`}
-                  title="الإشعارات"
+                  title={t('header.notifications')}
                 >
                   <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
@@ -536,21 +532,21 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
                     <div className="w-full h-full max-w-7xl max-h-[82vh] bg-white rounded-lg shadow-2xl flex flex-col my-6 sm:my-8 mx-4 sm:mx-6" onClick={(e) => e.stopPropagation()}>
                       {/* Header */}
                       <div className="p-4 sm:p-6 border-b border-gray-200 flex items-center justify-between bg-gradient-to-r from-blue-50 to-indigo-50 flex-shrink-0">
-                        <h3 className="text-lg sm:text-xl font-bold text-gray-900">الإشعارات</h3>
+                        <h3 className="text-lg sm:text-xl font-bold text-gray-900">{t('header.notifications')}</h3>
                         <div className="flex items-center gap-3">
                           {unreadCount > 0 && (
                             <button
                               onClick={handleMarkAllAsRead}
                               className="text-sm sm:text-base text-blue-600 hover:text-blue-700 font-medium px-3 py-2 rounded-lg hover:bg-blue-100 transition-colors"
-                              title="تم قراءة الكل"
+                              title={t('notifications.markAllRead')}
                             >
-                              تم قراءة الكل
+                              {t('notifications.markAllRead')}
                             </button>
                           )}
                           <button
                             onClick={() => setNotificationsOpen(false)}
                             className="text-gray-500 hover:text-gray-700 p-2 rounded-lg hover:bg-gray-100 transition-colors"
-                            title="إغلاق"
+                            title={t('common.close')}
                           >
                             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -561,7 +557,7 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
 
                       {/* Date filter */}
                       <div className="flex flex-wrap items-center gap-2 p-3 sm:p-4 border-b border-gray-200 bg-gray-50 flex-shrink-0">
-                        <span className="text-xs sm:text-sm text-gray-600 ml-1">التصفية:</span>
+                        <span className="text-xs sm:text-sm text-gray-600 ml-1">{t('notifications.filterLabel')}</span>
                         {(['all', 'today', 'yesterday', 'this_week'] as const).map((key) => (
                           <button
                             key={key}
@@ -576,7 +572,7 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
                                 : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-100'
                             }`}
                           >
-                            {key === 'all' ? 'الكل' : key === 'today' ? 'اليوم' : key === 'yesterday' ? 'أمس' : 'هذا الأسبوع'}
+                            {key === 'all' ? t('notifications.filterAll') : key === 'today' ? t('notifications.filterToday') : key === 'yesterday' ? t('notifications.filterYesterday') : t('notifications.filterThisWeek')}
                           </button>
                         ))}
                         <div className="flex items-center gap-2">
@@ -593,9 +589,9 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
                                 ? 'border-blue-600 ring-1 ring-blue-600'
                                 : 'border-gray-300'
                             }`}
-                            title="يوم محدد"
+                            title={t('notifications.filterSpecificDay')}
                           />
-                          <span className="text-xs text-gray-500 hidden sm:inline">يوم محدد</span>
+                          <span className="text-xs text-gray-500 hidden sm:inline">{t('notifications.filterSpecificDay')}</span>
                         </div>
                       </div>
                       
@@ -604,14 +600,14 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
                         {loadingNotifications ? (
                           <div className="flex flex-col items-center justify-center h-full">
                             <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-                            <p className="mt-4 text-sm text-gray-500">جاري التحميل...</p>
+                            <p className="mt-4 text-sm text-gray-500">{t('notifications.loading')}</p>
                           </div>
                         ) : displayedNotifications.length === 0 ? (
                           <div className="flex flex-col items-center justify-center h-full text-gray-500">
                             <svg className="w-20 h-20 mb-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
                             </svg>
-                            <p className="text-lg">لا توجد إشعارات</p>
+                            <p className="text-lg">{t('notifications.noNotifications')}</p>
                           </div>
                         ) : (
                           <div className="space-y-4">
@@ -655,7 +651,7 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
                                       handleDeleteNotification(notification.id)
                                     }}
                                     className="flex-shrink-0 text-gray-400 hover:text-red-500 p-2 rounded-lg hover:bg-red-50 transition-colors"
-                                    title="حذف"
+                                    title={t('notifications.delete')}
                                   >
                                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -680,10 +676,10 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
                                         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                                       </svg>
-                                      جاري التحميل...
+                                      {t('notifications.loading')}
                                     </>
                                   ) : (
-                                    'عرض المزيد (10 إشعارات)'
+                                    `${t('notifications.loadMore')} (10)`
                                   )}
                                 </Button>
                               </div>
@@ -704,7 +700,7 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
                   size="md"
                   onClick={handleGoBack}
                   className="p-2 sm:p-3 flex-shrink-0"
-                  title={previousPage ? 'رجوع' : 'رجوع إلى الرئيسية'}
+                  title={previousPage ? t('common.back') : t('common.backToHome')}
                 >
                   <svg className="w-6 h-6 sm:w-7 sm:h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />

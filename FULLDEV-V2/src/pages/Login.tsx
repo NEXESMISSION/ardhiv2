@@ -1,12 +1,13 @@
 import { useState, useEffect, useRef } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
+import { useLanguage } from '@/i18n/context'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card } from '@/components/ui/card'
 import { Alert } from '@/components/ui/alert'
 import { IconButton } from '@/components/ui/icon-button'
-import { translateAuthError } from '@/utils/authErrors'
+import { translateAuthError, translateAuthErrorFr } from '@/utils/authErrors'
 
 declare global {
   interface WindowEventMap {
@@ -19,6 +20,7 @@ interface BeforeInstallPromptEvent extends Event {
 }
 
 export function LoginPage() {
+  const { t, language, setLanguage } = useLanguage()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
@@ -73,7 +75,7 @@ export function LoginPage() {
 
     // Client-side validation
     if (!email.trim()) {
-      setError('البريد الإلكتروني إجباري')
+      setError(t('login.errorEmailRequired'))
       emailInputRef.current?.focus()
       return
     }
@@ -88,12 +90,12 @@ export function LoginPage() {
     finalEmail = finalEmail.toLowerCase()
 
     if (!password.trim()) {
-      setError('كلمة المرور إجبارية')
+      setError(t('login.errorPasswordRequired'))
       return
     }
 
     if (password.length < 6) {
-      setError('كلمة المرور يجب أن تكون 6 أحرف على الأقل')
+      setError(t('login.errorPasswordMin'))
       return
     }
 
@@ -116,7 +118,7 @@ export function LoginPage() {
         
         // Special handling for auth_user_id mismatch
         if (signInError.code === 'AUTH_USER_ID_MISMATCH') {
-          let errorMsg = signInError.message || 'معرف المصادقة غير متطابق.'
+          let errorMsg = signInError.message || (language === 'fr' ? 'Identifiant d\'authentification non correspondant.' : 'معرف المصادقة غير متطابق.')
           if (signInError.authUserId) {
             errorMsg += '\n\nمعرف المستخدم: ' + signInError.authUserId
             errorMsg += '\n\nيرجى تحديث auth_user_id في جدول users.'
@@ -124,8 +126,7 @@ export function LoginPage() {
           }
           setError(errorMsg)
         } else if (signInError.code === 'USER_NOT_IN_SYSTEM') {
-          // Special handling for user not in system
-          let errorMsg = signInError.message || 'المستخدم غير مسجل في النظام.'
+          let errorMsg = signInError.message || (language === 'fr' ? 'Utilisateur non enregistré dans le système.' : 'المستخدم غير مسجل في النظام.')
           if (signInError.authUserId) {
             errorMsg += '\n\nمعرف المستخدم: ' + signInError.authUserId
             errorMsg += '\n\nيرجى التحقق من إضافة المستخدم في جدول users في قاعدة البيانات.'
@@ -134,7 +135,7 @@ export function LoginPage() {
           }
           setError(errorMsg)
         } else if (signInError.code === 'USER_LOAD_FAILED') {
-          setError(signInError.message || 'فشل تحميل بيانات المستخدم. يرجى المحاولة مرة أخرى.')
+          setError(signInError.message || (language === 'fr' ? 'Échec du chargement du profil. Veuillez réessayer.' : 'فشل تحميل بيانات المستخدم. يرجى المحاولة مرة أخرى.'))
         } else {
           // Check for invalid credentials error
           const errorMessage = signInError.message || ''
@@ -143,9 +144,11 @@ export function LoginPage() {
           if (errorMessage.includes('Invalid login credentials') || 
               errorMessage.includes('invalid_credentials') ||
               errorCode === 'invalid_grant') {
-            setError(`❌ فشل تسجيل الدخول\n\nالبريد الإلكتروني أو كلمة المرور غير صحيحة.\n\n📧 البريد المستخدم: ${finalEmail}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🔍 خطوات الحل:\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n1️⃣ تحقق من وجود المستخدم في Supabase:\n   • اذهب إلى: Supabase Dashboard\n   • القائمة: Authentication → Users\n   • ابحث عن: ${finalEmail}\n   • إذا لم تجده، المستخدم غير موجود!\n\n2️⃣ إنشاء المستخدم (إذا لم يكن موجوداً):\n   • في Supabase Dashboard:\n     - Authentication → Users → Add User\n     - Email: ${finalEmail}\n     - Password: (أدخل كلمة مرور قوية)\n     - Auto Confirm User: ✓\n\n3️⃣ إضافة المستخدم إلى جدول users:\n   • بعد إنشاء المستخدم في Auth\n   • احصل على auth_user_id من Supabase\n   • استخدم SQL Editor في Supabase:\n\n   INSERT INTO users (email, role, auth_user_id, name)\n   VALUES (\n     '${finalEmail}',\n     'worker',\n     '(auth_user_id من Supabase)',\n     'اسم المستخدم'\n   );\n\n4️⃣ تحقق من كلمة المرور:\n   • تأكد من كتابة كلمة المرور بشكل صحيح\n   • كلمات المرور حساسة لحالة الأحرف (A ≠ a)\n   • تأكد من عدم وجود مسافات إضافية\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n💡 ملاحظة: إذا كنت المسؤول، تأكد من إنشاء\n   المستخدم في Supabase Auth أولاً قبل المحاولة.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`)
+            setError(language === 'fr'
+              ? `❌ Échec de connexion\n\nE-mail ou mot de passe incorrect.\n\n📧 E-mail utilisé : ${finalEmail}\n\nVérifiez vos identifiants et réessayez.`
+              : `❌ فشل تسجيل الدخول\n\nالبريد الإلكتروني أو كلمة المرور غير صحيحة.\n\n📧 البريد المستخدم: ${finalEmail}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🔍 خطوات الحل:\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n1️⃣ تحقق من وجود المستخدم في Supabase:\n   • اذهب إلى: Supabase Dashboard\n   • القائمة: Authentication → Users\n   • ابحث عن: ${finalEmail}\n   • إذا لم تجده، المستخدم غير موجود!\n\n2️⃣ إنشاء المستخدم (إذا لم يكن موجوداً):\n   • في Supabase Dashboard:\n     - Authentication → Users → Add User\n     - Email: ${finalEmail}\n     - Password: (أدخل كلمة مرور قوية)\n     - Auto Confirm User: ✓\n\n3️⃣ إضافة المستخدم إلى جدول users:\n   • بعد إنشاء المستخدم في Auth\n   • احصل على auth_user_id من Supabase\n   • استخدم SQL Editor في Supabase:\n\n   INSERT INTO users (email, role, auth_user_id, name)\n   VALUES (\n     '${finalEmail}',\n     'worker',\n     '(auth_user_id من Supabase)',\n     'اسم المستخدم'\n   );\n\n4️⃣ تحقق من كلمة المرور:\n   • تأكد من كتابة كلمة المرور بشكل صحيح\n   • كلمات المرور حساسة لحالة الأحرف (A ≠ a)\n   • تأكد من عدم وجود مسافات إضافية\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n💡 ملاحظة: إذا كنت المسؤول، تأكد من إنشاء\n   المستخدم في Supabase Auth أولاً قبل المحاولة.\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`)
         } else {
-          const translatedError = translateAuthError(signInError)
+          const translatedError = language === 'fr' ? translateAuthErrorFr(signInError) : translateAuthError(signInError)
           setError(translatedError)
           }
         }
@@ -169,7 +172,7 @@ export function LoginPage() {
         setPassword('')
       }
     } catch (err: any) {
-      const translatedError = translateAuthError(err)
+      const translatedError = language === 'fr' ? translateAuthErrorFr(err) : translateAuthError(err)
       setError(translatedError)
       setPassword('')
       setTimeout(() => {
@@ -191,16 +194,34 @@ export function LoginPage() {
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-indigo-50 px-4 py-8">
       <Card className="w-full max-w-md shadow-xl border-0">
         <div className="p-6 sm:p-8">
+          {/* Language switcher */}
+          <div className="flex justify-center gap-2 mb-4">
+            <button
+              type="button"
+              onClick={() => setLanguage('fr')}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium ${language === 'fr' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+            >
+              FR
+            </button>
+            <button
+              type="button"
+              onClick={() => setLanguage('ar')}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium ${language === 'ar' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+            >
+              ع
+            </button>
+          </div>
+
           {/* Header */}
           <div className="text-center mb-6 sm:mb-8">
             <div className="inline-flex items-center justify-center w-16 h-16 sm:w-20 sm:h-20 bg-blue-100 rounded-full mb-4">
               <span className="text-3xl sm:text-4xl">🏞️</span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-2">
-              نظام إدارة الأراضي
+              {t('login.title')}
             </h1>
             <p className="text-sm sm:text-base text-gray-600">
-              تسجيل الدخول للوصول إلى النظام
+              {t('login.subtitle')}
             </p>
           </div>
 
@@ -221,7 +242,7 @@ export function LoginPage() {
                       onClick={() => setError(null)}
                       className="mt-2 text-xs text-red-700 hover:text-red-900 underline"
                     >
-                      إغلاق
+                      {t('common.close')}
                     </button>
                   </div>
               </div>
@@ -234,7 +255,7 @@ export function LoginPage() {
             {/* Email Field */}
             <div>
               <Label htmlFor="email" className="text-sm font-medium text-gray-700">
-                البريد الإلكتروني <span className="text-xs text-gray-500">(أو اسم المستخدم)</span>
+                {t('login.emailLabel')} <span className="text-xs text-gray-500">{t('login.emailOrUser')}</span>
               </Label>
               <div className="mt-1 relative">
                 <Input
@@ -244,12 +265,11 @@ export function LoginPage() {
                   value={email}
                   onChange={(e) => {
                     setEmail(e.target.value)
-                    // Don't clear error automatically - let user dismiss it manually
                   }}
                   required
                   autoComplete="email"
                   className="w-full pr-10"
-                  placeholder="example@gmail.com أو example"
+                  placeholder={t('login.emailPlaceholder')}
                   disabled={loading}
                   dir="ltr"
                 />
@@ -264,21 +284,18 @@ export function LoginPage() {
             {/* Password Field */}
             <div>
               <Label htmlFor="password" className="text-sm font-medium text-gray-700">
-                كلمة المرور
+                {t('login.passwordLabel')}
               </Label>
               <div className="mt-1 relative">
                 <Input
                   id="password"
                   type={showPassword ? 'text' : 'password'}
                   value={password}
-                  onChange={(e) => {
-                    setPassword(e.target.value)
-                    // Don't clear error automatically - let user dismiss it manually
-                  }}
+                  onChange={(e) => setPassword(e.target.value)}
                   required
                   autoComplete="current-password"
                   className="w-full pr-10"
-                  placeholder="••••••••"
+                  placeholder={t('login.passwordPlaceholder')}
                   disabled={loading}
                 />
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center">
@@ -288,7 +305,7 @@ export function LoginPage() {
                     size="sm"
                     onClick={() => setShowPassword(!showPassword)}
                     className="text-gray-400 hover:text-gray-600"
-                    title={showPassword ? 'إخفاء كلمة المرور' : 'إظهار كلمة المرور'}
+                    title={showPassword ? t('login.hidePassword') : t('login.showPassword')}
                   >
                     {showPassword ? (
                       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -317,7 +334,7 @@ export function LoginPage() {
                 disabled={loading}
               />
               <Label htmlFor="remember-me" className="mr-2 block text-sm text-gray-700 cursor-pointer">
-                تذكرني
+                {t('login.rememberMe')}
               </Label>
             </div>
 
@@ -334,19 +351,19 @@ export function LoginPage() {
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                   </svg>
-                  جاري تسجيل الدخول...
+                  {t('login.submitting')}
                 </span>
               ) : (
-                'تسجيل الدخول'
+                t('login.submit')
               )}
             </Button>
           </form>
 
-          {/* PWA Install - show only in browser (not when already installed) and when prompt available or Android */}
+          {/* PWA Install */}
           {!isStandalone && (
             <div className="mt-6 pt-6 border-t border-gray-200">
               <p className="text-xs sm:text-sm text-gray-600 mb-3 text-center">
-                تثبيت التطبيق على الهاتف (أندرويد)
+                {t('login.installTitle')}
               </p>
               {installPrompt ? (
                 <Button
@@ -356,12 +373,12 @@ export function LoginPage() {
                   onClick={handleInstallClick}
                 >
                   <span>📲</span>
-                  <span>تثبيت التطبيق</span>
+                  <span>{t('login.installButton')}</span>
                 </Button>
               ) : (
                 <div className="text-center text-xs text-gray-500 space-y-1">
-                  <p>في متصفح Chrome: القائمة ⋮ → إضافة إلى الشاشة الرئيسية</p>
-                  <p className="text-[11px]">أو: الإعدادات → تثبيت التطبيق</p>
+                  <p>{t('login.installChrome')}</p>
+                  <p className="text-[11px]">{t('login.installSettings')}</p>
                 </div>
               )}
             </div>

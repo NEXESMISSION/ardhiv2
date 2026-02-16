@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
+import { useLanguage } from '@/i18n/context'
 import { supabase } from '@/lib/supabase'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -15,7 +16,22 @@ interface HomePageProps {
   onNavigate: (page: string) => void
 }
 
+const PAGE_IDS = [
+  { id: 'confirmation', icon: '✅' },
+  { id: 'clients', icon: '👥' },
+  { id: 'land', icon: '🏞️' },
+  { id: 'appointments', icon: '📅' },
+  { id: 'phone-call-appointments', icon: '📞' },
+  { id: 'installments', icon: '💳' },
+  { id: 'finance', icon: '💰' },
+  { id: 'sales-records', icon: '📋' },
+  { id: 'confirmation-history', icon: '📜' },
+  { id: 'contract-writers', icon: '📝' },
+  { id: 'users', icon: '👤' },
+] as const
+
 export function HomePage({ onNavigate }: HomePageProps) {
+  const { t } = useLanguage()
   const { systemUser, refreshSystemUser, isOwner } = useAuth()
   const [editDialogOpen, setEditDialogOpen] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -31,9 +47,8 @@ export function HomePage({ onNavigate }: HomePageProps) {
   const [imageFile, setImageFile] = useState<File | null>(null)
   const [imagePreview, setImagePreview] = useState<string | null>(null)
   
-  // Get user display name (use name field if available, otherwise email)
   const getUserName = () => {
-    if (!systemUser) return 'مستخدم'
+    if (!systemUser) return t('home.user')
     if (systemUser.name && systemUser.name.trim()) {
       return systemUser.name.trim()
     }
@@ -53,21 +68,13 @@ export function HomePage({ onNavigate }: HomePageProps) {
     return systemUser?.image_url || null
   }
 
-  const allPages = [
-    { id: 'confirmation', label: 'التأكيدات', icon: '✅', description: 'تأكيد المبيعات المعلقة' },
-    { id: 'clients', label: 'العملاء', icon: '👥', description: 'إدارة بيانات العملاء' },
-    { id: 'land', label: 'دفعات الأراضي', icon: '🏞️', description: 'إدارة دفعات الأراضي والقطع' },
-    { id: 'appointments', label: 'موعد اتمام البيع', icon: '📅', description: 'مواعيد اتمام البيع' },
-    { id: 'phone-call-appointments', label: 'مواعيد المكالمات', icon: '📞', description: 'مواعيد المكالمات الهاتفية' },
-    { id: 'installments', label: 'الأقساط', icon: '💳', description: 'متابعة الأقساط والمدفوعات' },
-    { id: 'finance', label: 'المالية', icon: '💰', description: 'الإدارة المالية والتقارير' },
-    { id: 'sales-records', label: 'سجل المبيعات', icon: '📋', description: 'سجل جميع المبيعات' },
-    { id: 'confirmation-history', label: 'سجل التأكيدات', icon: '📜', description: 'سجل تأكيدات المبيعات' },
-    { id: 'contract-writers', label: 'محررين العقد', icon: '📝', description: 'إدارة محرري العقود' },
-    { id: 'users', label: 'المستخدمين', icon: '👤', description: 'إدارة المستخدمين والعمال' },
-  ]
+  const allPages = PAGE_IDS.map(p => ({
+    id: p.id,
+    label: t(`pageNames.${p.id}`),
+    icon: p.icon,
+    description: t(`homePageDesc.${p.id}`),
+  }))
 
-  // Filter pages based on user permissions (confirmation-history: show if user has confirmation)
   let pages = systemUser?.role === 'owner'
     ? allPages
     : allPages.filter(page => {
@@ -194,11 +201,11 @@ export function HomePage({ onNavigate }: HomePageProps) {
     const file = e.target.files?.[0]
     if (file) {
       if (!file.type.startsWith('image/')) {
-        setError('الرجاء اختيار ملف صورة')
+        setError(t('home.errorImageType'))
         return
       }
       if (file.size > 5 * 1024 * 1024) {
-        setError('حجم الصورة يجب أن يكون أقل من 5 ميجابايت')
+        setError(t('home.errorImageSize'))
         return
       }
       setImageFile(file)
@@ -261,7 +268,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
           finalImageUrl = urlData.publicUrl
         } catch (e: any) {
           console.error('Error uploading image:', e)
-          setError('فشل رفع الصورة: ' + (e.message || 'خطأ غير معروف'))
+          setError(t('home.errorUpload') + ': ' + (e.message || ''))
           setSaving(false)
           return
         }
@@ -285,7 +292,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
 
       if (updateError) throw updateError
 
-      setSuccess('تم تحديث الملف الشخصي بنجاح')
+      setSuccess(t('home.successProfile'))
       
       // Refresh system user to show updated data
       await refreshSystemUser()
@@ -297,7 +304,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
       }, 1500)
     } catch (e: any) {
       console.error('Error updating profile:', e)
-      setError(e.message || 'فشل تحديث الملف الشخصي')
+      setError(e.message || t('home.errorUpdateProfile'))
     } finally {
       setSaving(false)
     }
@@ -371,7 +378,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
                     size="sm"
                     onClick={openEditDialog}
                     className="p-2 hover:bg-blue-50 hover:text-blue-600"
-                    title="تعديل الملف الشخصي"
+                    title={t('home.editProfile')}
                   >
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
@@ -383,13 +390,12 @@ export function HomePage({ onNavigate }: HomePageProps) {
           </Card>
         )}
 
-        {/* Header */}
         <div className="mb-4 sm:mb-6 lg:mb-8 text-center">
           <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-gray-900 mb-2">
-            نظام إدارة الأراضي
+            {t('home.welcomeTitle')}
           </h1>
           <p className="text-xs sm:text-sm text-gray-600">
-            اختر الصفحة التي تريد الوصول إليها
+            {t('home.choosePage')}
           </p>
         </div>
 
@@ -432,7 +438,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
               setSuccess(null)
             }
           }}
-          title="تعديل الملف الشخصي"
+          title={t('home.editProfile')}
           size="md"
           footer={
             <div className="flex justify-end gap-2">
@@ -447,14 +453,14 @@ export function HomePage({ onNavigate }: HomePageProps) {
                 }}
                 disabled={saving}
               >
-                إلغاء
+                {t('home.cancel')}
               </Button>
               <Button
                 variant="primary"
                 onClick={handleSaveProfile}
                 disabled={saving}
               >
-                {saving ? 'جاري الحفظ...' : 'حفظ'}
+                {saving ? t('home.saving') : t('home.save')}
               </Button>
             </div>
           }
@@ -463,9 +469,8 @@ export function HomePage({ onNavigate }: HomePageProps) {
             {success && <Alert variant="success">{success}</Alert>}
             {error && <Alert variant="error">{error}</Alert>}
 
-            {/* Profile Image */}
             <div>
-              <Label htmlFor="profile-image">صورة الملف الشخصي</Label>
+              <Label htmlFor="profile-image">{t('home.profileImage')}</Label>
               <div className="mt-2 flex items-center gap-4">
                 {(imagePreview || systemUser.image_url) && (
                   <div className="flex-shrink-0 relative">
@@ -481,7 +486,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
                         setImagePreview(systemUser.image_url)
                       }}
                       className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-1 hover:bg-red-600"
-                      title="إزالة الصورة"
+                      title={t('home.removeImage')}
                     >
                       <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -498,75 +503,70 @@ export function HomePage({ onNavigate }: HomePageProps) {
                     className="text-xs sm:text-sm"
                     disabled={saving}
                   />
-                  <p className="text-xs text-gray-500 mt-1">حد أقصى 5 ميجابايت</p>
+                  <p className="text-xs text-gray-500 mt-1">{t('home.maxSize')}</p>
                 </div>
               </div>
             </div>
 
-            {/* Name */}
             <div>
-              <Label htmlFor="name">الاسم</Label>
+              <Label htmlFor="name">{t('home.name')}</Label>
               <Input
                 id="name"
                 type="text"
                 value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                placeholder="أدخل الاسم"
+                placeholder={t('home.namePlaceholder')}
                 className="text-xs sm:text-sm"
                 disabled={saving}
               />
             </div>
 
-            {/* Title */}
             <div>
-              <Label htmlFor="title">المسمى الوظيفي</Label>
+              <Label htmlFor="title">{t('home.jobTitle')}</Label>
               <Input
                 id="title"
                 type="text"
                 value={formData.title}
                 onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                placeholder="مثال: رئيس مجلس الإدارة والمدير التنفيذي"
+                placeholder={t('home.jobTitlePlaceholder')}
                 className="text-xs sm:text-sm"
                 disabled={saving}
               />
             </div>
 
-            {/* Phone */}
             <div>
-              <Label htmlFor="phone">رقم الهاتف</Label>
+              <Label htmlFor="phone">{t('home.phone')}</Label>
               <Input
                 id="phone"
                 type="tel"
                 value={formData.phone}
                 onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                placeholder="+216 XX XXX XXX"
+                placeholder={t('home.phonePlaceholder')}
                 className="text-xs sm:text-sm"
                 disabled={saving}
               />
             </div>
 
-            {/* Place */}
             <div>
-              <Label htmlFor="place">المكان</Label>
+              <Label htmlFor="place">{t('home.place')}</Label>
               <Input
                 id="place"
                 type="text"
                 value={formData.place}
                 onChange={(e) => setFormData({ ...formData, place: e.target.value })}
-                placeholder="المدينة أو المنطقة"
+                placeholder={t('home.placePlaceholder')}
                 className="text-xs sm:text-sm"
                 disabled={saving}
               />
             </div>
 
-            {/* Notes */}
             <div>
-              <Label htmlFor="notes">ملاحظات</Label>
+              <Label htmlFor="notes">{t('home.notes')}</Label>
               <Textarea
                 id="notes"
                 value={formData.notes}
                 onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                placeholder="ملاحظات إضافية (اختياري)"
+                placeholder={t('home.notesPlaceholder')}
                 className="text-xs sm:text-sm min-h-[80px]"
                 disabled={saving}
               />

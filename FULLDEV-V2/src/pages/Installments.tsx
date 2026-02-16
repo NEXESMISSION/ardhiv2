@@ -8,6 +8,7 @@ import { formatPrice, formatDateShort } from '@/utils/priceCalculator'
 import { calculateInstallmentWithDeposit } from '@/utils/installmentCalculator'
 import { buildSaleQuery, formatSalesWithSellers } from '@/utils/salesQueries'
 import { InstallmentDetailsDialog } from '@/components/InstallmentDetailsDialog'
+import { useLanguage } from '@/i18n/context'
 
 interface Sale {
   id: string
@@ -88,6 +89,7 @@ interface InstallmentsPageProps {
 }
 
 export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
+  const { t } = useLanguage()
   const [sales, setSales] = useState<Sale[]>([])
   const [groupedSales, setGroupedSales] = useState<Sale[][]>([])
   const [loading, setLoading] = useState(true)
@@ -174,7 +176,7 @@ export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
         if (res.count != null) setTotalCount(res.count)
       }).catch(() => {})
     } catch (e: any) {
-      setError(e.message || 'فشل تحميل المبيعات بالتقسيط')
+      setError(e.message || t('installments.loadError'))
     } finally {
       setLoading(false)
     }
@@ -276,17 +278,19 @@ export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
     <div className="px-2 sm:px-4 lg:px-6 py-2 sm:py-3 lg:py-4 space-y-2 sm:space-y-3 lg:space-y-4">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
-          <h1 className="text-base sm:text-lg lg:text-xl font-bold text-gray-900">الأقساط</h1>
+          <h1 className="text-base sm:text-lg lg:text-xl font-bold text-gray-900">{t('installments.pageTitle')}</h1>
           {onNavigate && (
             <Button type="button" variant="secondary" size="sm" onClick={() => onNavigate('confirmation')}>
-              انتقل إلى التأكيدات
+              {t('installments.goToConfirmation')}
             </Button>
           )}
         </div>
         {totalCount > 0 && (
           <span className="text-xs sm:text-sm text-gray-600">
-            عرض {sales.length > 0 ? (currentPage - 1) * ITEMS_PER_PAGE + 1 : 0} -{' '}
-            {Math.min(currentPage * ITEMS_PER_PAGE, totalCount)} من {totalCount}
+            {t('installments.showingRange')
+              .replace('{{from}}', String(sales.length > 0 ? (currentPage - 1) * ITEMS_PER_PAGE + 1 : 0))
+              .replace('{{to}}', String(Math.min(currentPage * ITEMS_PER_PAGE, totalCount)))
+              .replace('{{total}}', String(totalCount))}
           </span>
         )}
       </div>
@@ -299,12 +303,12 @@ export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
         <div className="flex items-center justify-center py-8 min-h-[120px]">
           <div className="text-center">
             <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600" />
-            <p className="mt-2 text-xs text-gray-500">جاري التحميل...</p>
+            <p className="mt-2 text-xs text-gray-500">{t('installments.loading')}</p>
           </div>
         </div>
       ) : groupedSales.length === 0 ? (
         <Card className="p-3 sm:p-4 lg:p-6 text-center">
-          <p className="text-xs sm:text-sm text-gray-500">لا توجد مبيعات بالتقسيط</p>
+          <p className="text-xs sm:text-sm text-gray-500">{t('installments.noInstallmentSales')}</p>
         </Card>
       ) : (
         <>
@@ -322,14 +326,14 @@ export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
                   <div className="mb-2 sm:mb-3">
                     <div className="flex flex-wrap items-center gap-1 sm:gap-2 mb-1">
                       <h3 className="text-sm sm:text-base font-semibold text-gray-900 truncate">
-                        {firstSale.client?.name || 'غير محدد'}
+                        {firstSale.client?.name || t('shared.unknown')}
                       </h3>
                       <Badge variant="info" size="sm" className="text-xs">
-                        {salesGroup.length} {salesGroup.length === 1 ? 'قطعة' : 'قطع'}
+                        {salesGroup.length} {salesGroup.length === 1 ? t('installments.piece') : t('installments.pieces')}
                       </Badge>
                       {firstSale.payment_offer && (
                         <Badge variant="secondary" size="sm" className="text-xs">
-                          {firstSale.payment_offer.name || 'عرض التقسيط'}
+                          {firstSale.payment_offer.name || t('installments.offerLabel')}
                         </Badge>
                       )}
                     </div>
@@ -348,15 +352,15 @@ export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
                     <table className="w-full text-sm border-collapse">
                       <thead>
                         <tr className="border-b-2 border-gray-300 bg-gray-50">
-                          <th className="text-right py-2 px-3 font-semibold text-xs">الصفقة</th>
-                          <th className="text-right py-2 px-3 font-semibold text-xs">القطع</th>
-                          <th className="text-right py-2 px-3 font-semibold text-xs">الأقساط</th>
-                          <th className="text-right py-2 px-3 font-semibold text-xs">المدفوع</th>
-                          <th className="text-right py-2 px-3 font-semibold text-xs">المتبقي</th>
-                          <th className="text-right py-2 px-3 font-semibold text-xs">المتأخر</th>
-                          <th className="text-right py-2 px-3 font-semibold text-xs">تاريخ الاستحقاق</th>
-                          <th className="text-right py-2 px-3 font-semibold text-xs">الحالة</th>
-                          <th className="text-right py-2 px-3 font-semibold text-xs">إجراء</th>
+                          <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.dealColumn')}</th>
+                          <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.piecesColumn')}</th>
+                          <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.installmentsColumn')}</th>
+                          <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.paidColumn')}</th>
+                          <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.remainingColumn')}</th>
+                          <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.overdueColumn')}</th>
+                          <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.dueDateColumn')}</th>
+                          <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.statusColumn')}</th>
+                          <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.actionColumn')}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -385,16 +389,16 @@ export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
                       {groupIndex === 0 && (
                         <thead>
                           <tr className="border-b-2 border-gray-300 bg-gray-50">
-                            <th className="text-right py-2 px-3 font-semibold text-xs">العميل</th>
-                            <th className="text-right py-2 px-3 font-semibold text-xs">الصفقة</th>
-                            <th className="text-right py-2 px-3 font-semibold text-xs">القطع</th>
-                            <th className="text-right py-2 px-3 font-semibold text-xs">الأقساط</th>
-                            <th className="text-right py-2 px-3 font-semibold text-xs">المدفوع</th>
-                            <th className="text-right py-2 px-3 font-semibold text-xs">المتبقي</th>
-                            <th className="text-right py-2 px-3 font-semibold text-xs">المتأخر</th>
-                            <th className="text-right py-2 px-3 font-semibold text-xs">تاريخ الاستحقاق</th>
-                            <th className="text-right py-2 px-3 font-semibold text-xs">الحالة</th>
-                            <th className="text-right py-2 px-3 font-semibold text-xs">إجراء</th>
+                            <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.clientColumn')}</th>
+                            <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.dealColumn')}</th>
+                            <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.piecesColumn')}</th>
+                            <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.installmentsColumn')}</th>
+                            <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.paidColumn')}</th>
+                            <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.remainingColumn')}</th>
+                            <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.overdueColumn')}</th>
+                            <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.dueDateColumn')}</th>
+                            <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.statusColumn')}</th>
+                            <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.actionColumn')}</th>
                           </tr>
                         </thead>
                       )}
@@ -415,7 +419,7 @@ export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
         {totalPages > 1 && (
           <div className="flex items-center justify-center gap-1.5 sm:gap-2 flex-wrap mt-4">
             <Button variant="secondary" size="sm" onClick={() => goToPage(currentPage - 1)} disabled={!hasPrevPage} className="text-xs sm:text-sm py-1.5 px-2">
-              السابق
+              {t('installments.prev')}
             </Button>
             {totalPages <= 7 ? (
               Array.from({ length: totalPages }, (_, i) => {
@@ -442,7 +446,7 @@ export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
               </>
             )}
             <Button variant="secondary" size="sm" onClick={() => goToPage(currentPage + 1)} disabled={!hasNextPage} className="text-xs sm:text-sm py-1.5 px-2">
-              التالي
+              {t('installments.next')}
             </Button>
           </div>
         )}
@@ -466,6 +470,7 @@ export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
 
 // Separate component for sale row to handle async stats
 function SaleRow({ sale, onClick }: { sale: Sale; onClick: () => void }) {
+  const { t } = useLanguage()
   const [stats, setStats] = useState<{
     totalPaid: number
     remaining: number
@@ -563,7 +568,7 @@ function SaleRow({ sale, onClick }: { sale: Sale; onClick: () => void }) {
     return (
       <tr>
         <td colSpan={10} className="py-2 sm:py-3 lg:py-4 text-center text-xs sm:text-sm text-gray-500">
-          جاري التحميل...
+          {t('installments.loading')}
         </td>
       </tr>
     )
@@ -573,17 +578,17 @@ function SaleRow({ sale, onClick }: { sale: Sale; onClick: () => void }) {
 
   const getStatusBadge = () => {
     if (stats.overdueCount > 0) {
-      return <Badge variant="danger" size="sm" className="text-xs">⚠️ متأخر</Badge>
+      return <Badge variant="danger" size="sm" className="text-xs">⚠️ {t('installments.badgeOverdue')}</Badge>
     }
     if (stats.nextDueDate) {
       const daysUntilDue = Math.ceil(
         (new Date(stats.nextDueDate).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)
       )
       if (daysUntilDue <= 7) {
-        return <Badge variant="warning" size="sm" className="text-xs">⏰ قريب الاستحقاق</Badge>
+        return <Badge variant="warning" size="sm" className="text-xs">⏰ {t('installments.badgeDueSoon')}</Badge>
       }
     }
-    return <Badge variant="success" size="sm" className="text-xs">🟢 على المسار</Badge>
+    return <Badge variant="success" size="sm" className="text-xs">🟢 {t('installments.badgeOnTrack')}</Badge>
   }
 
   const formatNextDueDate = () => {
@@ -592,9 +597,9 @@ function SaleRow({ sale, onClick }: { sale: Sale; onClick: () => void }) {
     const now = new Date()
     const daysDiff = Math.ceil((date.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
 
-    if (daysDiff < 0) return `(${Math.abs(daysDiff)} يوم)`
-    if (daysDiff === 0) return '(اليوم)'
-    return `(${daysDiff} يوم)`
+    if (daysDiff < 0) return `(${Math.abs(daysDiff)} ${t('installments.dayWord')})`
+    if (daysDiff === 0) return `(${t('installments.today')})`
+    return `(${daysDiff} ${t('installments.dayWord')})`
   }
 
   const handleTouchStart = (e: React.TouchEvent) => {
@@ -724,7 +729,7 @@ function SaleRow({ sale, onClick }: { sale: Sale; onClick: () => void }) {
                         }}
           className="text-xs py-1 px-2"
                       >
-          عرض التفاصيل
+          {t('installments.viewDetails')}
                       </Button>
       </td>
     </tr>
@@ -733,6 +738,7 @@ function SaleRow({ sale, onClick }: { sale: Sale; onClick: () => void }) {
 
 // Mobile-optimized card component
 function SaleCard({ sale, onClick }: { sale: Sale; onClick: () => void }) {
+  const { t } = useLanguage()
   const [stats, setStats] = useState<{
     totalPaid: number
     remaining: number
@@ -825,7 +831,7 @@ function SaleCard({ sale, onClick }: { sale: Sale; onClick: () => void }) {
   if (loadingStats) {
               return (
       <Card className="p-2">
-        <div className="text-center py-2 text-xs text-gray-500">جاري التحميل...</div>
+        <div className="text-center py-2 text-xs text-gray-500">{t('installments.loading')}</div>
               </Card>
             )
   }
@@ -834,17 +840,17 @@ function SaleCard({ sale, onClick }: { sale: Sale; onClick: () => void }) {
 
   const getStatusBadge = () => {
     if (stats.overdueCount > 0) {
-      return <Badge variant="danger" size="sm" className="text-xs">⚠️ متأخر</Badge>
+      return <Badge variant="danger" size="sm" className="text-xs">⚠️ {t('installments.badgeOverdue')}</Badge>
     }
     if (stats.nextDueDate) {
       const daysUntilDue = Math.ceil(
         (new Date(stats.nextDueDate).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)
       )
       if (daysUntilDue <= 7) {
-        return <Badge variant="warning" size="sm" className="text-xs">⏰ قريب</Badge>
+        return <Badge variant="warning" size="sm" className="text-xs">⏰ {t('installments.badgeDueSoonShort')}</Badge>
         }
     }
-    return <Badge variant="success" size="sm" className="text-xs">🟢 على المسار</Badge>
+    return <Badge variant="success" size="sm" className="text-xs">🟢 {t('installments.badgeOnTrack')}</Badge>
   }
 
   const formatNextDueDate = () => {
@@ -853,9 +859,9 @@ function SaleCard({ sale, onClick }: { sale: Sale; onClick: () => void }) {
     const now = new Date()
     const daysDiff = Math.ceil((date.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
     
-    if (daysDiff < 0) return `${Math.abs(daysDiff)} يوم`
-    if (daysDiff === 0) return 'اليوم'
-    return `${daysDiff} يوم`
+    if (daysDiff < 0) return `${Math.abs(daysDiff)} ${t('installments.dayWord')}`
+    if (daysDiff === 0) return t('installments.today')
+    return `${daysDiff} ${t('installments.dayWord')}`
   }
 
   const handleTouchStart = (e: React.TouchEvent) => {
@@ -938,7 +944,7 @@ function SaleCard({ sale, onClick }: { sale: Sale; onClick: () => void }) {
         <div className="flex items-start justify-between">
           <div className="flex-1 min-w-0">
             <div className="font-semibold text-xs text-gray-900 truncate">
-              {sale.client?.name || 'غير محدد'}
+              {sale.client?.name || t('shared.unknown')}
                       </div>
             <div className="text-xs text-gray-500">{sale.client?.id_number || ''}</div>
                       </div>
@@ -947,17 +953,17 @@ function SaleCard({ sale, onClick }: { sale: Sale; onClick: () => void }) {
 
         {/* Piece info */}
         <div className="flex items-center gap-2 text-xs">
-          <span className="text-gray-600">القطعة:</span>
+          <span className="text-gray-600">{t('installments.pieceLabel')}:</span>
           <span className="font-medium">{sale.piece?.piece_number || '-'}</span>
           <span className="text-gray-400">|</span>
-          <span className="text-gray-600">التاريخ:</span>
+          <span className="text-gray-600">{t('installments.dateLabel')}:</span>
           <span>{formatDateShort(sale.sale_date)}</span>
                           </div>
 
         {/* Installments progress */}
         <div className="flex items-center justify-between text-xs">
           <div className="flex items-center gap-1.5">
-            <span className="text-gray-600">الأقساط:</span>
+            <span className="text-gray-600">{t('installments.installmentsLabel')}:</span>
             <span className="font-semibold">{stats.paidCount}/{stats.totalCount}</span>
                         </div>
           {stats.nextDueDate && (
@@ -970,11 +976,11 @@ function SaleCard({ sale, onClick }: { sale: Sale; onClick: () => void }) {
         {/* Amounts */}
         <div className="grid grid-cols-2 gap-2 pt-1 border-t border-gray-100">
                 <div>
-            <div className="text-xs text-gray-500">المدفوع</div>
+            <div className="text-xs text-gray-500">{t('installments.paidLabel')}</div>
             <div className="font-semibold text-xs text-green-600">{formatPrice(stats.totalPaid)} DT</div>
                 </div>
                 <div>
-            <div className="text-xs text-gray-500">المتبقي</div>
+            <div className="text-xs text-gray-500">{t('installments.remainingLabel')}</div>
             <div className="font-semibold text-xs text-gray-700">{formatPrice(stats.remaining)} DT</div>
                 </div>
                 </div>
@@ -983,7 +989,7 @@ function SaleCard({ sale, onClick }: { sale: Sale; onClick: () => void }) {
         {stats.overdueAmount > 0 && (
           <div className="pt-1 border-t border-red-100">
             <div className="flex items-center justify-between">
-              <span className="text-xs text-red-600 font-semibold">المتأخر:</span>
+              <span className="text-xs text-red-600 font-semibold">{t('installments.overdueLabel')}:</span>
               <span className="text-xs text-red-600 font-semibold">{formatPrice(stats.overdueAmount)} DT</span>
               </div>
             </div>
@@ -1001,7 +1007,7 @@ function SaleCard({ sale, onClick }: { sale: Sale; onClick: () => void }) {
                               }}
             className="w-full text-xs py-1"
           >
-            📋 عرض التفاصيل
+            📋 {t('installments.viewDetails')}
                             </Button>
             </div>
           </div>

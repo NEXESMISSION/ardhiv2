@@ -9,6 +9,7 @@ import { Card } from '@/components/ui/card'
 import { Alert } from '@/components/ui/alert'
 import { formatPrice } from '@/utils/priceCalculator'
 import { calculateInstallmentWithDeposit } from '@/utils/installmentCalculator'
+import { useLanguage } from '@/i18n/context'
 
 interface PaymentOffer {
   id: string
@@ -63,7 +64,11 @@ interface EditSaleDialogProps {
   isOwner?: boolean
 }
 
+const replaceVars = (str: string, vars: Record<string, string | number>) =>
+  Object.entries(vars).reduce((s, [k, v]) => s.replace(new RegExp(`\\{\\{${k}\\}\\}`, 'g'), String(v)), str)
+
 export function EditSaleDialog({ open, onClose, sale, onSave, isOwner = true }: EditSaleDialogProps) {
+  const { t } = useLanguage()
   const [salePrice, setSalePrice] = useState('')
   const [depositAmount, setDepositAmount] = useState('')
   const [paymentMethod, setPaymentMethod] = useState<'full' | 'installment' | 'promise'>('full')
@@ -203,29 +208,29 @@ export function EditSaleDialog({ open, onClose, sale, onSave, isOwner = true }: 
 
   async function handleAddNewOffer() {
     if (!sale.batch_id) {
-      setAddOfferError('لا توجد دفعة مرتبطة بهذا البيع')
+      setAddOfferError(t('editSale.noBatchForSale'))
       return
     }
     const pricePerM2 = parseFloat(newOfferPricePerM2)
     if (isNaN(pricePerM2) || pricePerM2 <= 0) {
-      setAddOfferError('سعر المتر المربع يجب أن يكون رقماً أكبر من صفر')
+      setAddOfferError(t('editSale.errorPricePerM2'))
       return
     }
     const advanceVal = parseFloat(newOfferAdvanceValue)
     if (isNaN(advanceVal) || advanceVal < 0) {
-      setAddOfferError('قيمة التسبقة يجب أن تكون رقماً موجباً')
+      setAddOfferError(t('editSale.errorAdvanceValue'))
       return
     }
     if (newOfferCalcMode === 'monthlyAmount') {
       const m = parseFloat(newOfferMonthlyAmount)
       if (isNaN(m) || m <= 0) {
-        setAddOfferError('المبلغ الشهري يجب أن يكون رقماً أكبر من صفر')
+        setAddOfferError(t('editSale.errorMonthlyAmount'))
         return
       }
     } else {
       const m = parseInt(newOfferMonths, 10)
       if (isNaN(m) || m <= 0) {
-        setAddOfferError('عدد الأشهر يجب أن يكون رقماً صحيحاً أكبر من صفر')
+        setAddOfferError(t('editSale.errorMonths'))
         return
       }
     }
@@ -263,7 +268,7 @@ export function EditSaleDialog({ open, onClose, sale, onSave, isOwner = true }: 
       setPaymentOfferId(newOffer.id)
       resetAddOfferForm()
     } catch (e: any) {
-      setAddOfferError(e.message || 'فشل إضافة العرض')
+      setAddOfferError(e.message || t('editSale.addOfferFailed'))
     } finally {
       setSavingNewOffer(false)
     }
@@ -344,27 +349,27 @@ export function EditSaleDialog({ open, onClose, sale, onSave, isOwner = true }: 
     const deposit = parseFloat(depositAmount)
 
     if (isNaN(price) || price <= 0) {
-      setError('يرجى إدخال سعر صحيح')
+      setError(t('editSale.errorPrice'))
       return
     }
 
     if (isNaN(deposit) || deposit < 0) {
-      setError('يرجى إدخال مبلغ العربون صحيح')
+      setError(t('editSale.errorDeposit'))
       return
     }
 
     if (deposit > price) {
-      setError('مبلغ العربون لا يمكن أن يتجاوز السعر')
+      setError(t('editSale.errorDepositExceeds'))
       return
     }
 
     if (!deadlineDate) {
-      setError('يرجى تحديد تاريخ آخر أجل')
+      setError(t('editSale.errorDeadline'))
       return
     }
 
     if (paymentMethod === 'installment' && !paymentOfferId) {
-      setError('يرجى اختيار عرض التقسيط')
+      setError(t('editSale.errorOffer'))
       return
     }
 
@@ -373,12 +378,12 @@ export function EditSaleDialog({ open, onClose, sale, onSave, isOwner = true }: 
       const remaining = parseFloat(remainingPaymentAmount) || 0
       
       if (partial < 0 || remaining < 0) {
-        setError('المبالغ الجزئية يجب أن تكون موجبة')
+        setError(t('editSale.errorPartial'))
         return
       }
       
       if (Math.abs(partial + remaining - (price - deposit)) > 0.01) {
-        setError(`المبالغ الجزئية غير متطابقة. يجب أن يكون المجموع: ${formatPrice(price - deposit)} DT`)
+        setError(replaceVars(t('editSale.errorPartialMismatch'), { amount: formatPrice(price - deposit) }))
         return
       }
     }
@@ -412,7 +417,7 @@ export function EditSaleDialog({ open, onClose, sale, onSave, isOwner = true }: 
       // Validate UUID format
       const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
       if (!uuidRegex.test(saleId)) {
-        throw new Error('معرف البيع غير صحيح')
+        throw new Error(t('editSale.invalidSaleId'))
       }
 
       // First verify the sale exists and is pending
@@ -423,11 +428,11 @@ export function EditSaleDialog({ open, onClose, sale, onSave, isOwner = true }: 
         .single()
 
       if (checkError || !existingSale) {
-        throw new Error('البيع غير موجود')
+        throw new Error(t('editSale.saleNotFound'))
       }
 
       if (existingSale.status !== 'pending') {
-        throw new Error(`لا يمكن تحديث البيع. الحالة الحالية: ${existingSale.status}`)
+        throw new Error(replaceVars(t('editSale.errorCannotUpdateStatus'), { status: existingSale.status }))
       }
 
       // Update by ID (status already verified)
@@ -451,9 +456,7 @@ export function EditSaleDialog({ open, onClose, sale, onSave, isOwner = true }: 
 
         if (updateOnlyError) {
           console.error('Error updating sale (retry):', updateOnlyError)
-          throw new Error(
-            'لم يتم حفظ التعديلات (الصلاحيات). شغّل docs/sql/fix_sales_update_for_confirmation.sql في Supabase → SQL Editor.'
-          )
+          throw new Error(t('editSale.permissionError'))
         }
       }
 
@@ -465,23 +468,19 @@ export function EditSaleDialog({ open, onClose, sale, onSave, isOwner = true }: 
         .single()
 
       if (verifyError || !verifyRow) {
-        throw new Error(
-          'لم يتم حفظ التعديلات (الصلاحيات). شغّل docs/sql/fix_sales_update_for_confirmation.sql في Supabase → SQL Editor.'
-        )
+        throw new Error(t('editSale.permissionError'))
       }
 
       const savedPrice = Number(verifyRow.sale_price)
       if (Math.abs(savedPrice - finalPrice) > 0.01) {
-        throw new Error(
-          'لم يتم حفظ التعديلات (الصلاحيات). شغّل docs/sql/fix_sales_update_for_confirmation.sql في Supabase → SQL Editor.'
-        )
+        throw new Error(t('editSale.permissionError'))
       }
 
       onSave()
       onClose()
     } catch (e: any) {
       console.error('Error updating sale:', e)
-      setError(e.message || 'فشل تحديث البيع')
+      setError(e.message || t('editSale.updateError'))
     } finally {
       setSaving(false)
     }
@@ -522,39 +521,39 @@ export function EditSaleDialog({ open, onClose, sale, onSave, isOwner = true }: 
     <Dialog
       open={open}
       onClose={onClose}
-      title="تعديل تفاصيل البيع"
+      title={t('editSale.title')}
       size="lg"
       footer={
         <div className="flex justify-end gap-3">
           <Button variant="secondary" onClick={onClose} disabled={saving || loadingSale}>
-            إلغاء
+            {t('editSale.cancel')}
           </Button>
           <Button onClick={handleSave} disabled={saving || loadingSale}>
-            {saving ? 'جاري الحفظ...' : loadingSale ? 'جاري تحميل التفاصيل...' : '💾 حفظ التعديلات'}
+            {saving ? t('editSale.saving') : loadingSale ? t('editSale.loadingDetails') : `💾 ${t('editSale.saveChanges')}`}
           </Button>
         </div>
       }
     >
       <div className="space-y-4">
         {loadingSale && (
-          <p className="text-xs sm:text-sm text-gray-500">جاري تحميل تفاصيل البيع من السجل...</p>
+          <p className="text-xs sm:text-sm text-gray-500">{t('editSale.loadingSale')}</p>
         )}
         {error && <Alert variant="error" className="text-xs sm:text-sm">{error}</Alert>}
 
         {/* Sale Info */}
         <Card className="p-3 bg-blue-50 border-blue-200">
-          <h3 className="text-xs sm:text-sm font-semibold text-blue-900 mb-2">معلومات البيع</h3>
+          <h3 className="text-xs sm:text-sm font-semibold text-blue-900 mb-2">{t('editSale.saleInfoTitle')}</h3>
           <div className="space-y-1 text-xs sm:text-sm">
-            <p><span className="font-medium">العميل:</span> {sale.client?.name || 'غير محدد'}</p>
-            <p><span className="font-medium">القطعة:</span> {sale.batch?.name || '-'} - {sale.piece?.piece_number || '-'}</p>
-            <p><span className="font-medium">المساحة:</span> {sale.piece?.surface_m2.toLocaleString('en-US')} م²</p>
+            <p><span className="font-medium">{t('editSale.clientLabel')}:</span> {sale.client?.name || t('shared.unknown')}</p>
+            <p><span className="font-medium">{t('editSale.pieceLabel')}:</span> {sale.batch?.name || '-'} - {sale.piece?.piece_number || '-'}</p>
+            <p><span className="font-medium">{t('editSale.surfaceLabel')}:</span> {sale.piece?.surface_m2.toLocaleString('en-US')} م²</p>
           </div>
         </Card>
 
         {/* Sale Price */}
         <div className="space-y-2">
           <Label className="text-xs sm:text-sm">
-            سعر البيع (DT) * <span className="text-gray-500 text-xs">(يمكن تعديله يدوياً)</span>
+            {t('editSale.salePriceLabel')} <span className="text-gray-500 text-xs">({t('editSale.salePriceHint')})</span>
           </Label>
           <Input
             type="number"
@@ -570,7 +569,7 @@ export function EditSaleDialog({ open, onClose, sale, onSave, isOwner = true }: 
         {/* Deposit Amount */}
         <div className="space-y-2">
           <Label className="text-xs sm:text-sm">
-            مبلغ العربون (DT) * <span className="text-gray-500 text-xs">(يمكن تعديله يدوياً)</span>
+            {t('editSale.depositLabel')} <span className="text-gray-500 text-xs">({t('editSale.depositHint')})</span>
           </Label>
           <Input
             type="number"
@@ -583,36 +582,36 @@ export function EditSaleDialog({ open, onClose, sale, onSave, isOwner = true }: 
           />
           {salePrice && depositAmount && (
             <p className="text-xs text-gray-500">
-              المتبقي بعد العربون: {formatPrice((parseFloat(salePrice) || 0) - (parseFloat(depositAmount) || 0))} DT
+              {t('editSale.remainingAfterDeposit')}: {formatPrice((parseFloat(salePrice) || 0) - (parseFloat(depositAmount) || 0))} DT
             </p>
           )}
         </div>
 
         {/* Payment Method */}
         <div className="space-y-2">
-          <Label className="text-xs sm:text-sm">نوع البيع *</Label>
+          <Label className="text-xs sm:text-sm">{t('editSale.saleTypeLabel')}</Label>
           <select
             value={paymentMethod}
             onChange={(e) => setPaymentMethod(e.target.value as 'full' | 'installment' | 'promise')}
             className="w-full px-2 sm:px-3 py-1.5 sm:py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs sm:text-sm"
           >
-            <option value="full">بالحاضر</option>
-            <option value="installment">التقسيط</option>
-            <option value="promise">وعد بالبيع</option>
+            <option value="full">{t('editSale.paymentFull')}</option>
+            <option value="installment">{t('editSale.paymentInstallment')}</option>
+            <option value="promise">{t('editSale.paymentPromise')}</option>
           </select>
         </div>
 
         {/* Installment Offer Selection */}
         {paymentMethod === 'installment' && (
           <div className="space-y-2">
-            <Label className="text-xs sm:text-sm">عرض التقسيط *</Label>
+            <Label className="text-xs sm:text-sm">{t('editSale.installmentOfferLabel')}</Label>
             {loadingOffers ? (
-              <p className="text-xs sm:text-sm text-gray-500">جاري تحميل العروض...</p>
+              <p className="text-xs sm:text-sm text-gray-500">{t('editSale.loadingOffers')}</p>
             ) : paymentOffers.length === 0 && !showAddOffer ? (
               isOwner ? (
-                <Alert variant="error" className="text-xs sm:text-sm">لا توجد عروض تقسيط متاحة لهذه الدفعة. اضغط أدناه لإضافة عرض جديد.</Alert>
+                <Alert variant="error" className="text-xs sm:text-sm">{t('editSale.noOffers')}</Alert>
               ) : (
-                <Alert variant="error" className="text-xs sm:text-sm">لا توجد عروض تقسيط متاحة لهذه الدفعة.</Alert>
+                <Alert variant="error" className="text-xs sm:text-sm">{t('editSale.noOffers').split('.')[0]}.</Alert>
               )
             ) : !showAddOffer ? (
               <select
@@ -620,10 +619,10 @@ export function EditSaleDialog({ open, onClose, sale, onSave, isOwner = true }: 
                 onChange={(e) => setPaymentOfferId(e.target.value)}
                 className="w-full px-2 sm:px-3 py-1.5 sm:py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs sm:text-sm"
               >
-                <option value="">-- اختر عرض التقسيط --</option>
+                <option value="">{t('editSale.chooseOfferPlaceholder')}</option>
                 {paymentOffers.map((offer) => (
                   <option key={offer.id} value={offer.id}>
-                    {offer.name || 'عرض بدون اسم'} - {offer.price_per_m2_installment.toLocaleString()} د/م²
+                    {offer.name || t('editSale.offerNoName')} - {offer.price_per_m2_installment.toLocaleString()} د/م²
                   </option>
                 ))}
               </select>
@@ -638,27 +637,27 @@ export function EditSaleDialog({ open, onClose, sale, onSave, isOwner = true }: 
                     onClick={() => setShowAddOffer(true)}
                     className="text-xs sm:text-sm"
                   >
-                    + إضافة عرض تقسيط جديد
+                    + {t('editSale.addOffer')}
                   </Button>
                 ) : (
                   <Card className="p-3 bg-blue-50 border-blue-200 space-y-3">
-                    <h4 className="text-xs sm:text-sm font-semibold text-blue-900">إضافة عرض تقسيط جديد</h4>
+                    <h4 className="text-xs sm:text-sm font-semibold text-blue-900">{t('editSale.addOfferTitle')}</h4>
                     {addOfferError && (
                       <Alert variant="error" className="text-xs sm:text-sm">{addOfferError}</Alert>
                     )}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       <div className="space-y-1">
-                        <Label className="text-xs">اسم العرض</Label>
+                        <Label className="text-xs">{t('editSale.offerNameLabelShort')}</Label>
                         <Input
                           value={newOfferName}
                           onChange={(e) => setNewOfferName(e.target.value)}
-                          placeholder="مثال: offre 500"
+                          placeholder={t('editSale.offerNamePlaceholder')}
                           size="sm"
                           className="text-xs sm:text-sm"
                         />
                       </div>
                       <div className="space-y-1">
-                        <Label className="text-xs">سعر المتر (د/م²) *</Label>
+                        <Label className="text-xs">{t('editSale.pricePerM2Label')}</Label>
                         <Input
                           type="number"
                           min="0"
@@ -673,18 +672,18 @@ export function EditSaleDialog({ open, onClose, sale, onSave, isOwner = true }: 
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       <div className="space-y-1">
-                        <Label className="text-xs">نوع التسبقة</Label>
+                        <Label className="text-xs">{t('editSale.advanceTypeLabel')}</Label>
                         <select
                           value={newOfferAdvanceMode}
                           onChange={(e) => setNewOfferAdvanceMode(e.target.value as 'fixed' | 'percent')}
                           className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs sm:text-sm"
                         >
-                          <option value="fixed">مبلغ ثابت (دت)</option>
-                          <option value="percent">نسبة مئوية (%)</option>
+<option value="fixed">{t('editSale.advanceFixed')}</option>
+                        <option value="percent">{t('editSale.advancePercent')}</option>
                         </select>
                       </div>
                       <div className="space-y-1">
-                        <Label className="text-xs">قيمة التسبقة *</Label>
+                        <Label className="text-xs">{t('editSale.advanceValueLabel')}</Label>
                         <Input
                           type="number"
                           min="0"
@@ -698,14 +697,14 @@ export function EditSaleDialog({ open, onClose, sale, onSave, isOwner = true }: 
                       </div>
                     </div>
                     <div className="space-y-2">
-                      <Label className="text-xs">طريقة الحساب</Label>
+                      <Label className="text-xs">{t('editSale.calcMethodLabel')}</Label>
                       <select
                         value={newOfferCalcMode}
                         onChange={(e) => setNewOfferCalcMode(e.target.value as 'monthlyAmount' | 'months')}
                         className="w-full px-2 py-1.5 border border-gray-300 rounded text-xs sm:text-sm"
                       >
-                        <option value="monthlyAmount">المبلغ الشهري</option>
-                        <option value="months">عدد الأشهر</option>
+                        <option value="monthlyAmount">{t('editSale.calcMonthly')}</option>
+                        <option value="months">{t('editSale.calcMonths')}</option>
                       </select>
                       {newOfferCalcMode === 'monthlyAmount' ? (
                         <Input
@@ -738,7 +737,7 @@ export function EditSaleDialog({ open, onClose, sale, onSave, isOwner = true }: 
                         disabled={savingNewOffer}
                         className="text-xs sm:text-sm"
                       >
-                        {savingNewOffer ? 'جاري الإضافة...' : 'إضافة العرض'}
+                        {savingNewOffer ? t('editSale.addingOffer') : t('editSale.addOfferBtn')}
                       </Button>
                       <Button
                         type="button"
@@ -748,7 +747,7 @@ export function EditSaleDialog({ open, onClose, sale, onSave, isOwner = true }: 
                         disabled={savingNewOffer}
                         className="text-xs sm:text-sm"
                       >
-                        إلغاء
+                        {t('editSale.cancel')}
                       </Button>
                     </div>
                   </Card>
@@ -759,35 +758,35 @@ export function EditSaleDialog({ open, onClose, sale, onSave, isOwner = true }: 
             {/* Installment Preview */}
             {installmentPreview && sale.piece && (
               <Card className="p-3 bg-green-50 border-green-200 mt-2">
-                <h4 className="text-xs sm:text-sm font-semibold text-green-900 mb-2">معاينة الحسابات</h4>
+                <h4 className="text-xs sm:text-sm font-semibold text-green-900 mb-2">{t('editSale.previewTitle')}</h4>
                 <div className="space-y-1 text-xs sm:text-sm">
                   <div className="flex justify-between">
-                    <span>السعر الإجمالي:</span>
+                    <span>{t('editSale.totalPriceLabel')}:</span>
                     <span className="font-semibold">{formatPrice(installmentPreview.totalPrice)} DT</span>
                   </div>
                   <div className="flex justify-between">
-                    <span>التسبقة:</span>
+                    <span>{t('editSale.advanceLabel')}:</span>
                     <span className="font-semibold text-orange-600">{formatPrice(installmentPreview.advanceAmount)} DT</span>
                   </div>
                   <div className="flex justify-between">
-                    <span>العربون:</span>
+                    <span>{t('finance.deposit')}:</span>
                     <span className="font-semibold text-blue-600">{formatPrice(parseFloat(depositAmount) || 0)} DT</span>
                   </div>
                   <div className="flex justify-between">
-                    <span>المتبقي من التسبقة:</span>
+                    <span>{t('editSale.remainingAfterAdvance')}:</span>
                     <span className="font-semibold">{formatPrice(installmentPreview.advanceAfterDeposit)} DT</span>
                   </div>
                   <div className="flex justify-between">
-                    <span>المتبقي للأقساط:</span>
+                    <span>{t('editSale.remainingInstallments')}:</span>
                     <span className="font-semibold text-purple-600">{formatPrice(installmentPreview.remainingForInstallments)} DT</span>
                   </div>
                   <div className="flex justify-between">
-                    <span>المبلغ الشهري:</span>
+                    <span>{t('editSale.monthlyAmountLabel')}:</span>
                     <span className="font-semibold">{formatPrice(installmentPreview.monthlyPayment)} DT</span>
                   </div>
                   <div className="flex justify-between">
-                    <span>عدد الأشهر:</span>
-                    <span className="font-semibold">{installmentPreview.numberOfMonths} شهر</span>
+                    <span>{t('editSale.monthsCountLabel')}:</span>
+                    <span className="font-semibold">{installmentPreview.numberOfMonths} {t('editSale.monthWord')}</span>
                   </div>
                 </div>
               </Card>
@@ -799,10 +798,10 @@ export function EditSaleDialog({ open, onClose, sale, onSave, isOwner = true }: 
         {paymentMethod === 'promise' && (
           <div className="space-y-3">
             <Card className="p-3 bg-orange-50 border-orange-200">
-              <h4 className="text-xs sm:text-sm font-semibold text-orange-900 mb-2">تفاصيل وعد البيع</h4>
+              <h4 className="text-xs sm:text-sm font-semibold text-orange-900 mb-2">{t('editSale.promiseDetailsTitle')}</h4>
               <div className="space-y-2">
                 <div className="space-y-1">
-                  <Label className="text-xs sm:text-sm">المبلغ المستلم (DT)</Label>
+                  <Label className="text-xs sm:text-sm">{t('editSale.amountReceivedLabel')}</Label>
                   <Input
                     type="number"
                     min="0"
@@ -812,10 +811,10 @@ export function EditSaleDialog({ open, onClose, sale, onSave, isOwner = true }: 
                     size="sm"
                     className="text-xs sm:text-sm"
                   />
-                  <p className="text-xs text-gray-500">المبلغ الذي تم استلامه بالفعل</p>
+                  <p className="text-xs text-gray-500">{t('editSale.partialReceivedHint')}</p>
                 </div>
                 <div className="space-y-1">
-                  <Label className="text-xs sm:text-sm">المبلغ المتبقي (DT)</Label>
+                  <Label className="text-xs sm:text-sm">{t('editSale.amountRemainingLabel')}</Label>
                   <div className="flex items-center gap-2">
                     <Input
                       type="number"
@@ -832,7 +831,7 @@ export function EditSaleDialog({ open, onClose, sale, onSave, isOwner = true }: 
                     </span>
                   </div>
                   <p className="text-xs text-gray-500">
-                    يتم تحديثه تلقائياً: السعر ({formatPrice(parseFloat(salePrice) || 0)}) - العربون ({formatPrice(parseFloat(depositAmount) || 0)}) - المستلم ({formatPrice(parseFloat(partialPaymentAmount) || 0)}) = {formatPrice(parseFloat(remainingPaymentAmount) || 0)}
+                    {t('editSale.remainingAutoUpdate')}: {t('finance.price')} ({formatPrice(parseFloat(salePrice) || 0)}) - {t('finance.deposit')} ({formatPrice(parseFloat(depositAmount) || 0)}) - {t('editSale.receivedLabel')} ({formatPrice(parseFloat(partialPaymentAmount) || 0)}) = {formatPrice(parseFloat(remainingPaymentAmount) || 0)}
                   </p>
                 </div>
               </div>
@@ -842,7 +841,7 @@ export function EditSaleDialog({ open, onClose, sale, onSave, isOwner = true }: 
 
         {/* Deadline Date */}
         <div className="space-y-2">
-          <Label className="text-xs sm:text-sm">تاريخ آخر أجل لإتمام الإجراءات *</Label>
+          <Label className="text-xs sm:text-sm">{t('editSale.deadlineLabel')}</Label>
           <Input
             type="date"
             value={deadlineDate}
@@ -854,11 +853,11 @@ export function EditSaleDialog({ open, onClose, sale, onSave, isOwner = true }: 
 
         {/* Notes */}
         <div className="space-y-2">
-          <Label className="text-xs sm:text-sm">ملاحظات</Label>
+          <Label className="text-xs sm:text-sm">{t('editSale.notesLabel')}</Label>
           <Textarea
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
-            placeholder="ملاحظات إضافية..."
+            placeholder={t('editSale.notesPlaceholder')}
             rows={3}
             size="sm"
             className="text-xs sm:text-sm"

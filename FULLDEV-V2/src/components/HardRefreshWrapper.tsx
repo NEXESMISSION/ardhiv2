@@ -1,4 +1,5 @@
 import { useRef, useState, useEffect, useCallback, type ReactNode } from 'react'
+import { useLanguage } from '@/i18n/context'
 
 // Must pull down this far (after dead zone) to trigger refresh - avoids slightest touch
 const PULL_DEAD_ZONE = 25 // ignore small movements
@@ -31,6 +32,7 @@ interface HardRefreshWrapperProps {
  * No long-press. Disabled when any dialog/modal is open.
  */
 export function HardRefreshWrapper({ children, className = '' }: HardRefreshWrapperProps) {
+  const { t } = useLanguage()
   const [pullDistance, setPullDistance] = useState(0)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const touchStartRef = useRef<{ y: number; scrollTop: number } | null>(null)
@@ -123,9 +125,9 @@ export function HardRefreshWrapper({ children, className = '' }: HardRefreshWrap
           }}
         >
           {pullDistance >= PULL_THRESHOLD ? (
-            <span className="text-sm font-bold">أفلت للتحديث</span>
+            <span className="text-sm font-bold">{t('shared.releaseToRefresh')}</span>
           ) : (
-            <span className="text-sm font-medium">اسحب للأسفل للتحديث</span>
+            <span className="text-sm font-medium">{t('shared.pullToRefresh')}</span>
           )}
         </div>
       )}
@@ -134,7 +136,7 @@ export function HardRefreshWrapper({ children, className = '' }: HardRefreshWrap
         <div className="fixed inset-0 z-[100] flex items-center justify-center safe-area-padding pwa-popup-safe-top pwa-popup-safe-bottom bg-white/90">
           <div className="flex flex-col items-center gap-3">
             <div className="h-12 w-12 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
-            <p className="text-sm font-semibold text-gray-800">جاري التحديث...</p>
+            <p className="text-sm font-semibold text-gray-800">{t('shared.updating')}</p>
           </div>
         </div>
       )}

@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
+import { useLanguage } from '@/i18n/context'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -43,10 +44,12 @@ interface ClientStats {
 // MAIN COMPONENT
 // ============================================================================
 
+function replaceVars(str: string, vars: Record<string, string | number>): string {
+  return Object.entries(vars).reduce((s, [k, v]) => s.replace(new RegExp(`\\{\\{${k}\\}\\}`, 'g'), String(v)), str)
+}
+
 export function ClientsPage() {
-  // ============================================================================
-  // AUTH
-  // ============================================================================
+  const { t } = useLanguage()
   const { isOwner } = useAuth()
 
   // ============================================================================
@@ -463,7 +466,7 @@ export function ClientsPage() {
         }
       }, 300)
     } catch (e: any) {
-      setListError(e.message || 'فشل تحميل العملاء')
+      setListError(e.message || t('clients.loadError'))
       setLoading(false)
     }
   }
@@ -496,7 +499,7 @@ export function ClientsPage() {
 
       if (err) {
         console.error('Error searching clients:', err)
-        setListError('فشل البحث عن العملاء. يرجى المحاولة مرة أخرى.')
+        setListError(t('clients.searchError'))
         setClients([])
         return
       }
@@ -504,7 +507,7 @@ export function ClientsPage() {
       setClients(data || [])
       setTotalCount(data?.length || 0)
     } catch (e: any) {
-      setListError(e.message || 'فشل البحث')
+      setListError(e.message || t('clients.searchFailed'))
       setClients([])
       setTotalCount(0)
     } finally {
@@ -628,27 +631,27 @@ export function ClientsPage() {
 
   function validateForm(): boolean {
     if (!idNumber.trim()) {
-      setError('رقم الهوية إجباري')
+      setError(t('clients.errorIdRequired'))
       return false
     }
 
     if (!/^\d{8}$/.test(idNumber.trim())) {
-      setError('رقم الهوية يجب أن يكون 8 أرقام')
+      setError(t('clients.errorIdDigits'))
       return false
     }
 
     if (!name.trim()) {
-      setError('الاسم إجباري')
+      setError(t('clients.errorNameRequired'))
       return false
     }
 
     if (!phone.trim()) {
-      setError('الهاتف إجباري')
+      setError(t('clients.errorPhoneRequired'))
       return false
     }
 
     if (email && email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
-      setError('البريد الإلكتروني غير صحيح')
+      setError(t('clients.errorEmailInvalid'))
       return false
     }
 
@@ -690,7 +693,7 @@ export function ClientsPage() {
             .single()
 
           if (existingClient) {
-            throw new Error(`رقم الهوية ${clientData.id_number} مستخدم بالفعل للعميل: ${existingClient.name}`)
+            throw new Error(replaceVars(t('clients.idUsedBy'), { id: clientData.id_number, name: existingClient.name }))
           }
         }
 
@@ -702,11 +705,11 @@ export function ClientsPage() {
         if (err) {
           // Handle unique constraint violation
           if (err.code === '23505' || err.message?.includes('unique')) {
-            throw new Error(`رقم الهوية ${clientData.id_number} مستخدم بالفعل. يرجى استخدام رقم آخر.`)
+            throw new Error(replaceVars(t('clients.idUsedByOther'), { id: clientData.id_number }))
           }
           throw err
         }
-        setSuccess('تم تحديث العميل بنجاح')
+        setSuccess(t('clients.successUpdated'))
       } else {
         // Create new client - Check for duplicate id_number first
         const { data: existingClient } = await supabase
@@ -716,7 +719,7 @@ export function ClientsPage() {
           .single()
 
         if (existingClient) {
-          throw new Error(`رقم الهوية ${clientData.id_number} مستخدم بالفعل للعميل: ${existingClient.name}. يرجى استخدام رقم آخر أو تعديل العميل الموجود.`)
+          throw new Error(replaceVars(t('clients.idUsedEdit'), { id: clientData.id_number, name: existingClient.name }))
         }
 
         // Create new client
@@ -725,11 +728,11 @@ export function ClientsPage() {
         if (err) {
           // Handle unique constraint violation (double check)
           if (err.code === '23505' || err.message?.includes('unique')) {
-            throw new Error(`رقم الهوية ${clientData.id_number} مستخدم بالفعل. يرجى استخدام رقم آخر.`)
+            throw new Error(replaceVars(t('clients.idUsedByOther'), { id: clientData.id_number }))
           }
           throw err
         }
-        setSuccess('تم إضافة العميل بنجاح')
+        setSuccess(t('clients.successCreated'))
       }
 
       setTimeout(() => {
@@ -740,7 +743,7 @@ export function ClientsPage() {
         loadStats()
       }, 1500)
     } catch (e: any) {
-      setError(e.message || 'خطأ غير متوقع')
+      setError(e.message || t('clients.errorUnexpected'))
     } finally {
       setSaving(false)
     }
@@ -757,7 +760,7 @@ export function ClientsPage() {
         .eq('client_id', clientToDelete)
 
       if ((salesCount || 0) > 0) {
-        throw new Error('لا يمكن حذف العميل لوجود مبيعات مرتبطة به. قم بإلغاء/نقل المبيعات أولاً.')
+        throw new Error(t('clients.errorHasSales'))
       }
 
       // Store the client being deleted for potential rollback
@@ -804,7 +807,7 @@ export function ClientsPage() {
       }
     } catch (e: any) {
       console.error('Error deleting client:', e)
-      alert('فشل حذف العميل: ' + e.message)
+      alert(t('clients.errorDeleteFailed') + ': ' + e.message)
     } finally {
       setDeleting(false)
     }
@@ -839,15 +842,15 @@ export function ClientsPage() {
         <header className="mb-3 sm:mb-4 lg:mb-6">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div>
-              <h1 className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-900 mb-1 sm:mb-2">إدارة العملاء</h1>
-              <p className="text-xs sm:text-sm text-gray-600">إدارة عملائك ومعلوماتهم</p>
+              <h1 className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-900 mb-1 sm:mb-2">{t('clients.title')}</h1>
+              <p className="text-xs sm:text-sm text-gray-600">{t('clients.subtitle')}</p>
             </div>
             <Button
               onClick={openCreateDialog}
               size="sm"
               className="w-9 h-9 sm:w-10 sm:h-10 p-0 rounded-full bg-gray-700 hover:bg-gray-800 text-white flex-shrink-0 shadow-sm"
-              title="إضافة عميل (اختصار: +)"
-              aria-label="إضافة عميل (اضغط +)"
+              title={t('clients.addClientShort')}
+              aria-label={t('clients.addClientAria')}
             >
               +
             </Button>
@@ -860,7 +863,7 @@ export function ClientsPage() {
             <CardContent className="pt-3 sm:pt-4 lg:pt-6 p-3 sm:p-4 lg:p-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-xs sm:text-sm text-gray-600 mb-0.5 sm:mb-1">إجمالي العملاء</p>
+                  <p className="text-xs sm:text-sm text-gray-600 mb-0.5 sm:mb-1">{t('clients.totalClients')}</p>
                   <p className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-900 animate-count-up transition-all duration-300">
                     {displayedStats.total.toLocaleString()}
                   </p>
@@ -878,7 +881,7 @@ export function ClientsPage() {
             <CardContent className="pt-3 sm:pt-4 lg:pt-6 p-3 sm:p-4 lg:p-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-xs sm:text-sm text-gray-600 mb-0.5 sm:mb-1">لديهم مبيعات</p>
+                  <p className="text-xs sm:text-sm text-gray-600 mb-0.5 sm:mb-1">{t('clients.withSales')}</p>
                   <p className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-900 animate-count-up transition-all duration-300">
                     {displayedStats.withSales.toLocaleString()}
                   </p>
@@ -896,7 +899,7 @@ export function ClientsPage() {
             <CardContent className="pt-3 sm:pt-4 lg:pt-6 p-3 sm:p-4 lg:p-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-xs sm:text-sm text-gray-600 mb-0.5 sm:mb-1">أفراد</p>
+                  <p className="text-xs sm:text-sm text-gray-600 mb-0.5 sm:mb-1">{t('clients.individuals')}</p>
                   <p className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-900 animate-count-up transition-all duration-300">
                     {displayedStats.individuals.toLocaleString()}
                   </p>
@@ -914,7 +917,7 @@ export function ClientsPage() {
             <CardContent className="pt-3 sm:pt-4 lg:pt-6 p-3 sm:p-4 lg:p-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-xs sm:text-sm text-gray-600 mb-0.5 sm:mb-1">شركات</p>
+                  <p className="text-xs sm:text-sm text-gray-600 mb-0.5 sm:mb-1">{t('clients.companies')}</p>
                   <p className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-900 animate-count-up transition-all duration-300">
                     {displayedStats.companies.toLocaleString()}
                   </p>
@@ -937,7 +940,7 @@ export function ClientsPage() {
               type="text"
               value={searchQuery}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchQuery(e.target.value)}
-              placeholder="🔍 ابحث عن عميل (الاسم، رقم الهوية، الهاتف، البريد الإلكتروني)..."
+              placeholder={`🔍 ${t('clients.searchPlaceholder')}`}
               className="w-full text-xs sm:text-sm pr-10"
               size="sm"
             />
@@ -945,7 +948,7 @@ export function ClientsPage() {
               <button
                 onClick={() => setSearchQuery('')}
                 className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                title="مسح البحث"
+                title={t('clients.clearSearch')}
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -958,10 +961,13 @@ export function ClientsPage() {
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-3">
             <div className="text-xs sm:text-sm text-gray-600">
               {searchQuery ? (
-                <>عرض {clients.length} نتيجة من البحث</>
+                <>{replaceVars(t('clients.showingResults'), { count: clients.length })}</>
               ) : (
-                <>عرض {clients.length > 0 ? (currentPage - 1) * itemsPerPage + 1 : 0} -{' '}
-                {Math.min(currentPage * itemsPerPage, totalCount)} من {totalCount}</>
+                <>{replaceVars(t('clients.showingRange'), {
+                  from: clients.length > 0 ? (currentPage - 1) * itemsPerPage + 1 : 0,
+                  to: Math.min(currentPage * itemsPerPage, totalCount),
+                  total: totalCount,
+                })}</>
               )}
             </div>
           </div>
@@ -979,20 +985,20 @@ export function ClientsPage() {
           <Card className="text-center py-8 sm:py-12">
             <CardContent>
               <div className="inline-block animate-spin rounded-full h-6 w-6 sm:h-8 sm:w-8 border-b-2 border-blue-600"></div>
-              <p className="mt-2 text-xs sm:text-sm text-gray-600">جاري التحميل...</p>
+              <p className="mt-2 text-xs sm:text-sm text-gray-600">{t('clients.loading')}</p>
             </CardContent>
           </Card>
         ) : clients.length === 0 ? (
           <Card className="text-center py-8 sm:py-12">
             <CardContent>
               <p className="text-xs sm:text-sm text-gray-500 mb-3 sm:mb-4">
-                {searchQuery ? `لا توجد نتائج للبحث عن "${searchQuery}"` : 'لا يوجد عملاء حتى الآن'}
+                {searchQuery ? replaceVars(t('clients.noResultsFor'), { query: searchQuery }) : t('clients.noClients')}
               </p>
               {!searchQuery && (
-                <Button onClick={openCreateDialog} size="sm" className="text-xs sm:text-sm">إضافة عميل جديد</Button>
+                <Button onClick={openCreateDialog} size="sm" className="text-xs sm:text-sm">{t('clients.addNewClient')}</Button>
               )}
               {searchQuery && (
-                <Button onClick={() => setSearchQuery('')} size="sm" className="text-xs sm:text-sm">مسح البحث</Button>
+                <Button onClick={() => setSearchQuery('')} size="sm" className="text-xs sm:text-sm">{t('clients.clearSearch')}</Button>
               )}
             </CardContent>
           </Card>
@@ -1013,7 +1019,7 @@ export function ClientsPage() {
                         size="sm"
                         className="text-xs flex-shrink-0 ml-2"
                       >
-                        {client.type === 'individual' ? 'فردي' : 'شركة'}
+                        {client.type === 'individual' ? t('clients.typeIndividual') : t('clients.typeCompany')}
                       </Badge>
                     </div>
                   </CardHeader>
@@ -1025,13 +1031,13 @@ export function ClientsPage() {
                         onClick={() => openDetailsDialog(client.id)}
                         className="flex-1 text-xs sm:text-sm py-1.5"
                       >
-                        التفاصيل
+                        {t('clients.details')}
                       </Button>
                       <IconButton
                         variant="default"
                         size="sm"
                         onClick={() => openEditDialog(client.id)}
-                        title="تعديل"
+                        title={t('clients.edit')}
                         className="p-1.5 sm:p-2"
                       >
                         <svg className="w-3.5 h-3.5 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1048,7 +1054,7 @@ export function ClientsPage() {
                         variant="danger"
                         size="sm"
                         onClick={() => openDeleteDialog(client.id)}
-                        title="حذف"
+                        title={t('clients.delete')}
                         className="p-1.5 sm:p-2"
                       >
                         <svg className="w-3.5 h-3.5 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1077,7 +1083,7 @@ export function ClientsPage() {
                   disabled={!hasPrevPage}
                   className="text-xs sm:text-sm py-1.5 px-2"
                 >
-                  السابق
+                  {t('clients.prev')}
                 </Button>
                 
                 {/* Show all pages if 7 or less */}
@@ -1166,7 +1172,7 @@ export function ClientsPage() {
                   disabled={!hasNextPage}
                   className="text-xs sm:text-sm py-1.5 px-2"
                 >
-                  التالي
+                  {t('clients.next')}
                 </Button>
               </div>
             )}
@@ -1182,7 +1188,7 @@ export function ClientsPage() {
               resetForm()
             }
           }}
-          title={editingClientId ? 'تعديل العميل' : 'إضافة عميل جديد'}
+          title={editingClientId ? t('clients.editClient') : t('clients.addNewClientTitle')}
           size="xl"
           footer={
             <div className="flex justify-end gap-3">
@@ -1195,7 +1201,7 @@ export function ClientsPage() {
                 disabled={saving}
                 className="bg-gray-100 text-gray-800 border border-gray-300 hover:bg-gray-200"
               >
-                إلغاء
+                {t('clients.cancel')}
               </Button>
               <Button
                 onClick={handleSaveClient}
@@ -1205,10 +1211,10 @@ export function ClientsPage() {
                 {saving ? (
                   <span className="flex items-center gap-2">
                     <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                    جارٍ الحفظ...
+                    {t('clients.saving')}
                   </span>
                 ) : (
-                  '💾 حفظ'
+                  `💾 ${t('clients.save')}`
                 )}
               </Button>
             </div>
@@ -1233,7 +1239,7 @@ export function ClientsPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 sm:gap-6">
             <div className="space-y-2">
               <Label className="text-gray-800 font-medium text-sm sm:text-base">
-                رقم الهوية <span className="text-red-500">*</span>
+                {t('clients.idNumber')} <span className="text-red-500">*</span>
               </Label>
               <Input
                 value={idNumber}
@@ -1241,62 +1247,62 @@ export function ClientsPage() {
                   const v = e.target.value.replace(/\D/g, '').slice(0, 8)
                   setIdNumber(v)
                 }}
-                placeholder="رقم الهوية (8 أرقام)"
+                placeholder={t('clients.idNumberPlaceholder')}
                 maxLength={8}
                 pattern="[0-9]{8}"
                 className={`text-base min-h-[2.75rem] transition-all focus:shadow-md ${
                   idNumberCheck === 'exists' ? 'border-red-500 focus:ring-red-500' : ''
                 } ${idNumberCheck === 'available' ? 'border-green-500 focus:ring-green-500' : ''}`}
               />
-              <p className="text-xs sm:text-sm text-gray-600">يجب أن يكون 8 أرقام</p>
+              <p className="text-xs sm:text-sm text-gray-600">{t('clients.idNumberHint')}</p>
               {idNumberCheck === 'checking' && (
                 <p className="text-xs text-amber-600 flex items-center gap-1">
                   <span className="inline-block w-3 h-3 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
-                  جاري التحقق...
+                  {t('clients.checking')}
                 </p>
               )}
               {idNumberCheck === 'exists' && (
                 <p className="text-xs sm:text-sm text-red-700 font-medium">
-                  رقم الهوية مستخدم بالفعل{idNumberExistingName ? ` (العميل: ${idNumberExistingName})` : ''}. استخدم رقم هوية آخر أو عدّل بيانات العميل الموجود.
+                  {t('clients.idInUse')}{idNumberExistingName ? ` (${replaceVars(t('clients.idInUseClient'), { name: idNumberExistingName })})` : ''}. {t('clients.idInUseHint')}
                 </p>
               )}
               {idNumberCheck === 'available' && (
-                <p className="text-xs sm:text-sm text-green-600 font-medium">✓ رقم الهوية متاح — يمكنك الحفظ</p>
+                <p className="text-xs sm:text-sm text-green-600 font-medium">✓ {t('clients.idAvailable')}</p>
               )}
             </div>
 
             <div className="space-y-2">
               <Label className="text-gray-800 font-medium text-sm sm:text-base">
-                الاسم <span className="text-red-500">*</span>
+                {t('clients.name')} <span className="text-red-500">*</span>
               </Label>
               <Input
                 value={name}
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) => setName(e.target.value)}
-                placeholder="اسم العميل"
+                placeholder={t('clients.namePlaceholder')}
                 className="text-base min-h-[2.75rem] transition-all focus:shadow-md"
               />
               {nameSearchStatus === 'checking' && (
                 <p className="text-xs text-amber-600 flex items-center gap-1">
                   <span className="inline-block w-3 h-3 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
-                  جاري البحث عن أسماء مشابهة...
+                  {t('clients.searchingNames')}
                 </p>
               )}
               {nameSearchStatus === 'found' && nameSearchMatches.length > 0 && (
                 <div className="rounded-md border border-amber-200 bg-amber-50/80 p-2 text-xs">
-                  <p className="font-semibold text-amber-900 mb-1">يوجد عملاء بأسماء مشابهة:</p>
+                  <p className="font-semibold text-amber-900 mb-1">{t('clients.similarNamesTitle')}</p>
                   <ul className="space-y-1 text-amber-800">
                     {nameSearchMatches.map((c) => (
                       <li key={c.id} className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                         <span className="font-medium">{c.name}</span>
-                        <span className="text-amber-700">· رقم الهوية: {c.id_number}</span>
+                        <span className="text-amber-700">· {replaceVars(t('clients.similarId'), { id: c.id_number })}</span>
                       </li>
                     ))}
                   </ul>
-                  <p className="text-amber-700 mt-1">تحقق من عدم تكرار العميل قبل الحفظ.</p>
+                  <p className="text-amber-700 mt-1">{t('clients.similarHint')}</p>
                 </div>
               )}
               {nameSearchStatus === 'none' && name.trim().length >= 2 && (
-                <p className="text-xs sm:text-sm text-green-600 font-medium">✓ لا يوجد عميل بهذا الاسم في السجل — يمكنك إنشاء عميل جديد</p>
+                <p className="text-xs sm:text-sm text-green-600 font-medium">✓ {t('clients.nameAvailable')}</p>
               )}
             </div>
             </div>
@@ -1304,35 +1310,35 @@ export function ClientsPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 sm:gap-6">
             <div className="space-y-2">
               <Label className="text-gray-800 font-medium text-sm sm:text-base">
-                الهاتف <span className="text-red-500">*</span>
+                {t('clients.phone')} <span className="text-red-500">*</span>
               </Label>
               <Input
                 value={phone}
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPhone(e.target.value)}
-                placeholder="مثال: 5822092120192614/10/593"
+                placeholder={t('clients.phonePlaceholder')}
                 className={`text-base min-h-[2.75rem] transition-all focus:shadow-md ${
                   phoneCheck === 'exists' ? 'border-red-500 focus:ring-red-500' : ''
                 } ${phoneCheck === 'available' ? 'border-green-500 focus:ring-green-500' : ''}`}
               />
-              <p className="text-xs sm:text-sm text-gray-600">عند إدخال 4 أرقام أو أكثر نتحقق إن كان هذا الرقم مسجّلاً لعميل آخر (مثل التحقق من رقم الهوية)</p>
+              <p className="text-xs sm:text-sm text-gray-600">{t('clients.phoneHint')}</p>
               {phoneCheck === 'checking' && (
                 <p className="text-xs text-amber-600 flex items-center gap-1">
                   <span className="inline-block w-3 h-3 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
-                  جاري التحقق...
+                  {t('clients.checking')}
                 </p>
               )}
               {phoneCheck === 'exists' && (
                 <p className="text-xs sm:text-sm text-red-700 font-medium">
-                  رقم الهاتف مستخدم بالفعل{phoneExistingName ? ` (العميل: ${phoneExistingName})` : ''}. استخدم رقماً آخر أو عدّل بيانات العميل الموجود.
+                  {t('clients.phoneInUse')}{phoneExistingName ? ` (${replaceVars(t('clients.idInUseClient'), { name: phoneExistingName })})` : ''}. {t('clients.idInUseHint')}
                 </p>
               )}
               {phoneCheck === 'available' && (
-                <p className="text-xs sm:text-sm text-green-600 font-medium">✓ رقم الهاتف متاح — يمكنك الحفظ</p>
+                <p className="text-xs sm:text-sm text-green-600 font-medium">✓ {t('clients.phoneAvailable')}</p>
               )}
             </div>
 
             <div className="space-y-2">
-              <Label className="text-gray-800 font-medium text-sm sm:text-base">البريد الإلكتروني</Label>
+              <Label className="text-gray-800 font-medium text-sm sm:text-base">{t('clients.email')}</Label>
               <Input
                 type="email"
                 value={email}
@@ -1344,17 +1350,17 @@ export function ClientsPage() {
             </div>
 
             <div className="space-y-2">
-              <Label className="text-gray-800 font-medium text-sm sm:text-base">العنوان</Label>
+              <Label className="text-gray-800 font-medium text-sm sm:text-base">{t('clients.address')}</Label>
               <Input
                 value={address}
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAddress(e.target.value)}
-                placeholder="عنوان العميل"
+                placeholder={t('clients.addressPlaceholder')}
                 className="text-base min-h-[2.75rem] transition-all focus:shadow-md"
               />
             </div>
 
             <div className="space-y-2">
-              <Label className="text-gray-800 font-medium text-sm sm:text-base">النوع</Label>
+              <Label className="text-gray-800 font-medium text-sm sm:text-base">{t('clients.type')}</Label>
               <Select
                 value={type}
                 onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
@@ -1362,17 +1368,17 @@ export function ClientsPage() {
                 }
                 className="text-base min-h-[2.75rem]"
               >
-                <option value="individual">فردي</option>
-                <option value="company">شركة</option>
+                <option value="individual">{t('clients.typeIndividual')}</option>
+                <option value="company">{t('clients.typeCompany')}</option>
               </Select>
             </div>
 
             <div className="space-y-2">
-              <Label className="text-gray-800 font-medium text-sm sm:text-base">ملاحظات</Label>
+              <Label className="text-gray-800 font-medium text-sm sm:text-base">{t('clients.notes')}</Label>
               <Textarea
                 value={notes}
                 onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setNotes(e.target.value)}
-                placeholder="ملاحظات إضافية"
+                placeholder={t('clients.notesPlaceholder')}
                 rows={4}
                 className="text-base min-h-[5rem] transition-all focus:shadow-md w-full"
               />
@@ -1388,12 +1394,12 @@ export function ClientsPage() {
             setDetailsDialogOpen(false)
             setSelectedClient(null)
           }}
-          title={`تفاصيل العميل: ${selectedClient?.name || ''}`}
+          title={`${t('clients.clientDetails')}: ${selectedClient?.name || ''}`}
           size="md"
           footer={
             <div className="flex justify-end">
               <Button variant="secondary" onClick={() => setDetailsDialogOpen(false)}>
-                إغلاق
+                {t('clients.close')}
               </Button>
             </div>
           }
@@ -1402,45 +1408,45 @@ export function ClientsPage() {
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <Label className="text-xs text-gray-500">رقم الهوية</Label>
+                  <Label className="text-xs text-gray-500">{t('clients.idNumber')}</Label>
                   <p className="text-sm font-medium">{selectedClient.id_number}</p>
                 </div>
                 <div>
-                  <Label className="text-xs text-gray-500">النوع</Label>
+                  <Label className="text-xs text-gray-500">{t('clients.type')}</Label>
                   <p className="text-sm font-medium">
-                    {selectedClient.type === 'individual' ? 'فردي' : 'شركة'}
+                    {selectedClient.type === 'individual' ? t('clients.typeIndividual') : t('clients.typeCompany')}
                   </p>
                 </div>
                 <div>
-                  <Label className="text-xs text-gray-500">الهاتف</Label>
+                  <Label className="text-xs text-gray-500">{t('clients.phone')}</Label>
                   <p className="text-sm font-medium">{selectedClient.phone}</p>
                 </div>
                 {selectedClient.email && (
                   <div>
-                    <Label className="text-xs text-gray-500">البريد الإلكتروني</Label>
+                    <Label className="text-xs text-gray-500">{t('clients.email')}</Label>
                     <p className="text-sm font-medium">{selectedClient.email}</p>
                   </div>
                 )}
                 {selectedClient.address && (
                   <div className="col-span-2">
-                    <Label className="text-xs text-gray-500">العنوان</Label>
+                    <Label className="text-xs text-gray-500">{t('clients.address')}</Label>
                     <p className="text-sm font-medium">{selectedClient.address}</p>
                   </div>
                 )}
                 {selectedClient.notes && (
                   <div className="col-span-2">
-                    <Label className="text-xs text-gray-500">ملاحظات</Label>
+                    <Label className="text-xs text-gray-500">{t('clients.notes')}</Label>
                     <p className="text-sm font-medium">{selectedClient.notes}</p>
                   </div>
                 )}
                 <div>
-                  <Label className="text-xs text-gray-500">تاريخ الإضافة</Label>
+                  <Label className="text-xs text-gray-500">{t('clients.dateAdded')}</Label>
                   <p className="text-sm font-medium">
                     {new Date(selectedClient.created_at).toLocaleDateString('en-US')}
                   </p>
                 </div>
                 <div>
-                  <Label className="text-xs text-gray-500">آخر تحديث</Label>
+                  <Label className="text-xs text-gray-500">{t('clients.lastUpdated')}</Label>
                   <p className="text-sm font-medium">
                     {new Date(selectedClient.updated_at).toLocaleDateString('en-US')}
                   </p>
@@ -1460,10 +1466,10 @@ export function ClientsPage() {
             }
           }}
           onConfirm={handleDeleteClient}
-          title="حذف العميل"
-          description="هل أنت متأكد من حذف هذا العميل؟ لا يمكن التراجع عن هذا الإجراء."
-          confirmText={deleting ? 'جاري الحذف...' : 'نعم، حذف'}
-          cancelText="إلغاء"
+          title={t('clients.deleteClient')}
+          description={t('clients.deleteConfirm')}
+          confirmText={deleting ? t('clients.deleting') : t('clients.confirmDelete')}
+          cancelText={t('clients.cancel')}
           variant="destructive"
           disabled={deleting}
         />

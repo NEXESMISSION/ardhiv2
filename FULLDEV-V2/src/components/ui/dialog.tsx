@@ -1,5 +1,6 @@
 import { useEffect, type ReactNode } from 'react'
 import { IconButton } from './icon-button'
+import { useLanguage } from '@/i18n/context'
 
 interface DialogProps {
   open: boolean
@@ -26,6 +27,7 @@ export function Dialog({
   size = 'lg',
   footer,
 }: DialogProps) {
+  const { t } = useLanguage()
   useEffect(() => {
     if (open) {
       document.body.style.overflow = 'hidden'
@@ -56,7 +58,7 @@ export function Dialog({
         {/* Header */}
         <div className="flex items-center justify-between px-3 sm:px-4 lg:px-6 py-2 sm:py-3 lg:py-4 border-b border-gray-200 flex-shrink-0">
           <h2 className="text-sm sm:text-base lg:text-xl font-semibold text-gray-900 truncate flex-1 pr-2">{title}</h2>
-          <IconButton variant="ghost" size="sm" onClick={onClose} aria-label="إغلاق" className="flex-shrink-0 p-1.5 sm:p-2">
+          <IconButton variant="ghost" size="sm" onClick={onClose} aria-label={t('common.close')} className="flex-shrink-0 p-1.5 sm:p-2">
             <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path
                 strokeLinecap="round"

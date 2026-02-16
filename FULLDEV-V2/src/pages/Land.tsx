@@ -15,6 +15,7 @@ import { ClientSelectionDialog } from '@/components/ClientSelectionDialog'
 import { MultiPieceSaleDialog } from '@/components/MultiPieceSaleDialog'
 import { PaymentTerms } from '@/utils/paymentTerms'
 import { useAuth } from '@/contexts/AuthContext'
+import { useLanguage } from '@/i18n/context'
 import { notifyOwners, notifyCurrentUser } from '@/utils/notifications'
 import { formatPrice } from '@/utils/priceCalculator'
 
@@ -82,6 +83,7 @@ interface LandPiece {
 // ============================================================================
 
 export function LandPage() {
+  const { t } = useLanguage()
   const { systemUser } = useAuth()
   
   // ============================================================================
@@ -267,7 +269,7 @@ export function LandPage() {
       console.warn('Safety timeout: forcing loading state to false')
       setLoading(false)
       if (batches.length === 0) {
-        setListError('استغرق التحميل وقتاً طويلاً. يرجى المحاولة مرة أخرى أو تحديث الصفحة.')
+        setListError(t('land.loadTimeout'))
       }
     }, 16000) // 16 second absolute maximum - increased to match function timeout
     
@@ -436,7 +438,7 @@ export function LandPage() {
       if (isStillLoading && !timeoutCleared) {
         console.warn('loadBatches timeout - forcing loading to false')
         setLoading(false)
-        setListError('استغرق التحميل وقتاً طويلاً. يرجى المحاولة مرة أخرى أو تحديث الصفحة.')
+        setListError(t('land.loadTimeout'))
         // Set empty batches so UI doesn't show "no batches" when there's an error
         if (batches.length === 0) {
           setBatches([])
@@ -474,7 +476,7 @@ export function LandPage() {
       if (err) {
         console.error('Error loading batches:', err)
         setLoading(false)
-        setListError(err.message || 'فشل تحميل الدفعات')
+        setListError(err.message || t('land.loadError'))
         // Keep existing batches if any, otherwise set empty
         if (batches.length === 0) {
           setBatches([])
@@ -557,7 +559,7 @@ export function LandPage() {
       isStillLoading = false
       clearTimeout(timeoutId)
       console.error('Exception loading batches:', e)
-      setListError(e.message || 'فشل تحميل الدفعات. تحقق من الاتصال بالإنترنت.')
+      setListError(e.message || t('land.loadError'))
       setLoading(false)
       // Keep existing batches if any, otherwise set empty
       if (batches.length === 0) {
@@ -978,7 +980,7 @@ export function LandPage() {
     setSuccess(null)
 
     if (!batchName.trim()) {
-      setError('اسم الأرض إجباري')
+      setError(t('land.errorBatchNameRequired'))
       return
     }
 
@@ -987,11 +989,11 @@ export function LandPage() {
       if (editingBatchId) {
         // Update existing batch
         await updateBatch(editingBatchId)
-        setSuccess('تم تحديث الدفعة بنجاح')
+        setSuccess(t('land.successBatchUpdated'))
       } else {
         // Create new batch
         await createBatch()
-        setSuccess('تم إنشاء الدفعة بنجاح')
+        setSuccess(t('land.successBatchCreated'))
       }
 
       setTimeout(() => {
@@ -1001,7 +1003,7 @@ export function LandPage() {
         window.dispatchEvent(new CustomEvent('saleUpdated'))
       }, 1500)
     } catch (e: any) {
-      setError(e.message || 'خطأ غير متوقع')
+      setError(e.message || t('land.errorUnexpected'))
     } finally {
       setSaving(false)
     }
@@ -1229,7 +1231,7 @@ export function LandPage() {
       window.dispatchEvent(new CustomEvent('saleUpdated'))
     } catch (e: any) {
       console.error('Error deleting batch:', e)
-      setErrorMessage('فشل حذف الدفعة: ' + e.message)
+      setErrorMessage(t('land.errorDeleteBatch') + ': ' + e.message)
       setShowErrorDialog(true)
     } finally {
       setDeleting(false)
@@ -1238,17 +1240,17 @@ export function LandPage() {
 
   function addInstallmentOffer() {
     if (!newOffer.pricePerM2 || newOffer.pricePerM2 <= 0) {
-      setError('يرجى إدخال سعر المتر المربع')
+      setError(t('land.errorPriceRequired'))
       return
     }
 
     if (newOffer.calcMode === 'monthlyAmount' && (!newOffer.monthlyAmount || newOffer.monthlyAmount <= 0)) {
-      setError('يرجى إدخال المبلغ الشهري')
+      setError(t('land.errorMonthlyRequired'))
       return
     }
 
     if (newOffer.calcMode === 'months' && (!newOffer.months || newOffer.months <= 0)) {
-      setError('يرجى إدخال عدد الأشهر')
+      setError(t('land.errorMonthsRequired'))
       return
     }
 
@@ -2180,7 +2182,7 @@ export function LandPage() {
         }
       }
       
-      setErrorMessage(e.message || 'فشل إنشاء البيع. تم إلغاء جميع الحجوزات والمبيعات.')
+      setErrorMessage(e.message || t('land.errorCreateSales'))
       setShowErrorDialog(true)
       
       // Trigger refresh events (debounced in useEffect)
@@ -2202,12 +2204,12 @@ export function LandPage() {
         {/* Header */}
         <header className="mb-3 sm:mb-4 lg:mb-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 sm:gap-3">
           <div>
-            <h1 className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-900">دفعات الأراضي</h1>
-            <p className="text-xs sm:text-sm text-gray-600 mt-0.5">إدارة دفعات الأراضي والقطع والعروض</p>
+            <h1 className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-900">{t('land.title')}</h1>
+            <p className="text-xs sm:text-sm text-gray-600 mt-0.5">{t('land.subtitle')}</p>
           </div>
           {systemUser?.role === 'owner' && (
           <Button onClick={openCreateDialog} size="sm" className="w-full sm:w-auto text-xs sm:text-sm">
-            + دفعة جديدة
+            + {t('land.newBatch')}
           </Button>
           )}
         </header>
@@ -2227,7 +2229,7 @@ export function LandPage() {
                   variant="secondary"
                   className="ml-2 text-xs"
                 >
-                  إعادة المحاولة
+                  {t('land.retry')}
                 </Button>
               </div>
             </Alert>
@@ -2239,7 +2241,7 @@ export function LandPage() {
           <div className="mb-3 sm:mb-4">
             <Input
               type="text"
-              placeholder="🔍 بحث (اسم الدفعة، الموقع)..."
+              placeholder={`🔍 ${t('land.searchPlaceholder')}`}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               size="sm"
@@ -2253,27 +2255,27 @@ export function LandPage() {
           <Card className="mb-3 sm:mb-4 lg:mb-5 p-3 sm:p-4 bg-gradient-to-r from-blue-50 to-indigo-50 border-blue-200">
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
               <div className="bg-blue-50 rounded-lg p-2 border border-blue-200">
-                <div className="text-xs text-blue-700 font-medium mb-0.5">القطع</div>
+                <div className="text-xs text-blue-700 font-medium mb-0.5">{t('land.pieces')}</div>
                 <div className="text-base sm:text-lg font-bold text-blue-900 animate-count-up transition-all duration-300">
                   {displayedStats.totalPieces.toLocaleString()}
                 </div>
               </div>
               <div className="bg-green-50 rounded-lg p-2 border border-green-200">
-                <div className="text-xs text-green-700 font-medium mb-0.5">مباع</div>
+                <div className="text-xs text-green-700 font-medium mb-0.5">{t('land.sold')}</div>
                 <div className="text-base sm:text-lg font-bold text-green-900 animate-count-up transition-all duration-300">
                   {displayedStats.soldPieces.toLocaleString()}
                 </div>
               </div>
               <div className="bg-orange-50 rounded-lg p-2 border border-orange-200">
-                <div className="text-xs text-orange-700 font-medium mb-0.5">محجوز</div>
+                <div className="text-xs text-orange-700 font-medium mb-0.5">{t('land.reserved')}</div>
                 <div className="text-base sm:text-lg font-bold text-orange-900 animate-count-up transition-all duration-300">
                   {displayedStats.reservedPieces.toLocaleString()}
                 </div>
               </div>
               <div className="bg-purple-50 rounded-lg p-2 border border-purple-200">
-                <div className="text-xs text-purple-700 font-medium mb-0.5">المساحة</div>
+                <div className="text-xs text-purple-700 font-medium mb-0.5">{t('land.surface')}</div>
                 <div className="text-base sm:text-lg font-bold text-purple-900 animate-count-up transition-all duration-300">
-                  {displayedStats.totalSurface.toLocaleString()} م²
+                  {displayedStats.totalSurface.toLocaleString()} {t('land.surfaceM2')}
                 </div>
               </div>
             </div>
@@ -2284,14 +2286,14 @@ export function LandPage() {
         {loading ? (
           <div className="text-center py-8 sm:py-12">
             <div className="inline-block animate-spin rounded-full h-6 w-6 sm:h-8 sm:w-8 border-b-2 border-blue-600"></div>
-            <p className="mt-2 text-xs sm:text-sm text-gray-600">جاري التحميل...</p>
+            <p className="mt-2 text-xs sm:text-sm text-gray-600">{t('land.loading')}</p>
           </div>
         ) : batches.length === 0 && !listError ? (
           <Card className="text-center py-8 sm:py-12">
             <CardContent>
-              <p className="text-xs sm:text-sm text-gray-500 mb-3 sm:mb-4">لا توجد دفعات حتى الآن</p>
+              <p className="text-xs sm:text-sm text-gray-500 mb-3 sm:mb-4">{t('land.noBatches')}</p>
               {systemUser?.role === 'owner' && (
-              <Button onClick={openCreateDialog} size="sm" className="text-xs sm:text-sm">إنشاء دفعة جديدة</Button>
+              <Button onClick={openCreateDialog} size="sm" className="text-xs sm:text-sm">{t('land.createBatch')}</Button>
               )}
             </CardContent>
           </Card>
@@ -2340,20 +2342,20 @@ export function LandPage() {
                       <div className="flex items-center gap-3 mb-3 text-xs flex-wrap">
                         <div className="flex items-center gap-1">
                           <span className="text-blue-600 font-semibold">{batch.stats.totalPieces}</span>
-                          <span className="text-gray-500">قطع</span>
+                          <span className="text-gray-500">{t('land.pieces')}</span>
                         </div>
                         <div className="flex items-center gap-1">
                           <span className="text-green-600 font-semibold">{batch.stats.soldPieces}</span>
-                          <span className="text-gray-500">مباع</span>
+                          <span className="text-gray-500">{t('land.sold')}</span>
                         </div>
                         <div className="flex items-center gap-1">
                           <span className="text-orange-600 font-semibold">{batch.stats.reservedPieces}</span>
-                          <span className="text-gray-500">محجوز</span>
+                          <span className="text-gray-500">{t('land.reserved')}</span>
                         </div>
                         {batch.stats.totalSurface > 0 && (
                           <div className="flex items-center gap-1">
                             <span className="text-purple-600 font-semibold">{batch.stats.totalSurface.toLocaleString()}</span>
-                            <span className="text-gray-500">م²</span>
+                            <span className="text-gray-500">{t('land.surfaceM2')}</span>
                       </div>
                     )}
                       </div>
@@ -2367,7 +2369,7 @@ export function LandPage() {
                         onClick={() => openPiecesDialog(batch.id)}
                         className="flex-1 bg-white hover:bg-gray-50 !text-gray-900 border-2 border-gray-300 font-semibold text-xs sm:text-sm py-2 shadow-sm"
                     >
-                        عرض القطع
+                        {t('land.viewPieces')}
                     </Button>
                       {systemUser?.role === 'owner' && (
                         <>
@@ -2375,7 +2377,7 @@ export function LandPage() {
                             variant="ghost"
                             size="sm"
                             onClick={() => openEditDialog(batch.id)}
-                            title="تعديل"
+                            title={t('land.edit')}
                             className="p-2 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
                           >
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2386,7 +2388,7 @@ export function LandPage() {
                             variant="ghost"
                       size="sm"
                       onClick={() => openDeleteDialog(batch.id)}
-                      title="حذف"
+                      title={t('land.delete')}
                             className="p-2 text-red-600 hover:text-red-700 hover:bg-red-50"
                     >
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2414,8 +2416,8 @@ export function LandPage() {
           }}
           title={
             editingBatchId
-              ? `تعديل الدفعة: ${batches.find((b) => b.id === editingBatchId)?.name || ''}`
-              : 'دفعة أرض جديدة'
+              ? `${t('land.editBatch')}: ${batches.find((b) => b.id === editingBatchId)?.name || ''}`
+              : t('land.newBatchTitle')
           }
           size="xl"
           footer={
@@ -2428,16 +2430,16 @@ export function LandPage() {
                 }}
                 disabled={saving}
               >
-                إلغاء
+                {t('land.cancel')}
               </Button>
               <Button onClick={handleSaveBatch} disabled={saving || uploadingImage || !batchName.trim()}>
                 {saving || uploadingImage ? (
                   <span className="flex items-center gap-2">
                     <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                    {uploadingImage ? 'جاري رفع الصورة...' : 'جارٍ الحفظ...'}
+                    {uploadingImage ? t('land.uploadingImage') : t('land.saving')}
                   </span>
                 ) : (
-                  '💾 حفظ الدفعة'
+                  `💾 ${t('land.saveBatch')}`
                 )}
               </Button>
             </div>
@@ -2461,43 +2463,43 @@ export function LandPage() {
             {/* Basic Info Section */}
             <div className="space-y-2 sm:space-y-3 lg:space-y-4">
               <div className="border-b border-gray-200 pb-1.5 sm:pb-2">
-                <h3 className="text-xs sm:text-sm lg:text-base font-semibold text-gray-900">معلومات أساسية</h3>
+                <h3 className="text-xs sm:text-sm lg:text-base font-semibold text-gray-900">{t('land.basicInfo')}</h3>
               </div>
               <div className="space-y-2 sm:space-y-3 lg:space-y-4">
                 <div className="space-y-1.5 sm:space-y-2">
                   <Label className="text-xs sm:text-sm">
-                        اسم الأرض <span className="text-red-500">*</span>
+                        {t('land.batchNameLabel')} <span className="text-red-500">*</span>
                       </Label>
                       <Input
                         value={batchName}
                         onChange={(e: React.ChangeEvent<HTMLInputElement>) => setBatchName(e.target.value)}
-                        placeholder="اسم الدفعة (مثال: مطار 1)"
+                        placeholder={t('land.batchNamePlaceholder')}
                     className="transition-all focus:shadow-md text-xs sm:text-sm"
                     size="sm"
                       />
                     </div>
                 <div className="space-y-1.5 sm:space-y-2">
-                  <Label className="text-xs sm:text-sm">الموقع</Label>
+                  <Label className="text-xs sm:text-sm">{t('land.location')}</Label>
                       <Input
                         value={location}
                         onChange={(e: React.ChangeEvent<HTMLInputElement>) => setLocation(e.target.value)}
-                        placeholder="الموقع العام للأرض"
+                        placeholder={t('land.locationPlaceholder')}
                     className="transition-all focus:shadow-md text-xs sm:text-sm"
                     size="sm"
                       />
                     </div>
                 <div className="space-y-1.5 sm:space-y-2">
-                  <Label className="text-xs sm:text-sm">الرسم العقاري / العدد</Label>
+                  <Label className="text-xs sm:text-sm">{t('land.titleReference')}</Label>
                       <Input
                         value={titleReference}
                         onChange={(e: React.ChangeEvent<HTMLInputElement>) => setTitleReference(e.target.value)}
-                        placeholder="رقم الرسم العقاري أو مرجع الملكية"
+                        placeholder={t('land.titleReferencePlaceholder')}
                     className="transition-all focus:shadow-md text-xs sm:text-sm"
                     size="sm"
                       />
                     </div>
                 <div className="space-y-1.5 sm:space-y-2">
-                  <Label className="text-xs sm:text-sm">صورة الدفعة</Label>
+                  <Label className="text-xs sm:text-sm">{t('land.batchImage')}</Label>
                       <Input
                         type="file"
                         accept="image/*"
@@ -2537,7 +2539,7 @@ export function LandPage() {
                               }}
                               className="mt-2 text-xs"
                             >
-                              إزالة الصورة
+                              {t('land.removeImage')}
                             </Button>
                           )}
                         </div>
@@ -2549,12 +2551,12 @@ export function LandPage() {
             {/* Full Payment Section */}
             <div className="space-y-2 sm:space-y-3 lg:space-y-4">
               <div className="border-b border-gray-200 pb-1.5 sm:pb-2">
-                <h3 className="text-xs sm:text-sm lg:text-base font-semibold text-gray-900">الدفع بالحاضر</h3>
+                <h3 className="text-xs sm:text-sm lg:text-base font-semibold text-gray-900">{t('land.cashPayment')}</h3>
               </div>
               <div className="space-y-2 sm:space-y-3 lg:space-y-4">
                 <div className="space-y-1.5 sm:space-y-2">
                   <Label className="text-xs sm:text-sm">
-                        سعر المتر المربع (بالحاضر)
+                        {t('land.pricePerM2')}
                       </Label>
                       <Input
                         type="number"
@@ -2579,16 +2581,16 @@ export function LandPage() {
             <div className="space-y-2 sm:space-y-3 lg:space-y-4">
               <div className="border-b border-gray-200 pb-1.5 sm:pb-2 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
                 <h3 className="text-xs sm:text-sm lg:text-base font-semibold text-gray-900">
-                  عروض التقسيط ({installmentOffers.length})
+                  {t('land.installmentOffers')} ({installmentOffers.length})
                 </h3>
                 <Button size="sm" onClick={openAddOfferDialog} className="text-xs sm:text-sm w-full sm:w-auto">
-                  + إضافة عرض تقسيط جديد
+                  + {t('land.addOffer')}
                         </Button>
                       </div>
               <div className="space-y-2 sm:space-y-3 lg:space-y-4">
                 {installmentOffers.length > 0 ? (
                   <div className="space-y-1.5 sm:space-y-2">
-                    <Label className="text-xs sm:text-sm font-semibold">العروض المضافة</Label>
+                    <Label className="text-xs sm:text-sm font-semibold">{t('land.addedOffers')}</Label>
                     <div className="space-y-1.5 sm:space-y-2 max-h-48 sm:max-h-56 lg:max-h-64 overflow-y-auto scrollbar-thin">
                           {installmentOffers.map((offer) => (
                             <div
@@ -2598,14 +2600,14 @@ export function LandPage() {
                           <div className="flex-1 space-y-0.5 sm:space-y-1 min-w-0">
                             <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
                               <span className="font-medium text-xs sm:text-sm truncate">
-                                    {offer.name || 'عرض بدون اسم'}
+                                    {offer.name || t('land.offerNoName')}
                                   </span>
                               <Badge variant="info" size="sm" className="text-xs flex-shrink-0">
-                                    {offer.pricePerM2.toLocaleString()} د/م²
+                                    {offer.pricePerM2.toLocaleString()} د/{t('land.surfaceM2')}
                                   </Badge>
                                 </div>
                                 <div className="text-xs text-gray-600">
-                                  تسبقة:{' '}
+                                  {t('land.advance')}:{' '}
                                   {offer.advanceValue || 0}{' '}
                                   {offer.advanceMode === 'percent' ? '%' : 'دج'}
                                   {offer.calcMode === 'monthlyAmount'
@@ -2639,7 +2641,7 @@ export function LandPage() {
                       </div>
                 ) : (
                   <p className="text-xs sm:text-sm text-gray-500 text-center py-3 sm:py-4">
-                    لا توجد عروض مضافة. اضغط على "إضافة عرض تقسيط جديد" لإضافة عرض.
+                    {t('land.noOffersAdded')}
                   </p>
                     )}
                   </div>
@@ -2658,10 +2660,10 @@ export function LandPage() {
             }
           }}
           onConfirm={handleDeleteBatch}
-          title={`حذف الدفعة: ${selectedBatchName}`}
-          description={`هل أنت متأكد من حذف هذه الدفعة؟ سيتم حذف جميع القطع والعروض المرتبطة بها. لا يمكن التراجع عن هذا الإجراء.`}
-          confirmText={deleting ? 'جاري الحذف...' : 'نعم، حذف'}
-          cancelText="إلغاء"
+          title={`${t('land.deleteBatch')}: ${selectedBatchName}`}
+          description={t('land.deleteConfirmDesc')}
+          confirmText={deleting ? t('land.deleting') : t('land.confirmDelete')}
+          cancelText={t('land.cancel')}
           variant="destructive"
           disabled={deleting}
         >
@@ -2669,12 +2671,12 @@ export function LandPage() {
           {loadingPieces ? (
             <div className="text-center py-4">
               <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-red-600"></div>
-              <p className="mt-2 text-xs text-gray-600">جاري تحميل القطع...</p>
+              <p className="mt-2 text-xs text-gray-600">{t('land.loadingPieces')}</p>
             </div>
           ) : batchPieces.length > 0 ? (
             <div className="mt-4 pt-4 border-t border-gray-200">
               <p className="text-sm font-semibold text-gray-900 mb-2">
-                القطع المرتبطة بهذه الدفعة ({batchPieces.length}):
+                {t('land.piecesInBatch')} ({batchPieces.length}):
               </p>
               <div className="space-y-2 max-h-64 overflow-y-auto scrollbar-thin">
                 {batchPieces.map((piece, idx) => (
@@ -2687,7 +2689,7 @@ export function LandPage() {
                         <Badge variant="default" size="sm">
                           #{idx + 1}
                         </Badge>
-                        <span className="font-medium">القطعة {piece.piece_number}</span>
+                        <span className="font-medium">{t('land.piece')} {piece.piece_number}</span>
                         <Badge
                           variant={
                             piece.status === 'Available'
@@ -2701,7 +2703,7 @@ export function LandPage() {
                           {piece.status}
                         </Badge>
                       </div>
-                      <span className="text-gray-600">{piece.surface_m2.toLocaleString()} م²</span>
+                      <span className="text-gray-600">{piece.surface_m2.toLocaleString()} {t('land.surfaceM2')}</span>
                     </div>
                   </div>
                 ))}
@@ -2709,7 +2711,7 @@ export function LandPage() {
             </div>
           ) : (
             <div className="mt-4 pt-4 border-t border-gray-200">
-              <p className="text-sm text-gray-600">لا توجد قطع مرتبطة بهذه الدفعة</p>
+              <p className="text-sm text-gray-600">{t('land.noPiecesInBatch')}</p>
             </div>
           )}
         </ConfirmDialog>
@@ -2854,7 +2856,7 @@ export function LandPage() {
             setPiecesToAddSelectedIds(new Set())
             setAddPieceSearchQuery('')
           }}
-          title="إضافة قطعة للبيع"
+          title={t('land.addPieceToSale')}
           size="md"
           footer={
             <div className="flex justify-end gap-2">
@@ -2867,28 +2869,28 @@ export function LandPage() {
                   setAddPieceSearchQuery('')
                 }}
               >
-                إلغاء
+                {t('land.cancel')}
               </Button>
               <Button
                 variant="primary"
                 onClick={confirmAddPiecesToSale}
                 disabled={piecesToAddSelectedIds.size === 0}
               >
-                إضافة المحدد ({piecesToAddSelectedIds.size})
+                {t('land.addSelected')} ({piecesToAddSelectedIds.size})
               </Button>
             </div>
           }
         >
           {loadingAvailablePieces ? (
-            <p className="text-sm text-gray-600 py-4">جاري تحميل القطع المتاحة...</p>
+            <p className="text-sm text-gray-600 py-4">{t('land.loadingAvailablePieces')}</p>
           ) : availablePiecesToAdd.length === 0 ? (
-            <p className="text-sm text-gray-600 py-4">لا توجد قطع متاحة للإضافة في هذه الدفعة.</p>
+            <p className="text-sm text-gray-600 py-4">{t('land.noAvailablePieces')}</p>
           ) : (
             <>
               <div className="mb-3">
                 <Input
                   type="text"
-                  placeholder="بحث برقم القطعة أو المساحة..."
+                  placeholder={t('land.searchPieceOrArea')}
                   value={addPieceSearchQuery}
                   onChange={(e) => setAddPieceSearchQuery(e.target.value)}
                   size="sm"
@@ -2908,12 +2910,12 @@ export function LandPage() {
                     className="w-4 h-4 text-blue-600 rounded"
                   />
                   <span className="font-medium">القطعة {piece.piece_number}</span>
-                  <span className="text-sm text-gray-500">المساحة: {piece.surface_m2?.toLocaleString() ?? 0} م²</span>
+                  <span className="text-sm text-gray-500">{t('land.area')}: {piece.surface_m2?.toLocaleString() ?? 0} {t('land.surfaceM2')}</span>
                 </label>
               ))}
               </div>
               {addPieceSearchQuery.trim() && filteredPiecesToAdd.length === 0 && (
-                <p className="text-sm text-gray-500 mt-2">لا توجد نتائج للبحث.</p>
+                <p className="text-sm text-gray-500 mt-2">{t('land.noSearchResults')}</p>
               )}
             </>
           )}
@@ -2927,7 +2929,7 @@ export function LandPage() {
             setSelectedBatchId(null)
             setBatchPieces([])
           }}
-          title={`قطع الدفعة: ${selectedBatchName}`}
+          title={`${t('land.batchPiecesTitle')}: ${selectedBatchName}`}
           size="lg"
           footer={
             <div className="flex justify-end">
@@ -2939,7 +2941,7 @@ export function LandPage() {
                   setBatchPieces([])
                 }}
               >
-                إغلاق
+                {t('land.close')}
               </Button>
             </div>
           }
@@ -2947,24 +2949,24 @@ export function LandPage() {
           {loadingPieces ? (
             <div className="text-center py-6 sm:py-8">
               <div className="inline-block animate-spin rounded-full h-6 w-6 sm:h-8 sm:w-8 border-b-2 border-blue-600"></div>
-              <p className="mt-2 text-xs sm:text-sm text-gray-600">جاري التحميل...</p>
+              <p className="mt-2 text-xs sm:text-sm text-gray-600">{t('land.loading')}</p>
             </div>
           ) : batchPieces.length === 0 ? (
             <div className="text-center py-6 sm:py-8">
-              <p className="text-xs sm:text-sm text-gray-500">لا توجد قطع في هذه الدفعة</p>
+              <p className="text-xs sm:text-sm text-gray-500">{t('land.noPiecesHere')}</p>
             </div>
           ) : (
             <div className="space-y-2 sm:space-y-3">
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 mb-2 sm:mb-3 lg:mb-4">
                 <Badge variant="info" size="sm" className="text-xs sm:text-sm">
-                  إجمالي القطع: {batchPieces.length}
+                  {t('land.totalPieces')}: {batchPieces.length}
                 </Badge>
                 <Badge variant="default" size="sm" className="text-xs sm:text-sm">
-                  إجمالي المساحة:{' '}
+                  {t('land.totalSurface')}:{' '}
                   {batchPieces
                     .reduce((sum, p) => sum + (p.surface_m2 || 0), 0)
                     .toLocaleString()}{' '}
-                  م²
+                  {t('land.surfaceM2')}
                 </Badge>
               </div>
               <div className="space-y-1.5 sm:space-y-2 max-h-64 sm:max-h-80 lg:max-h-96 overflow-y-auto scrollbar-thin">
@@ -2976,7 +2978,7 @@ export function LandPage() {
                           <Badge variant="default" size="sm" className="text-xs">
                             #{idx + 1}
                           </Badge>
-                          <span className="text-xs sm:text-sm font-semibold truncate">القطعة {piece.piece_number}</span>
+                          <span className="text-xs sm:text-sm font-semibold truncate">{t('land.piece')} {piece.piece_number}</span>
                           <Badge
                             variant={
                               piece.status === 'Available'
@@ -2993,12 +2995,12 @@ export function LandPage() {
                         </div>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 sm:gap-2 text-xs sm:text-sm text-gray-600">
                           <div>
-                            <span className="font-medium">المساحة:</span>{' '}
-                            {piece.surface_m2.toLocaleString()} م²
+                            <span className="font-medium">{t('land.area')}:</span>{' '}
+                            {piece.surface_m2.toLocaleString()} {t('land.surfaceM2')}
                           </div>
                           {piece.direct_full_payment_price && (
                             <div>
-                              <span className="font-medium">السعر المباشر:</span>{' '}
+                              <span className="font-medium">{t('land.directPrice')}:</span>{' '}
                               {piece.direct_full_payment_price.toLocaleString()} دج
                             </div>
                           )}
@@ -3022,7 +3024,7 @@ export function LandPage() {
             setAddOfferDialogOpen(false)
             setError(null)
           }}
-          title="إضافة عرض تقسيط جديد"
+          title={t('land.addNewOffer')}
           size="md"
           footer={
             <div className="flex justify-end gap-3">
@@ -3033,10 +3035,10 @@ export function LandPage() {
                   setError(null)
                 }}
               >
-                إلغاء
+                {t('land.cancel')}
               </Button>
               <Button onClick={addInstallmentOffer}>
-                + إضافة العرض
+                + {t('land.addOfferButton')}
               </Button>
             </div>
           }
@@ -3049,11 +3051,11 @@ export function LandPage() {
 
           <div className="space-y-2 sm:space-y-3 lg:space-y-4">
             <div className="space-y-1.5 sm:space-y-2">
-              <Label className="text-xs sm:text-sm">اسم العرض (اختياري)</Label>
+              <Label className="text-xs sm:text-sm">{t('land.offerNameLabel')}</Label>
               <Input
                 value={newOffer.name}
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewOffer({ ...newOffer, name: e.target.value })}
-                placeholder="مثال: عرض 24 شهر"
+                placeholder={t('land.offerNamePlaceholder')}
                 size="sm"
                 className="text-xs sm:text-sm"
               />
@@ -3061,7 +3063,7 @@ export function LandPage() {
 
             <div className="space-y-1.5 sm:space-y-2">
               <Label className="text-xs sm:text-sm">
-                سعر المتر (بالتقسيط) <span className="text-red-500">*</span>
+                {t('land.pricePerM2Installment')} <span className="text-red-500">*</span>
               </Label>
               <Input
                 type="number"
@@ -3081,7 +3083,7 @@ export function LandPage() {
             </div>
 
             <div className="space-y-1.5 sm:space-y-2">
-              <Label className="text-xs sm:text-sm">التسبقة</Label>
+              <Label className="text-xs sm:text-sm">{t('land.advanceLabel')}</Label>
               <Input
                 type="number"
                 min={0}
@@ -3109,7 +3111,7 @@ export function LandPage() {
                     setNewOffer((prev) => ({ ...prev, advanceMode: 'fixed' }))
                   }
                 >
-                  مبلغ
+                  {t('land.amount')}
                 </button>
                 <button
                   type="button"
@@ -3122,13 +3124,13 @@ export function LandPage() {
                     setNewOffer((prev) => ({ ...prev, advanceMode: 'percent' }))
                   }
                 >
-                  نسبة
+                  {t('land.percent')}
                 </button>
               </div>
             </div>
 
             <div className="space-y-1.5 sm:space-y-2">
-              <Label className="text-xs sm:text-sm">طريقة الحساب</Label>
+              <Label className="text-xs sm:text-sm">{t('land.calcMethod')}</Label>
               <div className="flex gap-1.5 sm:gap-2 mb-1.5 sm:mb-2">
                 <button
                   type="button"
@@ -3141,7 +3143,7 @@ export function LandPage() {
                     setNewOffer((prev) => ({ ...prev, calcMode: 'monthlyAmount' }))
                   }
                 >
-                  مبلغ شهري
+                  {t('land.calcMonthly')}
                 </button>
                 <button
                   type="button"
@@ -3154,7 +3156,7 @@ export function LandPage() {
                     setNewOffer((prev) => ({ ...prev, calcMode: 'months' }))
                   }
                 >
-                  عدد أشهر
+                  {t('land.calcMonths')}
                 </button>
               </div>
               {newOffer.calcMode === 'monthlyAmount' ? (
@@ -3162,7 +3164,7 @@ export function LandPage() {
                   type="number"
                   min={0}
                   step="0.01"
-                  placeholder="المبلغ الشهري"
+                  placeholder={t('land.monthlyAmountPlaceholder')}
                   value={newOffer.monthlyAmount || ''}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                     setNewOffer({
@@ -3176,7 +3178,7 @@ export function LandPage() {
                   type="number"
                   min={1}
                   step={1}
-                  placeholder="عدد الأشهر"
+                  placeholder={t('land.monthsPlaceholder')}
                   value={newOffer.months || ''}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                     setNewOffer({
@@ -3198,7 +3200,7 @@ export function LandPage() {
             setSuccessMessage('')
           }}
           type="success"
-          title="نجح العملية"
+          title={t('land.successTitle')}
           message={successMessage}
         />
 
@@ -3209,7 +3211,7 @@ export function LandPage() {
             setErrorMessage('')
           }}
           type="error"
-          title="فشل العملية"
+          title={t('land.errorTitle')}
           message={errorMessage}
         />
 
@@ -3242,7 +3244,7 @@ export function LandPage() {
                       setImageZoom((prev) => Math.max(0.5, prev - 0.25))
                     }}
                     className="text-white hover:bg-white/20 p-1.5"
-                    title="تصغير"
+                    title={t('land.zoomOut')}
                   >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM13 10H7" />
@@ -3259,7 +3261,7 @@ export function LandPage() {
                       setImageZoom((prev) => Math.min(5, prev + 0.25))
                     }}
                     className="text-white hover:bg-white/20 p-1.5"
-                    title="تكبير"
+                    title={t('land.zoomIn')}
                   >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v6m3-3H7" />
@@ -3276,7 +3278,7 @@ export function LandPage() {
                     setImagePosition({ x: 0, y: 0 })
                   }}
                   className="text-white hover:bg-white/20 p-1.5"
-                  title="إعادة تعيين"
+                  title={t('land.reset')}
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -3294,7 +3296,7 @@ export function LandPage() {
                     setImagePosition({ x: 0, y: 0 })
                   }}
                   className="text-white hover:bg-white/20 p-1.5"
-                  title="إغلاق"
+                  title={t('land.close')}
                 >
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />

@@ -23,6 +23,11 @@ import { notifyOwners } from '@/utils/notifications'
 import { buildSaleQuery, formatSalesWithSellers } from '@/utils/salesQueries'
 import { prefetchContractWriters } from '@/utils/contractWritersCache'
 import { useAuth } from '@/contexts/AuthContext'
+import { useLanguage } from '@/i18n/context'
+
+function replaceVars(str: string, vars: Record<string, string | number>): string {
+  return Object.entries(vars).reduce((s, [k, v]) => s.replace(new RegExp(`\\{\\{${k}\\}\\}`, 'g'), String(v)), str)
+}
 
 interface Sale {
   id: string
@@ -80,6 +85,7 @@ interface Sale {
 
 export function ConfirmationPage() {
   const { isOwner } = useAuth()
+  const { t } = useLanguage()
   const [sales, setSales] = useState<Sale[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -117,14 +123,24 @@ export function ConfirmationPage() {
     return () => {}
   }, [])
 
+  // Load sales when page, batch filter, or search query changes. When filter is a specific batch, also run once batches are loaded.
+  const batchesReady = batchFilter === 'all' ? 1 : allBatches.length
+  const prevSearchQueryRef = useRef<string>(searchQuery)
   useEffect(() => {
     const pageToLoad = prevBatchFilterRef.current !== batchFilter ? 1 : currentPage
     if (prevBatchFilterRef.current !== batchFilter) {
       prevBatchFilterRef.current = batchFilter
       setCurrentPage(1)
     }
+    // Reset to page 1 when search query changes
+    if (prevSearchQueryRef.current !== searchQuery) {
+      prevSearchQueryRef.current = searchQuery
+      setCurrentPage(1)
+      loadPendingSales(1)
+      return
+    }
     loadPendingSales(pageToLoad)
-  }, [currentPage, batchFilter, allBatches.length])
+  }, [currentPage, batchFilter, batchesReady, searchQuery])
 
   useEffect(() => {
     const handleSaleCreated = () => {
@@ -166,9 +182,13 @@ export function ConfirmationPage() {
     if (sales.length === 0 && !loading) setLoading(true)
     setError(null)
     try {
-      const from = (page - 1) * itemsPerPage
-      const to = from + itemsPerPage - 1
       const batchId = batchFilter === 'all' ? null : allBatches.find(b => b.name === batchFilter)?.id
+      
+      // When searching, load all matching sales (no pagination limit) for client-side filtering
+      // When not searching, use pagination
+      const isSearching = searchQuery.trim().length > 0
+      const from = isSearching ? 0 : (page - 1) * itemsPerPage
+      const to = isSearching ? 999999 : from + itemsPerPage - 1
 
       let query = supabase
         .from('sales')
@@ -177,7 +197,7 @@ export function ConfirmationPage() {
         .order('sale_date', { ascending: false })
         .order('updated_at', { ascending: false })
         .range(from, to)
-        .limit(itemsPerPage)
+        .limit(isSearching ? 1000 : itemsPerPage) // Load up to 1000 when searching
       if (batchId) query = query.eq('batch_id', batchId)
 
       const { data, error: err } = await query
@@ -244,19 +264,6 @@ export function ConfirmationPage() {
         }
       }
       
-      // Debug: Log all installment sales and their payment_offer status (development only)
-      if (process.env.NODE_ENV === 'development') {
-        const installmentSales = formattedSales.filter(s => s.payment_method === 'installment')
-        if (installmentSales.length > 0) {
-          console.log('All installment sales after processing:', installmentSales.map(s => ({
-            sale_id: s.id,
-            payment_offer_id: s.payment_offer_id,
-            has_payment_offer: !!s.payment_offer,
-            payment_offer: s.payment_offer
-          })))
-        }
-      }
-
       // Group sales by client + payment_method + payment_offer_id (for installments)
       const groupedSales = new Map<string, Sale[]>()
       
@@ -275,22 +282,30 @@ export function ConfirmationPage() {
       setSales(formattedSales)
       setGroupedSales(salesGroups)
 
-      // Approximate total count from this page
-      const loaded = (data || []).length
-      if (loaded === itemsPerPage) {
-        setTotalCount((page * itemsPerPage) + 1)
+      // Count logic: when searching, count will be set by filteredGroupedSales length
+      // When not searching, use pagination count
+      if (!isSearching) {
+        // Approximate total count from this page
+        const loaded = (data || []).length
+        if (loaded === itemsPerPage) {
+          setTotalCount((page * itemsPerPage) + 1)
+        } else {
+          setTotalCount((page - 1) * itemsPerPage + loaded)
+        }
+        // Exact count in background (same filters)
+        const countQuery = batchId
+          ? supabase.from('sales').select('*', { count: 'exact', head: true }).eq('status', 'pending').eq('batch_id', batchId)
+          : supabase.from('sales').select('*', { count: 'exact', head: true }).eq('status', 'pending')
+        void Promise.resolve(countQuery).then((res: { count: number | null }) => {
+          if (res.count != null) setTotalCount(res.count)
+        }).catch(() => {})
       } else {
-        setTotalCount((page - 1) * itemsPerPage + loaded)
+        // When searching, total count will be set by filteredGroupedSales length after filtering
+        // Set a placeholder for now
+        setTotalCount(formattedSales.length)
       }
-      // Exact count in background (same filters)
-      const countQuery = batchId
-        ? supabase.from('sales').select('*', { count: 'exact', head: true }).eq('status', 'pending').eq('batch_id', batchId)
-        : supabase.from('sales').select('*', { count: 'exact', head: true }).eq('status', 'pending')
-      void Promise.resolve(countQuery).then((res: { count: number | null }) => {
-        if (res.count != null) setTotalCount(res.count)
-      }).catch(() => {})
     } catch (e: any) {
-      setError(e.message || 'فشل تحميل المبيعات المعلقة')
+      setError(e.message || t('confirmation.loadError'))
     } finally {
       setLoading(false)
     }
@@ -313,16 +328,16 @@ export function ConfirmationPage() {
     window.scrollTo(0, 0)
   }, [currentPage])
 
-  // Filter grouped sales (client-side search on current page)
+  // Filter grouped sales (client-side search - now searches across all loaded sales when searching)
   const filteredGroupedSales = useMemo(() => {
     return groupedSales.filter(salesGroup => {
       const firstSale = salesGroup[0]
       
       // Search filter
-      if (searchQuery) {
-        const query = searchQuery.toLowerCase()
+      if (searchQuery.trim()) {
+        const query = searchQuery.toLowerCase().trim()
         const matchesClient = firstSale.client?.name?.toLowerCase().includes(query) || 
-                             firstSale.client?.id_number?.includes(query) ||
+                             firstSale.client?.id_number?.toLowerCase().includes(query) ||
                              firstSale.client?.phone?.includes(query)
         const matchesPiece = salesGroup.some(s => s.piece?.piece_number?.toLowerCase().includes(query))
         const matchesBatch = firstSale.batch?.name?.toLowerCase().includes(query)
@@ -336,24 +351,33 @@ export function ConfirmationPage() {
         return false
       }
 
-              return true
+      return true
     })
   }, [groupedSales, searchQuery, batchFilter])
+  
+  // Update total count when searching to reflect filtered results
+  useEffect(() => {
+    if (searchQuery.trim()) {
+      // Count total sales in filtered groups (not groups, but individual sales)
+      const totalFilteredSales = filteredGroupedSales.reduce((sum, group) => sum + group.length, 0)
+      setTotalCount(totalFilteredSales)
+    }
+  }, [filteredGroupedSales, searchQuery])
 
   function getConfirmButtonText(sale: Sale): string {
     if (sale.payment_method === 'promise' && sale.partial_payment_amount) {
-      return 'استكمال الوعد بالبيع'
+      return t('confirmation.confirmPromisePartial')
     }
     if (sale.payment_method === 'promise' && !sale.partial_payment_amount) {
-      return 'تأكيد وعد بالبيع'
+      return t('confirmation.confirmPromise')
     }
     if (sale.payment_method === 'installment') {
-      return 'تأكيد بيع بالتقسيط'
+      return t('confirmation.confirmInstallment')
     }
     if (sale.payment_method === 'full') {
-      return 'تأكيد بيع نقدي'
+      return t('confirmation.confirmFull')
     }
-    return 'تأكيد البيع'
+    return t('confirmation.confirmSale')
   }
 
   function getConfirmButtonColor(sale: Sale): string {
@@ -380,14 +404,14 @@ export function ConfirmationPage() {
       if (error) throw error
 
       // Notify owners about sale cancellation
-      const clientName = sale.client?.name || 'عميل غير معروف'
-      const pieceNumber = sale.piece?.piece_number || 'غير معروف'
-      const batchName = sale.batch?.name || 'غير معروف'
+      const clientName = sale.client?.name || t('confirmation.clientUnknown')
+      const pieceNumber = sale.piece?.piece_number || t('confirmation.unknown')
+      const batchName = sale.batch?.name || t('confirmation.unknown')
       
       await notifyOwners(
         'sale_cancelled',
-        'تم إلغاء البيع',
-        `تم إلغاء بيع القطعة ${pieceNumber} للعميل ${clientName} من دفعة ${batchName}`,
+        t('confirmation.cancelSaleTitle'),
+        `${t('confirmation.cancelSaleTitle')} — ${t('confirmation.surface')} ${pieceNumber} — ${clientName} — ${batchName}`,
         'sale',
         sale.id,
         {
@@ -403,7 +427,7 @@ export function ConfirmationPage() {
         .update({ status: 'Available', updated_at: new Date().toISOString() })
         .eq('id', sale.land_piece_id)
 
-      setSuccessMessage('تم إلغاء البيع بنجاح')
+      setSuccessMessage(t('confirmation.cancelSuccess'))
       setShowSuccessDialog(true)
       setCancelDialogOpen(false)
       setSaleToCancel(null)
@@ -411,7 +435,7 @@ export function ConfirmationPage() {
       window.dispatchEvent(new CustomEvent('saleUpdated'))
       window.dispatchEvent(new CustomEvent('pieceStatusChanged'))
     } catch (e: any) {
-      setErrorMessage(e.message || 'فشل إلغاء البيع')
+      setErrorMessage(e.message || t('confirmation.cancelError'))
       setShowErrorDialog(true)
     } finally {
       setCancelling(false)
@@ -422,8 +446,8 @@ export function ConfirmationPage() {
     <div className="container mx-auto px-2 sm:px-4 lg:px-6 py-3 sm:py-4 lg:py-6 max-w-7xl">
       {/* Header - always visible so page opens fast */}
       <div className="mb-3 sm:mb-4 lg:mb-6">
-        <h1 className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-900 mb-1">التأكيدات</h1>
-        <p className="text-xs sm:text-sm text-gray-600">المراجعة وتأكيد المبيعات المعلقة</p>
+        <h1 className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-900 mb-1">{t('confirmation.title')}</h1>
+        <p className="text-xs sm:text-sm text-gray-600">{t('confirmation.subtitle')}</p>
       </div>
 
       {error && (
@@ -438,7 +462,7 @@ export function ConfirmationPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <Input
               type="text"
-              placeholder="🔍 بحث (عميل، قطعة، دفعة)..."
+              placeholder={`🔍 ${t('confirmation.searchPlaceholder')}`}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               size="sm"
@@ -449,18 +473,24 @@ export function ConfirmationPage() {
               onChange={(e) => setBatchFilter(e.target.value)}
               className="text-xs sm:text-sm text-gray-900 bg-white"
             >
-              <option value="all" className="text-gray-900">جميع الدفعات</option>
+              <option value="all" className="text-gray-900">{t('confirmation.allBatches')}</option>
               {batches.map(batch => (
                 <option key={batch} value={batch} className="text-gray-900">{batch}</option>
               ))}
             </Select>
           </div>
           <div className="flex items-center justify-between text-xs text-gray-600 flex-wrap gap-2">
-            {searchQuery ? (
-              <span>النتائج على هذه الصفحة: {filteredGroupedSales.length} من {groupedSales.length}</span>
+            {searchQuery.trim() ? (
+              <span>{replaceVars(t('confirmation.resultsOnPage'), { 
+                count: filteredGroupedSales.reduce((sum, group) => sum + group.length, 0), 
+                total: groupedSales.reduce((sum, group) => sum + group.length, 0) 
+              })}</span>
             ) : (
-              <span>عرض {groupedSales.length > 0 ? (currentPage - 1) * itemsPerPage + 1 : 0} -{' '}
-                {Math.min(currentPage * itemsPerPage, totalCount)} من {totalCount}</span>
+              <span>{replaceVars(t('confirmation.showingRange'), {
+                from: groupedSales.length > 0 ? (currentPage - 1) * itemsPerPage + 1 : 0,
+                to: Math.min(currentPage * itemsPerPage, totalCount),
+                total: totalCount,
+              })}</span>
             )}
             {(searchQuery || batchFilter !== 'all') && (
             <Button
@@ -472,7 +502,7 @@ export function ConfirmationPage() {
               }}
                 className="text-[10px] px-2 py-0.5"
             >
-                إعادة تعيين
+                {t('confirmation.reset')}
             </Button>
             )}
           </div>
@@ -483,13 +513,13 @@ export function ConfirmationPage() {
         <div className="flex items-center justify-center py-8 min-h-[120px]">
           <div className="text-center">
             <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600" />
-            <p className="mt-2 text-xs text-gray-500">جاري التحميل...</p>
+            <p className="mt-2 text-xs text-gray-500">{t('confirmation.loading')}</p>
           </div>
         </div>
       ) : filteredGroupedSales.length === 0 ? (
         <Card className="p-6 sm:p-8 text-center">
           <p className="text-sm sm:text-base text-gray-500">
-            {groupedSales.length === 0 ? 'لا توجد مبيعات معلقة تحتاج للتأكيد' : 'لا توجد نتائج للبحث'}
+            {groupedSales.length === 0 ? t('confirmation.noPendingSales') : t('confirmation.noSearchResults')}
           </p>
         </Card>
       ) : (
@@ -505,12 +535,12 @@ export function ConfirmationPage() {
               return diffMs > 0 ? { overdue: true, days: diffDays } : { overdue: false, days: Math.abs(diffDays) }
             }
             
-            // Format sale date and time
+            // Format sale date and time (locale-aware month names)
+            const monthKeys = ['monthJan', 'monthFeb', 'monthMar', 'monthApr', 'monthMay', 'monthJun', 'monthJul', 'monthAug', 'monthSep', 'monthOct', 'monthNov', 'monthDec'] as const
             const formatSaleDateTime = (dateStr: string) => {
               const date = new Date(dateStr)
-              const months = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر']
+              const month = t(`confirmation.${monthKeys[date.getMonth()]}`)
               const day = date.getDate()
-              const month = months[date.getMonth()]
               const year = date.getFullYear()
               const hours = date.getHours().toString().padStart(2, '0')
               const minutes = date.getMinutes().toString().padStart(2, '0')
@@ -558,7 +588,7 @@ export function ConfirmationPage() {
                       <div className="flex items-start justify-between mb-3">
                         <div className="flex-1 min-w-0">
                           <div className="text-sm font-bold mb-1 truncate">
-                            {sale.client?.name || 'غير محدد'}
+                            {sale.client?.name || t('confirmation.unknown')}
                           </div>
                           <div className="text-xs opacity-90 flex items-center gap-2 flex-wrap">
                             <span>#{sale.id.substring(0, 8)}</span>
@@ -571,23 +601,23 @@ export function ConfirmationPage() {
                       <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
                           {deadlineStatus?.overdue && (
                             <Badge className="bg-red-100 text-red-800 border border-red-200 text-xs px-2.5 py-1 font-semibold">
-                              ⚠️ تجاوز {deadlineStatus.days} يوم
+                              ⚠️ {replaceVars(t('confirmation.overdueDays'), { days: deadlineStatus.days })}
                             </Badge>
                           )}
                           <div className="flex items-center gap-1 flex-wrap justify-end">
                           {isPromise && (
                               <Badge className="bg-purple-100 text-purple-800 border border-purple-200 text-xs px-2 py-0.5 font-medium">
-                              وعد بالبيع
+                              {t('confirmation.promiseSale')}
                             </Badge>
                           )}
                           {isInstallment && (
                               <Badge className="bg-blue-100 text-blue-800 border border-blue-200 text-xs px-2 py-0.5 font-medium">
-                              تقسيط
+                              {t('confirmation.installment')}
                             </Badge>
                           )}
                           {sale.status === 'pending' && (
                               <Badge className="bg-amber-100 text-amber-800 border border-amber-200 text-xs px-2 py-0.5 font-medium">
-                              محجوز
+                              {t('confirmation.reserved')}
                             </Badge>
                           )}
                         </div>
@@ -599,12 +629,12 @@ export function ConfirmationPage() {
                         <div className="flex items-center gap-2 flex-wrap">
                           <span>📅 {formatSaleDateTime(sale.sale_date)}</span>
                           <span className="opacity-60">•</span>
-                          <span>👤 باعه {sale.seller?.name || 'غير محدد'}</span>
+                          <span>👤 {replaceVars(t('confirmation.soldBy'), { name: sale.seller?.name || t('confirmation.unknown') })}</span>
                           {sale.seller?.place && <span className="opacity-75">({sale.seller.place})</span>}
                         </div>
                         {sale.confirmedBy?.name && (
                           <div className="mt-1 text-xs opacity-80">
-                            ✓ أكده {sale.confirmedBy.name}{sale.confirmedBy.place ? ` (${sale.confirmedBy.place})` : ''}
+                            ✓ {replaceVars(t('confirmation.confirmedBy'), { name: sale.confirmedBy.name })}{sale.confirmedBy.place ? ` (${sale.confirmedBy.place})` : ''}
                           </div>
                         )}
                       </div>
@@ -624,8 +654,8 @@ export function ConfirmationPage() {
                   </div>
                 </div>
                       <div className="flex items-center gap-2 text-sm text-gray-600">
-                        <span className="font-medium">المساحة:</span>
-                        <span className="text-gray-900 font-semibold">{sale.piece?.surface_m2.toLocaleString('en-US')} م²</span>
+                        <span className="font-medium">{t('confirmation.surface')}:</span>
+                        <span className="text-gray-900 font-semibold">{sale.piece?.surface_m2.toLocaleString('en-US')} m²</span>
                   </div>
                   </div>
                       
@@ -633,32 +663,32 @@ export function ConfirmationPage() {
                     <div className="grid grid-cols-2 gap-3 mb-4">
                       {/* Price Card */}
                       <div className="bg-gradient-to-br from-red-50 to-red-100 rounded-lg p-3 border border-red-200">
-                        <div className="text-xs text-red-700 font-medium mb-1">السعر الكلي</div>
+                        <div className="text-xs text-red-700 font-medium mb-1">{t('confirmation.totalPrice')}</div>
                         <div className="text-lg font-bold text-red-700">{formatPrice(sale.sale_price)} DT</div>
                     </div>
                       
                       {/* Received Card */}
                       <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-lg p-3 border border-green-200">
-                        <div className="text-xs text-green-700 font-medium mb-1">المستلم</div>
+                        <div className="text-xs text-green-700 font-medium mb-1">{t('confirmation.received')}</div>
                         <div className="text-lg font-bold text-green-700">{formatPrice(received)} DT</div>
                 </div>
                       
                       {/* Deposit Card */}
                       <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg p-3 border border-blue-200">
-                        <div className="text-xs text-blue-700 font-medium mb-1">العربون</div>
+                        <div className="text-xs text-blue-700 font-medium mb-1">{t('confirmation.deposit')}</div>
                         <div className="text-lg font-bold text-blue-700">{formatPrice(sale.deposit_amount || 0)} DT</div>
                       </div>
                       
                       {/* Remaining Card - Highlighted */}
                       <div className="bg-gradient-to-br from-orange-50 to-orange-100 rounded-lg p-3 border-2 border-orange-300 shadow-sm">
-                        <div className="text-xs text-orange-700 font-medium mb-1">المتبقي</div>
+                        <div className="text-xs text-orange-700 font-medium mb-1">{t('confirmation.remaining')}</div>
                         <div className="text-lg font-bold text-orange-700">{formatPrice(remaining)} DT</div>
                   </div>
                     </div>
                     {/* Sale note (from sell phase) - visible on card */}
                     {sale.notes?.trim() && (
                       <div className="mb-4 rounded-lg p-3 bg-gray-50 border border-gray-200">
-                        <div className="text-xs font-semibold text-gray-600 mb-1">ملاحظات البيع (من مرحلة البيع):</div>
+                        <div className="text-xs font-semibold text-gray-600 mb-1">{t('confirmation.saleNotesLabel')}</div>
                         <p className="text-sm text-gray-800 whitespace-pre-wrap">{sale.notes.trim()}</p>
                       </div>
                     )}
@@ -686,7 +716,7 @@ export function ConfirmationPage() {
                           setSaleDetailsDialogOpen(true)
                         }}
                       >
-                        📋 تفاصيل
+                        📋 {t('confirmation.details')}
                 </Button>
                 <Button
                   variant="secondary"
@@ -697,7 +727,7 @@ export function ConfirmationPage() {
                           setCancelDialogOpen(true)
                         }}
                       >
-                        ❌ إلغاء
+                        ❌ {t('confirmation.cancel')}
                 </Button>
                 <Button
                         variant="secondary"
@@ -713,7 +743,7 @@ export function ConfirmationPage() {
                           setAppointmentDialogOpen(true)
                         }}
                       >
-                        📅 موعد
+                        📅 {t('confirmation.appointment')}
                 </Button>
                 <Button
                         variant="secondary"
@@ -724,7 +754,7 @@ export function ConfirmationPage() {
                           setEditDialogOpen(true)
                         }}
                       >
-                        ✏️ تعديل
+                        ✏️ {t('confirmation.edit')}
                 </Button>
                     </div>
               </div>
@@ -745,7 +775,7 @@ export function ConfirmationPage() {
             disabled={!hasPrevPage}
             className="text-xs sm:text-sm py-1.5 px-2"
           >
-            السابق
+            {t('confirmation.prev')}
           </Button>
           {totalPages <= 7 ? (
             Array.from({ length: totalPages }, (_, i) => {
@@ -808,7 +838,7 @@ export function ConfirmationPage() {
             disabled={!hasNextPage}
             className="text-xs sm:text-sm py-1.5 px-2"
           >
-            التالي
+            {t('confirmation.next')}
           </Button>
         </div>
       )}
@@ -858,7 +888,7 @@ export function ConfirmationPage() {
           sale={selectedSale}
           onSave={() => {
             loadPendingSales()
-            setSuccessMessage('تم تحديث تفاصيل البيع بنجاح')
+            setSuccessMessage(t('confirmation.updateSaleSuccess'))
             setShowSuccessDialog(true)
             window.dispatchEvent(new CustomEvent('saleUpdated'))
           }}
@@ -879,7 +909,7 @@ export function ConfirmationPage() {
               setAppointmentNotes('')
             }
         }}
-          title="موعد البيع (Rendez-vous de vente)"
+          title={t('confirmation.appointmentTitle')}
         size="md"
         footer={
           <div className="flex justify-end gap-3">
@@ -894,7 +924,7 @@ export function ConfirmationPage() {
               }}
                 disabled={savingAppointment}
             >
-              إلغاء
+              {t('confirmation.appointmentCancel')}
             </Button>
             <Button
                 onClick={async () => {
@@ -902,7 +932,7 @@ export function ConfirmationPage() {
 
                   // Validate client_id exists
                   if (!selectedSale.client_id) {
-                    setErrorMessage('خطأ: البيع المحدد لا يحتوي على معرف عميل. يرجى التحقق من بيانات البيع.')
+                    setErrorMessage(t('confirmation.appointmentClientError'))
                     setShowErrorDialog(true)
                     return
                   }
@@ -924,13 +954,13 @@ export function ConfirmationPage() {
                     if (appointmentError) throw appointmentError
 
                     // Notify owners about appointment creation
-                    const clientName = selectedSale.client?.name || 'عميل غير معروف'
-                    const pieceNumber = selectedSale.piece?.piece_number || 'غير معروف'
+                    const clientName = selectedSale.client?.name || t('confirmation.clientUnknown')
+                    const pieceNumber = selectedSale.piece?.piece_number || t('confirmation.unknown')
                     
                     await notifyOwners(
                       'appointment_created',
-                      'موعد جديد',
-                      `تم إنشاء موعد جديد للعميل ${clientName} للقطعة ${pieceNumber} في ${appointmentDate} الساعة ${appointmentTime}`,
+                      t('confirmation.newAppointment'),
+                      replaceVars(t('confirmation.newAppointmentMessage'), { client: clientName, piece: pieceNumber, date: appointmentDate, time: appointmentTime }),
                       'appointment',
                       null,
                       {
@@ -942,7 +972,7 @@ export function ConfirmationPage() {
                       }
                     )
 
-                    setSuccessMessage('تم حفظ الموعد بنجاح!')
+                    setSuccessMessage(t('confirmation.appointmentSuccess'))
                     setShowSuccessDialog(true)
                     setAppointmentDialogOpen(false)
                     setSelectedSale(null)
@@ -951,7 +981,7 @@ export function ConfirmationPage() {
                     setAppointmentNotes('')
                     loadPendingSales()
                   } catch (e: any) {
-                    setErrorMessage(e.message || 'فشل حفظ الموعد')
+                    setErrorMessage(e.message || t('confirmation.appointmentError'))
                     setShowErrorDialog(true)
                   } finally {
                     setSavingAppointment(false)
@@ -960,7 +990,7 @@ export function ConfirmationPage() {
                 disabled={savingAppointment || !appointmentDate || !appointmentTime} 
                 className="bg-green-600 hover:bg-green-700 active:bg-green-800 focus-visible:ring-green-500"
               >
-                {savingAppointment ? 'جاري الحفظ...' : 'حفظ الموعد'}
+                {savingAppointment ? t('confirmation.savingAppointment') : t('confirmation.saveAppointment')}
             </Button>
           </div>
         }
@@ -968,13 +998,13 @@ export function ConfirmationPage() {
         <div className="space-y-4">
           {selectedSale && (
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 space-y-1.5 text-sm">
-              <p><span className="font-medium">العميل:</span> {selectedSale.client?.name || 'غير محدد'}</p>
-              <p><span className="font-medium">رقم البيع:</span> #{selectedSale.id.substring(0, 8)}</p>
+              <p><span className="font-medium">{t('confirmation.clientLabel')}:</span> {selectedSale.client?.name || t('confirmation.unknown')}</p>
+              <p><span className="font-medium">{t('confirmation.saleNumberLabel')}:</span> #{selectedSale.id.substring(0, 8)}</p>
             </div>
           )}
           <div className="space-y-2">
             <Label className="text-xs sm:text-sm">
-              التاريخ * <span className="text-red-500">*</span>
+              {t('confirmation.dateRequired')} <span className="text-red-500">*</span>
             </Label>
             <Input
               type="date"
@@ -987,7 +1017,7 @@ export function ConfirmationPage() {
           </div>
           <div className="space-y-2">
             <Label className="text-xs sm:text-sm">
-              الوقت * <span className="text-red-500">*</span>
+              {t('confirmation.timeRequired')} <span className="text-red-500">*</span>
             </Label>
             <Input
               type="time"
@@ -998,11 +1028,11 @@ export function ConfirmationPage() {
             />
           </div>
           <div className="space-y-2">
-            <Label className="text-xs sm:text-sm">ملاحظات</Label>
+            <Label className="text-xs sm:text-sm">{t('confirmation.notes')}</Label>
             <Textarea
               value={appointmentNotes}
               onChange={(e) => setAppointmentNotes(e.target.value)}
-              placeholder="ملاحظات إضافية حول الموعد..."
+              placeholder={t('confirmation.notesPlaceholder')}
               rows={3}
               className="text-base"
             />
@@ -1019,7 +1049,7 @@ export function ConfirmationPage() {
           setSuccessMessage('')
         }}
         type="success"
-        title="نجح العملية"
+        title={t('confirmation.successTitle')}
         message={successMessage}
       />
 
@@ -1031,7 +1061,7 @@ export function ConfirmationPage() {
           setErrorMessage('')
         }}
         type="error"
-        title="فشل العملية"
+        title={t('confirmation.errorTitle')}
         message={errorMessage}
       />
 
@@ -1068,10 +1098,10 @@ export function ConfirmationPage() {
             setSaleToCancel(null)
           }}
           onConfirm={() => handleCancelSale(saleToCancel)}
-          title="إلغاء البيع"
-          description={`هل أنت متأكد من إلغاء هذا البيع؟\n\nالقطعة: ${saleToCancel.batch?.name || '-'} - ${saleToCancel.piece?.piece_number || '-'}\n\nسيتم:\n- إلغاء البيع\n- إرجاع القطعة إلى الحالة المتاحة\n- إزالة جميع الأموال المرتبطة من صفحة المالية`}
-          confirmText={cancelling ? 'جاري الإلغاء...' : 'نعم، إلغاء'}
-        cancelText="إلغاء"
+          title={t('confirmation.cancelSaleTitle')}
+          description={replaceVars(t('confirmation.cancelSaleDescription'), { batch: saleToCancel.batch?.name || '-', piece: saleToCancel.piece?.piece_number || '-' })}
+          confirmText={cancelling ? t('confirmation.cancelling') : t('confirmation.confirmCancel')}
+        cancelText={t('confirmation.cancel')}
           variant="destructive"
           disabled={cancelling}
           loading={cancelling}

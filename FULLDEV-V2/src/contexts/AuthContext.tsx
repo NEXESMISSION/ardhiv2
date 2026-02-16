@@ -16,6 +16,7 @@ interface SystemUser {
   allowed_batches: string[] | null
   allowed_pieces: string[] | null
   display_order: number | null
+  preferred_language: string | null
   created_at: string
   updated_at: string
 }
@@ -31,6 +32,9 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
+
+/** Set to true to log auth/system-user flow to console (default: quiet) */
+const DEBUG_AUTH = false
 
 // Constants for retry logic
 const MAX_RETRIES = 1 // Reduced to 1 for faster failure
@@ -107,7 +111,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           systemUserRef.current = cached
         }
         if (!loadingSystemUserRef.current) {
-          loadSystemUser(session.user.id).catch(console.error)
+          loadSystemUser(session.user.id).catch((e) => { if (DEBUG_AUTH) console.error(e) })
         }
       } else {
         setLoading(false)
@@ -125,7 +129,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } = supabase.auth.onAuthStateChange(async (event: string, session: any) => {
       if (!mounted) return
       
-      console.log('Auth state changed:', event, session?.user?.email)
+      if (DEBUG_AUTH) console.log('Auth state changed:', event, session?.user?.email)
       
       // Handle sign out
       if (event === 'SIGNED_OUT') {
@@ -151,7 +155,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // This prevents duplicate loads when INITIAL_SESSION fires after getSession
       if (event === 'INITIAL_SESSION') {
         if (initialSessionLoadedRef.current) {
-          console.log('INITIAL_SESSION: Already processed, skipping')
+          if (DEBUG_AUTH) console.log('INITIAL_SESSION: Already processed, skipping')
           return
         }
         // If we haven't processed initial session yet, treat it like SIGNED_IN
@@ -172,14 +176,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           // Skip if we already have systemUser or are already loading
           // This prevents multiple loads from multiple SIGNED_IN events
           if (systemUserRef.current) {
-            console.log(`${event}: System user already loaded, skipping`)
+            if (DEBUG_AUTH) console.log(`${event}: System user already loaded, skipping`)
             // CRITICAL: Always set loading to false if we have systemUser
             setLoading(false)
             loadingSystemUserRef.current = false
             return
           }
           if (loadingSystemUserRef.current) {
-            console.log(`${event}: Already loading system user, skipping`)
+            if (DEBUG_AUTH) console.log(`${event}: Already loading system user, skipping`)
             // Don't change loading state - let the existing load handle it
             return
           }
@@ -189,7 +193,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           loadSystemUser(session.user.id).catch((err) => {
             // Only log if it's not an expected abort
             if (!err?.aborted && !err?.message?.includes('aborted')) {
-              console.error('Error loading system user:', err)
+              if (DEBUG_AUTH) console.error('Error loading system user:', err)
             }
           })
         } else {
@@ -207,13 +211,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Completely ignore TOKEN_REFRESHED if we already have systemUser
         // This prevents unnecessary reloads that cause hanging
         if (systemUserRef.current) {
-          console.log('TOKEN_REFRESHED: System user already loaded, skipping reload')
+          if (DEBUG_AUTH) console.log('TOKEN_REFRESHED: System user already loaded, skipping reload')
           setLoading(false)
           return
         }
         // Only load if we don't have system user and not already loading
         if (!loadingSystemUserRef.current) {
-          console.log('TOKEN_REFRESHED: No system user, loading...')
+          if (DEBUG_AUTH) console.log('TOKEN_REFRESHED: No system user, loading...')
           await loadSystemUser(session.user.id)
         }
         return
@@ -288,7 +292,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function loadSystemUser(authUserId: string, retryCount = 0): Promise<any> {
     // Prevent multiple simultaneous calls using ref (synchronous check)
     if (loadingSystemUserRef.current) {
-      console.log('Already loading system user, waiting for existing call...')
+      if (DEBUG_AUTH) console.log('Already loading system user, waiting for existing call...')
       // Wait for the existing promise to complete
       if (currentLoadPromiseRef.current) {
         try {
@@ -302,7 +306,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     // Check retry limit
     if (retryCount >= MAX_RETRIES) {
-      console.error(`Max retries (${MAX_RETRIES}) reached for loading system user`)
+      if (DEBUG_AUTH) console.error(`Max retries (${MAX_RETRIES}) reached for loading system user`)
       setLoading(false)
       loadingSystemUserRef.current = false
       return { error: new Error('Max retries reached'), maxRetriesReached: true }
@@ -324,22 +328,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         loadingSystemUserRef.current = true
         setLoading(true)
-        console.log('Loading system user for auth_user_id:', authUserId, retryCount > 0 ? `(retry ${retryCount}/${MAX_RETRIES})` : '')
+        if (DEBUG_AUTH) console.log('Loading system user for auth_user_id:', authUserId, retryCount > 0 ? `(retry ${retryCount}/${MAX_RETRIES})` : '')
       
         // Query immediately - only select columns that definitely exist
         // Using minimal required columns first, then expand if needed
         // FIXED: Removed status, page_order, sidebar_order - they don't exist in the database
         // FIXED: Using auth_user_id=eq. instead of id=eq.
-        // Using only essential columns that are guaranteed to exist
-        // IMPORTANT: Always use auth_user_id for querying, never use id
+        // Use minimal column set to avoid 400 (missing columns in DB).
+        // Extras (name, allowed_pages, etc.) may be added by ALTER scripts; we handle nulls.
         const queryPromise = supabase
           .from('users')
-          .select('id, name, email, phone, place, title, notes, role, image_url, allowed_pages, allowed_batches, allowed_pieces, display_order, created_at, updated_at, auth_user_id')
+          .select('id, email, phone, place, title, notes, role, created_at, updated_at, auth_user_id')
           .eq('auth_user_id', authUserId) // CRITICAL: Use auth_user_id, not id
           .maybeSingle()
         
         // Log the query for debugging
-        console.log('Querying users table with auth_user_id:', authUserId)
+        if (DEBUG_AUTH) console.log('Querying users table with auth_user_id:', authUserId)
 
         // Add query timeout with abort tracking
         // Only set timeout if query takes longer than expected
@@ -359,19 +363,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           loadTimeoutRef.current = setTimeout(() => {
             // Only act if we're still the current request and still loading
             if (abortControllerRef.current === abortController && loadingSystemUserRef.current) {
-              console.error(`Load system user timeout after ${timeoutDuration}ms`)
+              if (DEBUG_AUTH) console.error(`Load system user timeout after ${timeoutDuration}ms`)
               abortController.abort()
               loadingSystemUserRef.current = false
               // Retry if we haven't exceeded max retries
               if (retryCount < MAX_RETRIES - 1) {
                 const delay = RETRY_DELAYS[retryCount] || 500
-                console.log(`Retrying loadSystemUser after ${delay}ms...`)
+                if (DEBUG_AUTH) console.log(`Retrying loadSystemUser after ${delay}ms...`)
                 setTimeout(() => {
-                  loadSystemUser(authUserId, retryCount + 1).catch(console.error)
+                  loadSystemUser(authUserId, retryCount + 1).catch((e) => { if (DEBUG_AUTH) console.error(e) })
                 }, delay)
               } else {
                 setLoading(false)
-                console.error('Max retries reached, giving up')
+                if (DEBUG_AUTH) console.error('Max retries reached, giving up')
               }
             }
             loadTimeoutRef.current = null
@@ -417,12 +421,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         
         // If query was aborted but completed, we still got the result
         if (abortController.signal.aborted && queryCompletedRef.value) {
-          console.log('Query completed but was marked as aborted - using result anyway')
+          if (DEBUG_AUTH) console.log('Query completed but was marked as aborted - using result anyway')
         }
         
         const { data, error } = result as any
         const queryTime = Date.now() - startTime
-        console.log(`Query completed in ${queryTime}ms`)
+        if (DEBUG_AUTH) console.log(`Query completed in ${queryTime}ms`)
 
         // Clear the fallback timeout (in case it wasn't cleared above)
         if (loadTimeoutRef.current) {
@@ -440,19 +444,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         loadingSystemUserRef.current = false
 
       if (error) {
-        console.error('Error loading system user:', error)
-        console.error('Auth User ID:', authUserId)
-        console.error('Error details:', {
-          code: error.code,
-          message: error.message,
-          status: error.status,
-          hint: error.hint
-        })
-          
-          // Handle 400 Bad Request (usually means column doesn't exist or query syntax error)
-          if (error.status === 400) {
-            console.error('Bad Request - likely column doesn\'t exist or query syntax error')
-            console.error('Attempting fallback query with minimal columns...')
+        if (DEBUG_AUTH) {
+          console.error('Error loading system user:', error)
+          console.error('Auth User ID:', authUserId)
+          console.error('Error details:', { code: error.code, message: error.message, status: error.status, hint: error.hint })
+        }
+
+          // Handle missing column (42703) or 400 Bad Request — run fallback before network-error check
+          const isMissingColumnOrBadRequest = error.code === '42703' || error.status === 400
+          if (isMissingColumnOrBadRequest) {
+            if (DEBUG_AUTH) {
+              console.error('Bad Request - likely column doesn\'t exist or query syntax error')
+              console.error('Attempting fallback query with minimal columns...')
+            }
             
             // Try a minimal query with only essential columns
             try {
@@ -465,7 +469,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               const fallbackResult = await fallbackQuery
               
               if (fallbackResult.error) {
-                console.error('Fallback query also failed:', fallbackResult.error)
+                if (DEBUG_AUTH) console.error('Fallback query also failed:', fallbackResult.error)
                 // If fallback also fails, treat as user not found
                 clearCachedSystemUser()
                 setSystemUser(null)
@@ -491,10 +495,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                   allowed_batches: null,
                   allowed_pieces: null,
                   display_order: null,
+                  preferred_language: null,
                   created_at: new Date().toISOString(),
                   updated_at: new Date().toISOString(),
                 }
-                console.log('Fallback query succeeded with minimal data')
+                if (DEBUG_AUTH) console.log('Fallback query succeeded with minimal data')
                 setSystemUser(minimalUser)
                 systemUserRef.current = minimalUser
                 setCachedSystemUser(authUserId, minimalUser)
@@ -503,7 +508,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 return { success: true, usedFallback: true }
               }
             } catch (fallbackError: any) {
-              console.error('Fallback query exception:', fallbackError)
+              if (DEBUG_AUTH) console.error('Fallback query exception:', fallbackError)
             }
             
             // If fallback also failed, continue with normal error handling
@@ -517,18 +522,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           
           // Check if it's a network error
           if (isNetworkError(error)) {
-            console.error('Network error detected')
-            // Retry with exponential backoff if we haven't exceeded max retries
+            if (DEBUG_AUTH) console.error('Network error detected')
             if (retryCount < MAX_RETRIES - 1) {
               const delay = RETRY_DELAYS[retryCount] || 3000
-              console.log(`Retrying after network error in ${delay}ms...`)
+              if (DEBUG_AUTH) console.log(`Retrying after network error in ${delay}ms...`)
               loadingSystemUserRef.current = false
               setTimeout(() => {
-                loadSystemUser(authUserId, retryCount + 1).catch(console.error)
+                loadSystemUser(authUserId, retryCount + 1).catch((e) => { if (DEBUG_AUTH) console.error(e) })
               }, delay)
               return { error, willRetry: true }
             } else {
-              console.error('Max retries reached after network errors')
+              if (DEBUG_AUTH) console.error('Max retries reached after network errors')
               clearCachedSystemUser()
               setSystemUser(null)
               systemUserRef.current = null
@@ -542,18 +546,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             }
           }
         
-        // 406 error usually means RLS policy blocked
-        if (error.status === 406) {
-          console.error('RLS policy blocked the query. Check:')
-          console.error('1. Did you run fix_rls_recursion.sql?')
-          console.error('2. Does the user exist in users table?')
-          console.error('3. Does auth_user_id match?')
+        if (error.status === 406 && DEBUG_AUTH) {
+          console.error('RLS policy blocked the query. Check: fix_rls_recursion.sql, user in users table, auth_user_id match.')
         }
-        
-        // 404 error - table or RPC function doesn't exist
-        if (error.status === 404) {
+        if (error.status === 404 && DEBUG_AUTH) {
           console.error('404 Not Found - table or RPC function may not exist')
-          console.error('This might be a deployment issue - check database schema')
         }
         
         clearCachedSystemUser()
@@ -574,17 +571,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       if (!data) {
-        console.warn('No system user data returned - user not in system users table')
-        console.warn('Auth User ID searched:', authUserId)
-        console.warn('')
-        console.warn('The user exists in users table but auth_user_id does not match!')
-        console.warn('')
-        console.warn('To fix, run this SQL in Supabase SQL Editor:')
-        console.warn('UPDATE users')
-        console.warn('SET auth_user_id = \'' + authUserId + '\'::uuid, updated_at = NOW()')
-        console.warn('WHERE email = \'test@gmail.com\';')
-        console.warn('')
-        console.warn('Or see: docs/sql/fix_auth_user_id.sql')
+        if (DEBUG_AUTH) {
+          console.warn('No system user data returned. Auth User ID:', authUserId, '- See docs/sql/fix_auth_user_id.sql')
+        }
         clearCachedSystemUser()
         setSystemUser(null)
         systemUserRef.current = null
@@ -602,22 +591,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return { userNotFound: true, authUserIdMismatch: true }
       }
 
-        console.log('System user loaded successfully:', data.email, data.role)
-        // Ensure all fields are properly set, even if null
+        if (DEBUG_AUTH) console.log('System user loaded successfully:', data.email, data.role)
+        // Ensure all fields are set (main query uses minimal columns; missing ones are null)
         const formattedUser: SystemUser = {
           id: data.id,
           email: data.email,
-          name: data.name || null,
-          phone: data.phone || null,
-          place: data.place || null,
-          title: data.title || null,
-          notes: data.notes || null,
+          name: data.name ?? null,
+          phone: data.phone ?? null,
+          place: data.place ?? null,
+          title: data.title ?? null,
+          notes: data.notes ?? null,
           role: data.role,
-          image_url: data.image_url || null,
-          allowed_pages: data.allowed_pages || null,
-          allowed_batches: data.allowed_batches || null,
-          allowed_pieces: data.allowed_pieces || null,
-          display_order: data.display_order || null,
+          image_url: data.image_url ?? null,
+          allowed_pages: data.allowed_pages ?? null,
+          allowed_batches: data.allowed_batches ?? null,
+          allowed_pieces: data.allowed_pieces ?? null,
+          display_order: data.display_order ?? null,
+          preferred_language: data.preferred_language ?? null,
           created_at: data.created_at,
           updated_at: data.updated_at,
         }
@@ -639,7 +629,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (abortControllerRef.current === abortController) {
           abortControllerRef.current = null
         }
-        console.log('Loading set to false, systemUser set to:', data)
+        if (DEBUG_AUTH) console.log('Loading set to false, systemUser set to:', data)
         return { success: true }
       } catch (error: any) {
         // Clear timeout on error
@@ -665,18 +655,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
         
         // Only log real errors (not aborts)
-        console.error('Error loading system user:', error)
+        if (DEBUG_AUTH) console.error('Error loading system user:', error)
         
         // Check if it's a network error
         if (isNetworkError(error)) {
-          console.error('Network error in catch block')
+          if (DEBUG_AUTH) console.error('Network error in catch block')
           // Retry with exponential backoff if we haven't exceeded max retries
           if (retryCount < MAX_RETRIES - 1) {
             const delay = RETRY_DELAYS[retryCount] || 3000
-            console.log(`Retrying after network error in ${delay}ms...`)
+            if (DEBUG_AUTH) console.log(`Retrying after network error in ${delay}ms...`)
             loadingSystemUserRef.current = false
             setTimeout(() => {
-              loadSystemUser(authUserId, retryCount + 1).catch(console.error)
+              loadSystemUser(authUserId, retryCount + 1).catch((e) => { if (DEBUG_AUTH) console.error(e) })
             }, delay)
             return { error, willRetry: true }
           }
@@ -701,9 +691,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const isTimeoutError = error?.message?.includes('timeout')
         if (retryCount < MAX_RETRIES - 1 && !isTimeoutError && !abortController.signal.aborted) {
           const delay = RETRY_DELAYS[retryCount] || 1000
-          console.log(`Retrying loadSystemUser after error in ${delay}ms...`)
+          if (DEBUG_AUTH) console.log(`Retrying loadSystemUser after error in ${delay}ms...`)
           setTimeout(() => {
-            loadSystemUser(authUserId, retryCount + 1).catch(console.error)
+            loadSystemUser(authUserId, retryCount + 1).catch((e) => { if (DEBUG_AUTH) console.error(e) })
           }, delay)
           return { error, willRetry: true }
         }
@@ -741,7 +731,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         normalizedEmail = normalizedEmail + '@gmail.com'
       }
 
-      console.log('Attempting to sign in with email:', normalizedEmail)
+      if (DEBUG_AUTH) console.log('Attempting to sign in with email:', normalizedEmail)
 
       const { data, error } = await supabase.auth.signInWithPassword({
         email: normalizedEmail,
@@ -761,11 +751,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (result?.userNotFound) {
           // Check if it's a database schema error (400 Bad Request)
           if (result?.error?.status === 400) {
-            console.error('=== DATABASE SCHEMA ERROR ===')
-            console.error('The database schema may be out of sync with the application')
-            console.error('Error:', result.error.message)
-            console.error('This usually means a column is missing or the query syntax is wrong')
-            
+            if (DEBUG_AUTH) console.error('DATABASE SCHEMA ERROR:', result.error?.message)
             await supabase.auth.signOut()
             setLoading(false)
             return { 
@@ -779,18 +765,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           
           // User authenticated but not in system users table OR auth_user_id mismatch
           if (result?.authUserIdMismatch) {
-            // User exists but auth_user_id doesn't match
-            console.error('=== AUTH_USER_ID MISMATCH ===')
-            console.error('Auth User ID:', data.user.id)
-            console.error('Email:', data.user.email)
-            console.error('')
-            console.error('The user exists in users table but auth_user_id is wrong!')
-            console.error('')
-            console.error('SQL to fix (run in Supabase SQL Editor):')
-            console.error(`UPDATE users`)
-            console.error(`SET auth_user_id = '${data.user.id}'::uuid, updated_at = NOW()`)
-            console.error(`WHERE email = '${data.user.email}';`)
-            
+            if (DEBUG_AUTH) console.error('AUTH_USER_ID MISMATCH:', data.user.email, '- See docs/sql/fix_auth_user_id.sql')
             await supabase.auth.signOut()
             setLoading(false)
             return { 
@@ -801,17 +776,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               } 
             }
           } else {
-            // User doesn't exist at all
-            console.error('=== USER NOT FOUND IN SYSTEM ===')
-            console.error('Auth User ID:', data.user.id)
-            console.error('Email:', data.user.email)
-            console.error('')
-            console.error('SQL to fix (run in Supabase SQL Editor):')
-            console.error(`INSERT INTO users (email, role, auth_user_id)`)
-            console.error(`VALUES ('${data.user.email}', 'owner', '${data.user.id}'::uuid)`)
-            console.error(`ON CONFLICT (auth_user_id) DO UPDATE`)
-            console.error(`SET email = EXCLUDED.email, role = EXCLUDED.role;`)
-            
+            if (DEBUG_AUTH) console.error('USER NOT FOUND IN SYSTEM:', data.user.email, '- Add user to users table')
             await supabase.auth.signOut()
             setLoading(false)
             return { 
@@ -850,7 +815,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const { error } = await supabase.auth.signOut({ scope: 'local' })
         if (error) {
           // Log error but don't throw - we'll clear state anyway
-          console.warn('Error signing out (non-critical):', error.message)
+          if (DEBUG_AUTH) console.warn('Error signing out (non-critical):', error.message)
         }
       }
       
@@ -865,7 +830,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       window.location.hash = ''
     } catch (error: any) {
       // Handle errors gracefully - clear state even if signOut fails
-      console.warn('Error during sign out (non-critical):', error?.message || error)
+      if (DEBUG_AUTH) console.warn('Error during sign out (non-critical):', error?.message || error)
       setUser(null)
       setSystemUser(null)
       systemUserRef.current = null
@@ -890,7 +855,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (user && systemUser) {
       // Always ensure loading is false when we have both user and systemUser
       if (loading) {
-        console.log('Force setting loading to false - user and systemUser both exist')
+        if (DEBUG_AUTH) console.log('Force setting loading to false - user and systemUser both exist')
         setLoading(false)
       }
       // Also ensure loadingSystemUserRef is false
@@ -906,15 +871,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const MAX_LOADING_TIME = 10000 // 10 seconds maximum
     const safetyTimeout = setTimeout(() => {
       if (loading && user) {
-        console.warn('Safety timeout: Force setting loading to false after 10 seconds')
+        if (DEBUG_AUTH) console.warn('Safety timeout: Force setting loading to false after 10 seconds')
         setLoading(false)
         loadingSystemUserRef.current = false
-        // If we have user but no systemUser, try one more time with minimal query
         if (user && !systemUser) {
-          console.warn('Attempting emergency fallback query...')
-          loadSystemUser(user.id).catch((err) => {
-            console.error('Emergency fallback query failed:', err)
-          })
+          if (DEBUG_AUTH) console.warn('Attempting emergency fallback query...')
+          loadSystemUser(user.id).catch((e) => { if (DEBUG_AUTH) console.error('Emergency fallback query failed:', e) })
         }
       }
     }, MAX_LOADING_TIME)

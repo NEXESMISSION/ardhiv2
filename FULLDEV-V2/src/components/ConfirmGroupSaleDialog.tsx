@@ -13,7 +13,12 @@ import { formatPrice, formatDateShort, formatDate } from '@/utils/priceCalculato
 import { calculateInstallmentWithDeposit } from '@/utils/installmentCalculator'
 import { generateInstallmentSchedule } from '@/utils/installmentSchedule'
 import { useAuth } from '@/contexts/AuthContext'
+import { useLanguage } from '@/i18n/context'
 import { notifyOwners, notifyCurrentUser } from '@/utils/notifications'
+
+function replaceVars(str: string, vars: Record<string, string | number>): string {
+  return Object.entries(vars).reduce((s, [k, v]) => s.replace(new RegExp(`\\{\\{${k}\\}\\}`, 'g'), String(v)), str)
+}
 import { getContractWritersCached, getContractWriters, type ContractWriterCached } from '@/utils/contractWritersCache'
 
 interface Sale {
@@ -71,6 +76,7 @@ export function ConfirmGroupSaleDialog({
   onConfirm,
 }: ConfirmGroupSaleDialogProps) {
   const { systemUser } = useAuth()
+  const { t } = useLanguage()
   const [installmentStartDate, setInstallmentStartDate] = useState('')
   const [paymentMethod, setPaymentMethod] = useState('cash')
   const [contractWriterId, setContractWriterId] = useState('')
@@ -265,7 +271,7 @@ export function ConfirmGroupSaleDialog({
 
     const firstSale = sales[0]
     if (firstSale.payment_method === 'installment' && !installmentStartDate) {
-      setError('يرجى تحديد تاريخ بداية الأقساط')
+      setError(t('confirmation.dialogErrorInstallmentDate'))
       return
     }
 
@@ -274,7 +280,7 @@ export function ConfirmGroupSaleDialog({
       const amount = parseFloat(cleanedAmount)
       
       if (!cleanedAmount || cleanedAmount === '' || isNaN(amount) || amount <= 0) {
-        setError('يرجى إدخال المبلغ المستلم الآن')
+        setError(t('confirmation.dialogErrorAmountRequired'))
         return
       }
       if (amount > (calculations?.confirmationAmount || 0)) {
@@ -314,13 +320,13 @@ export function ConfirmGroupSaleDialog({
       if (nonPendingSales.length > 0) {
         setConfirming(false)
         const statuses = nonPendingSales.map(s => s.status).join(', ')
-        setErrorMessage(`لا يمكن تأكيد بعض المبيعات. الحالات: ${statuses}`)
+        setErrorMessage(replaceVars(t('confirmation.dialogCannotConfirmStatuses'), { statuses }))
         setShowErrorDialog(true)
         return
       }
     } catch (earlyError: any) {
       setConfirming(false)
-      setErrorMessage(earlyError.message || 'فشل التحقق من المبيعات')
+      setErrorMessage(earlyError.message || t('confirmation.dialogErrorVerifySales'))
       setShowErrorDialog(true)
       return
     }
@@ -536,7 +542,7 @@ export function ConfirmGroupSaleDialog({
       }
 
       // Show success and close immediately; run notifications in background
-      setSuccessMessage(`تم تأكيد ${sales.length} بيع بنجاح!`)
+      setSuccessMessage(replaceVars(t('confirmation.dialogSuccessConfirmMultiple'), { count: sales.length }))
       setShowSuccessDialog(true)
       onConfirm()
       onClose()
@@ -578,7 +584,7 @@ export function ConfirmGroupSaleDialog({
         }
       })()
     } catch (e: any) {
-      setErrorMessage(e.message || 'فشل تأكيد المبيعات')
+      setErrorMessage(e.message || t('confirmation.dialogErrorConfirmSales'))
       setShowErrorDialog(true)
     } finally {
       setConfirming(false)
@@ -597,19 +603,19 @@ export function ConfirmGroupSaleDialog({
       <Dialog
         open={open}
         onClose={onClose}
-        title={`تأكيد ${sales.length} بيع - ${firstSale.client?.name || 'غير محدد'}`}
+        title={replaceVars(t('confirmation.dialogConfirmGroupTitle'), { count: sales.length, client: firstSale.client?.name || t('confirmation.unknown') })}
         size="xl"
         footer={
           <div className="flex justify-end gap-3">
             <Button variant="secondary" onClick={onClose} disabled={confirming}>
-              إلغاء
+              {t('confirmation.cancel')}
             </Button>
             <Button 
               onClick={handleConfirmClick} 
               disabled={confirming}
               className="bg-green-600 hover:bg-green-700 active:bg-green-800 focus-visible:ring-green-500"
             >
-              {confirming ? 'جاري التأكيد...' : isPromise ? 'تأكيد الوعد بالبيع' : 'اتمام البيع'}
+              {confirming ? t('confirmation.dialogConfirming') : isPromise ? t('confirmation.dialogConfirmPromise') : t('confirmation.dialogCompleteSale')}
             </Button>
           </div>
         }
@@ -622,13 +628,13 @@ export function ConfirmGroupSaleDialog({
             <h3 className="font-semibold text-blue-900 mb-2">معلومات العميل</h3>
             <div className="grid grid-cols-2 gap-4 text-sm">
               <div>
-                <p><span className="font-medium">الاسم:</span> {firstSale.client?.name || 'غير محدد'}</p>
-                <p><span className="font-medium">رقم الهوية:</span> {firstSale.client?.id_number || 'غير محدد'}</p>
+                <p><span className="font-medium">{t('confirmation.dialogNameLabel')}:</span> {firstSale.client?.name || t('confirmation.unknown')}</p>
+                <p><span className="font-medium">{t('confirmation.dialogIdNumberLabel')}:</span> {firstSale.client?.id_number || t('confirmation.unknown')}</p>
               </div>
               <div>
-                <p><span className="font-medium">الهاتف:</span> {firstSale.client?.phone || 'غير محدد'}</p>
+                <p><span className="font-medium">{t('confirmation.dialogPhoneLabel')}:</span> {firstSale.client?.phone || t('confirmation.unknown')}</p>
                 {firstSale.payment_offer && (
-                  <p><span className="font-medium">عرض التقسيط:</span> {firstSale.payment_offer.name || 'بدون اسم'}</p>
+                  <p><span className="font-medium">{t('confirmation.dialogInstallmentOfferLabel')}:</span> {firstSale.payment_offer.name || t('confirmation.dialogOfferNoName')}</p>
                 )}
               </div>
             </div>
@@ -722,7 +728,7 @@ export function ConfirmGroupSaleDialog({
                       </div>
                       <div className="border-t border-green-300 pt-2 mt-2">
                         <div className="flex justify-between font-semibold text-green-600">
-                          <span>المستحق عند التأكيد:</span>
+                          <span>{t('confirmation.dialogDueAtConfirm')}</span>
                           <span>{formatPrice(calculations.confirmationAmount)} DT</span>
                         </div>
                       </div>
@@ -901,7 +907,7 @@ export function ConfirmGroupSaleDialog({
                   {promisePaymentAmount && !isNaN(parseFloat(promisePaymentAmount)) && (
                     <div className="mt-2 p-2 bg-white rounded border border-orange-300">
                       <p className="text-sm">
-                        <span className="font-medium">المبلغ المتبقي بعد هذا الدفع:</span>{' '}
+                        <span className="font-medium">{t('confirmation.dialogRemainingAfterPayment')}</span>{' '}
                         <span className="font-semibold text-orange-600">
                           {formatPrice(calculations.confirmationAmount - parseFloat(promisePaymentAmount))} DT
                         </span>
@@ -919,7 +925,7 @@ export function ConfirmGroupSaleDialog({
             <Textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="ملاحظات إضافية..."
+              placeholder={t('confirmation.dialogNotesPlaceholder')}
               rows={3}
             />
           </div>
@@ -931,7 +937,7 @@ export function ConfirmGroupSaleDialog({
         open={showFinalConfirmDialog}
         onClose={() => setShowFinalConfirmDialog(false)}
         onConfirm={handleFinalConfirm}
-        title={isPromise ? 'تأكيد وعد البيع' : 'تأكيد المبيعات'}
+        title={isPromise ? t('confirmation.dialogConfirmPromise') : t('confirmation.dialogConfirmSalesTitle')}
         description={
           isPromise
             ? (() => {
@@ -945,8 +951,8 @@ export function ConfirmGroupSaleDialog({
                 return `هل أنت مستعد لتأكيد البيع؟\n\nسيتم إنشاء ${sales.length} بيع للعميل ${firstSale.client?.name || 'غير محدد'}\n\nالقطع: ${piecesInfo}\n\nالعربون: ${formatPrice(calculations.totalDeposit)} DT\n\nالمستحق عند التأكيد: ${formatPrice(calculations.confirmationAmount)} DT`
               })()
         }
-        confirmText={isPromise ? 'تأكيد الوعد بالبيع' : 'تأكيد'}
-        cancelText="إلغاء"
+        confirmText={isPromise ? t('confirmation.dialogConfirmPromise') : t('common.confirm')}
+        cancelText={t('confirmation.cancel')}
         variant="warning"
         disabled={confirming}
         loading={confirming}
@@ -1005,7 +1011,7 @@ export function ConfirmGroupSaleDialog({
           setSuccessMessage('')
         }}
         type="success"
-        title="نجح التأكيد"
+        title={t('confirmation.dialogSuccessTitle')}
         message={successMessage}
       />
 
@@ -1017,7 +1023,7 @@ export function ConfirmGroupSaleDialog({
           setErrorMessage('')
         }}
         type="error"
-        title="فشل التأكيد"
+        title={t('confirmation.dialogErrorTitle')}
         message={errorMessage}
       />
     </>

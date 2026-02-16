@@ -1,16 +1,20 @@
-import { useState, useEffect, lazy, Suspense, useRef, Component, type ReactNode } from 'react'
+import React, { useState, useEffect, lazy, Suspense, useRef, Component, type ReactNode } from 'react'
 import './App.css'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
+import { LanguageProvider, useLanguage, useApplyUserLanguage } from './i18n/context'
 import { Layout } from './components/Layout'
 
 /** Catches chunk load errors (e.g. Android PWA) and shows retry instead of blank */
-class PageErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
+class PageErrorBoundary extends Component<{ children: ReactNode; fallback?: ReactNode }, { hasError: boolean }> {
   state = { hasError: false }
   static getDerivedStateFromError = () => ({ hasError: true })
   componentDidCatch(error: unknown) {
     console.error('Page load error (PWA/chunk):', error)
   }
   render() {
+    if (this.state.hasError && this.props.fallback) {
+      return this.props.fallback
+    }
     if (this.state.hasError) {
       return (
         <div className="flex-1 flex flex-col items-center justify-center min-h-[280px] gap-4 p-6">
@@ -29,20 +33,40 @@ class PageErrorBoundary extends Component<{ children: ReactNode }, { hasError: b
   }
 }
 
+// Retry lazy import on failure (helps with ERR_NETWORK_CHANGED / flaky network)
+function lazyWithRetry<T extends React.ComponentType<any>>(
+  importFn: () => Promise<{ default: T }>,
+  retries = 3,
+  delayMs = 800
+): React.LazyExoticComponent<T> {
+  return lazy(async () => {
+    let lastErr: unknown
+    for (let i = 0; i < retries; i++) {
+      try {
+        return await importFn()
+      } catch (e) {
+        lastErr = e
+        if (i < retries - 1) await new Promise(r => setTimeout(r, delayMs))
+      }
+    }
+    throw lastErr
+  }) as React.LazyExoticComponent<T>
+}
+
 // Lazy-load all pages so initial bundle is small and app opens in milliseconds (PWA-friendly)
-const LoginPage = lazy(() => import('./pages/Login').then(m => ({ default: m.LoginPage })))
-const HomePage = lazy(() => import('./pages/Home').then(m => ({ default: m.HomePage })))
-const LandPage = lazy(() => import('./pages/Land').then(m => ({ default: m.LandPage })))
-const ClientsPage = lazy(() => import('./pages/Clients').then(m => ({ default: m.ClientsPage })))
-const ConfirmationPage = lazy(() => import('./pages/Confirmation').then(m => ({ default: m.ConfirmationPage })))
-const ConfirmationHistoryPage = lazy(() => import('./pages/ConfirmationHistory').then(m => ({ default: m.ConfirmationHistoryPage })))
-const FinancePage = lazy(() => import('./pages/Finance').then(m => ({ default: m.FinancePage })))
-const ContractWritersPage = lazy(() => import('./pages/ContractWriters').then(m => ({ default: m.ContractWritersPage })))
-const InstallmentsPage = lazy(() => import('./pages/Installments').then(m => ({ default: m.InstallmentsPage })))
-const SalesRecordsPage = lazy(() => import('./pages/SalesRecords').then(m => ({ default: m.SalesRecordsPage })))
-const AppointmentsPage = lazy(() => import('./pages/Appointments').then(m => ({ default: m.AppointmentsPage })))
-const PhoneCallAppointmentsPage = lazy(() => import('./pages/PhoneCallAppointments').then(m => ({ default: m.PhoneCallAppointmentsPage })))
-const UsersPage = lazy(() => import('./pages/Users').then(m => ({ default: m.UsersPage })))
+const LoginPage = lazyWithRetry(() => import('./pages/Login').then(m => ({ default: m.LoginPage })))
+const HomePage = lazyWithRetry(() => import('./pages/Home').then(m => ({ default: m.HomePage })))
+const LandPage = lazyWithRetry(() => import('./pages/Land').then(m => ({ default: m.LandPage })))
+const ClientsPage = lazyWithRetry(() => import('./pages/Clients').then(m => ({ default: m.ClientsPage })))
+const ConfirmationPage = lazyWithRetry(() => import('./pages/Confirmation').then(m => ({ default: m.ConfirmationPage })))
+const ConfirmationHistoryPage = lazyWithRetry(() => import('./pages/ConfirmationHistory').then(m => ({ default: m.ConfirmationHistoryPage })))
+const FinancePage = lazyWithRetry(() => import('./pages/Finance').then(m => ({ default: m.FinancePage })))
+const ContractWritersPage = lazyWithRetry(() => import('./pages/ContractWriters').then(m => ({ default: m.ContractWritersPage })))
+const InstallmentsPage = lazyWithRetry(() => import('./pages/Installments').then(m => ({ default: m.InstallmentsPage })))
+const SalesRecordsPage = lazyWithRetry(() => import('./pages/SalesRecords').then(m => ({ default: m.SalesRecordsPage })))
+const AppointmentsPage = lazyWithRetry(() => import('./pages/Appointments').then(m => ({ default: m.AppointmentsPage })))
+const PhoneCallAppointmentsPage = lazyWithRetry(() => import('./pages/PhoneCallAppointments').then(m => ({ default: m.PhoneCallAppointmentsPage })))
+const UsersPage = lazyWithRetry(() => import('./pages/Users').then(m => ({ default: m.UsersPage })))
 
 // Map URL hash to page IDs
 const pageHashMap: Record<string, string> = {
@@ -83,8 +107,24 @@ const SYSTEM_USER_MAX_WAIT_MS = 2500
 
 function AppContent() {
   const { user, systemUser, loading } = useAuth()
+  const { t } = useLanguage()
   const [allowAppWithoutSystemUser, setAllowAppWithoutSystemUser] = useState(false)
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useApplyUserLanguage(systemUser?.preferred_language)
+
+  const pageErrorFallback = (
+    <div className="flex-1 flex flex-col items-center justify-center min-h-[280px] gap-4 p-6">
+      <p className="text-gray-600 text-center">{t('app.pageLoadError')}</p>
+      <button
+        type="button"
+        onClick={() => window.location.reload()}
+        className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium"
+      >
+        {t('common.retry')}
+      </button>
+    </div>
+  )
 
   // Once we have user, give systemUser a short time to load; then show app anyway so we don't block forever
   useEffect(() => {
@@ -257,8 +297,8 @@ function AppContent() {
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center">
           <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mb-4"></div>
-          <p className="text-gray-600 mb-2">جاري التحميل...</p>
-          <p className="text-sm text-gray-500">جاري تحميل بياناتك...</p>
+          <p className="text-gray-600 mb-2">{t('app.loadingProfile')}</p>
+          <p className="text-sm text-gray-500">{t('app.loadingProfileSub')}</p>
         </div>
       </div>
     )
@@ -272,8 +312,8 @@ function AppContent() {
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center">
           <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mb-4"></div>
-          <p className="text-gray-600 mb-2">جاري التحميل...</p>
-          <p className="text-sm text-gray-500">جاري تحميل بيانات المستخدم...</p>
+          <p className="text-gray-600 mb-2">{t('app.loadingUser')}</p>
+          <p className="text-sm text-gray-500">{t('app.loadingUserSub')}</p>
         </div>
       </div>
     )
@@ -294,7 +334,7 @@ function AppContent() {
   const PageFallback = () => (
     <div className="flex-1 flex flex-col items-center justify-center min-h-[280px] gap-3" aria-hidden>
       <div className="animate-spin rounded-full h-10 w-10 border-2 border-blue-500 border-t-transparent" />
-      <p className="text-sm text-gray-500">جاري تحميل الصفحة...</p>
+      <p className="text-sm text-gray-500">{t('app.loadingPage')}</p>
     </div>
   )
 
@@ -316,7 +356,7 @@ function AppContent() {
 
   return (
     <Layout currentPage={currentPage} onNavigate={handleNavigate}>
-      <PageErrorBoundary>
+      <PageErrorBoundary fallback={pageErrorFallback}>
         <Suspense fallback={<PageFallback />}>
           {pageContent || <HomePage onNavigate={handleNavigate} />}
         </Suspense>
@@ -328,7 +368,9 @@ function AppContent() {
 function App() {
   return (
     <AuthProvider>
-      <AppContent />
+      <LanguageProvider>
+        <AppContent />
+      </LanguageProvider>
     </AuthProvider>
   )
 }

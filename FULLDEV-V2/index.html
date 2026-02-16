@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ar" dir="rtl">
+<html lang="fr" dir="ltr" id="html-root">
   <head>
     <meta charset="UTF-8" />
     <!-- Favicon -->
@@ -41,6 +41,15 @@
     <title>الادارة - نظام إدارة الأراضي</title>
   </head>
   <body>
+    <script>
+      (function() {
+        try {
+          var lang = localStorage.getItem('app_lang') || 'fr';
+          var html = document.documentElement;
+          if (lang === 'ar') { html.lang = 'ar'; html.dir = 'rtl'; } else { html.lang = 'fr'; html.dir = 'ltr'; }
+        } catch (e) {}
+      })();
+    </script>
     <!-- PWA/Android: set hash before React so first paint has correct route (avoids blank after login) -->
     <script>
       (function() {

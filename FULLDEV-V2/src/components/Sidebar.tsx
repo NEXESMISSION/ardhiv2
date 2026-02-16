@@ -1,4 +1,5 @@
 import { useAuth } from '@/contexts/AuthContext'
+import { useLanguage } from '@/i18n/context'
 
 interface SidebarProps {
   currentPage: string
@@ -7,28 +8,35 @@ interface SidebarProps {
   onToggle: () => void
 }
 
+const SIDEBAR_ITEMS = [
+  { id: 'home', icon: '🏠' },
+  { id: 'confirmation', icon: '✅' },
+  { id: 'clients', icon: '👥' },
+  { id: 'land', icon: '🏞️' },
+  { id: 'appointments', icon: '📅' },
+  { id: 'phone-call-appointments', icon: '📞' },
+  { id: 'installments', icon: '💳' },
+  { id: 'finance', icon: '💰' },
+  { id: 'sales-records', icon: '📋' },
+  { id: 'confirmation-history', icon: '📜' },
+  { id: 'contract-writers', icon: '📝' },
+  { id: 'users', icon: '👤' },
+] as const
+
 export function Sidebar({ currentPage, onNavigate, isOpen, onToggle }: SidebarProps) {
+  const { t } = useLanguage()
   const { signOut, systemUser } = useAuth()
 
   async function handleLogout() {
     await signOut()
     window.location.hash = '#login'
   }
-  
-  const allMenuItems = [
-    { id: 'home', label: 'الرئيسية', icon: '🏠' },
-    { id: 'confirmation', label: 'التأكيدات', icon: '✅' },
-    { id: 'clients', label: 'العملاء', icon: '👥' },
-    { id: 'land', label: 'دفعات الأراضي', icon: '🏞️' },
-    { id: 'appointments', label: 'موعد اتمام البيع', icon: '📅' },
-    { id: 'phone-call-appointments', label: 'مواعيد المكالمات', icon: '📞' },
-    { id: 'installments', label: 'الأقساط', icon: '💳' },
-    { id: 'finance', label: 'المالية', icon: '💰' },
-    { id: 'sales-records', label: 'السجل', icon: '📋' },
-    { id: 'confirmation-history', label: 'سجل التأكيدات', icon: '📜' },
-    { id: 'contract-writers', label: 'محررين العقد', icon: '📝' },
-    { id: 'users', label: 'المستخدمين', icon: '👤' },
-  ]
+
+  const allMenuItems = SIDEBAR_ITEMS.map(item => ({
+    id: item.id,
+    label: t(`pageNames.${item.id}`),
+    icon: item.icon,
+  }))
   
   // Filter and sort menu items based on user permissions
   let menuItems = systemUser?.role === 'owner'
@@ -82,9 +90,8 @@ export function Sidebar({ currentPage, onNavigate, isOpen, onToggle }: SidebarPr
         `}
       >
         <div className="flex flex-col h-full min-h-0">
-          {/* Header */}
           <div className="p-2 sm:p-3 lg:p-4 border-b border-gray-200 flex items-center justify-between">
-            <h2 className="text-sm sm:text-base lg:text-xl font-bold text-gray-900">النظام</h2>
+            <h2 className="text-sm sm:text-base lg:text-xl font-bold text-gray-900">{t('sidebar.appTitle')}</h2>
             <button
               onClick={onToggle}
               className="lg:hidden p-1.5 sm:p-2 hover:bg-gray-100 rounded-md"
@@ -127,7 +134,7 @@ export function Sidebar({ currentPage, onNavigate, isOpen, onToggle }: SidebarPr
               <div className="px-2 sm:px-3 lg:px-4 py-1.5 sm:py-2 text-xs sm:text-sm text-gray-600">
                 <div className="font-medium text-gray-900 truncate">{systemUser.email}</div>
                 <div className="text-gray-500">
-                  {systemUser.role === 'owner' ? 'مالك' : 'عامل'}
+                  {systemUser.role === 'owner' ? t('sidebar.owner') : t('sidebar.worker')}
                 </div>
               </div>
             )}
@@ -141,7 +148,7 @@ export function Sidebar({ currentPage, onNavigate, isOpen, onToggle }: SidebarPr
               "
             >
               <span className="text-base sm:text-lg lg:text-xl">🚪</span>
-              <span>تسجيل الخروج</span>
+              <span>{t('sidebar.logout')}</span>
             </button>
           </div>
         </div>

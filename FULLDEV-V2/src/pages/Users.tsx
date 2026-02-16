@@ -12,6 +12,7 @@ import { Badge } from '@/components/ui/badge'
 import { IconButton } from '@/components/ui/icon-button'
 import { Dialog } from '@/components/ui/dialog'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { useLanguage } from '@/i18n/context'
 
 // ============================================================================
 // TYPES
@@ -42,6 +43,7 @@ interface UserRow {
 
 export function UsersPage() {
   const { systemUser, user, refreshSystemUser } = useAuth()
+  const { t } = useLanguage()
   
   // ============================================================================
   // STATE: List View
@@ -78,21 +80,20 @@ export function UsersPage() {
   const [loadingPieces, setLoadingPieces] = useState<Set<string>>(new Set())
   const [expandedBatches, setExpandedBatches] = useState<Set<string>>(new Set())
   
-  // Available pages for permissions (سجل التأكيدات next to السجل by default)
   const availablePages = [
-    { id: 'home', label: 'الرئيسية', icon: '🏠' },
-    { id: 'land', label: 'دفعات الأراضي', icon: '🏞️' },
-    { id: 'clients', label: 'العملاء', icon: '👥' },
-    { id: 'confirmation', label: 'التأكيدات', icon: '✅' },
-    { id: 'appointments', label: 'موعد اتمام البيع', icon: '📅' },
-    { id: 'phone-call-appointments', label: 'مواعيد المكالمات', icon: '📞' },
-    { id: 'installments', label: 'الأقساط', icon: '💳' },
-    { id: 'finance', label: 'المالية', icon: '💰' },
-    { id: 'sales-records', label: 'السجل', icon: '📋' },
-    { id: 'confirmation-history', label: 'سجل التأكيدات', icon: '📜' },
-    { id: 'contract-writers', label: 'محررين العقد', icon: '📝' },
-    { id: 'users', label: 'المستخدمين', icon: '👤' },
-  ]
+    { id: 'home', icon: '🏠' },
+    { id: 'land', icon: '🏞️' },
+    { id: 'clients', icon: '👥' },
+    { id: 'confirmation', icon: '✅' },
+    { id: 'appointments', icon: '📅' },
+    { id: 'phone-call-appointments', icon: '📞' },
+    { id: 'installments', icon: '💳' },
+    { id: 'finance', icon: '💰' },
+    { id: 'sales-records', icon: '📋' },
+    { id: 'confirmation-history', icon: '📜' },
+    { id: 'contract-writers', icon: '📝' },
+    { id: 'users', icon: '👤' },
+  ].map(p => ({ ...p, label: t(`pageNames.${p.id}`) }))
   const [showPassword, setShowPassword] = useState(false)
   const [saving, setSaving] = useState(false)
   const [success, setSuccess] = useState<string | null>(null)
@@ -286,7 +287,7 @@ export function UsersPage() {
       setUsers(data || [])
     } catch (e: any) {
       console.error('Error loading users:', e)
-      setError('فشل تحميل المستخدمين')
+      setError(t('users.loadError'))
     } finally {
       setLoading(false)
     }
@@ -384,12 +385,12 @@ export function UsersPage() {
     if (file) {
       // Validate file type
       if (!file.type.startsWith('image/')) {
-        setError('الرجاء اختيار ملف صورة')
+        setError(t('users.chooseImage'))
         return
       }
       // Validate file size (max 5MB)
       if (file.size > 5 * 1024 * 1024) {
-        setError('حجم الصورة يجب أن يكون أقل من 5 ميجابايت')
+        setError(t('users.imageSizeError'))
         return
       }
       setImageFile(file)
@@ -411,22 +412,22 @@ export function UsersPage() {
 
     // Validation
     if (!formData.email.trim()) {
-      setError('البريد الإلكتروني إجباري')
+      setError(t('users.errorEmailRequired'))
       return
     }
 
     if (!editingWorkerId && !formData.password.trim()) {
-      setError('كلمة المرور إجبارية للمستخدمين الجدد')
+      setError(t('users.errorPasswordRequiredNew'))
       return
     }
 
     if (!editingWorkerId && formData.password.length < 6) {
-      setError('كلمة المرور يجب أن تكون 6 أحرف على الأقل')
+      setError(t('users.errorPasswordMin'))
       return
     }
 
     if (!supabaseAdmin) {
-      setError('خدمة الإدارة غير متاحة. يرجى التحقق من إعدادات البيئة.')
+      setError(t('users.serviceUnavailable'))
       return
     }
 
@@ -478,7 +479,7 @@ export function UsersPage() {
           finalImageUrl = urlData.publicUrl
         } catch (e: any) {
           console.error('Error uploading image:', e)
-          setError('فشل رفع الصورة: ' + (e.message || 'خطأ غير معروف'))
+          setError(t('users.uploadError') + ': ' + (e.message || t('shared.unknown')))
           setSaving(false)
           return
         }
@@ -535,7 +536,7 @@ export function UsersPage() {
           await refreshSystemUser()
         }
         
-        setSuccess('تم تحديث المستخدم بنجاح')
+        setSuccess(t('users.updateSuccess'))
         setTimeout(() => {
           closeDialog()
         }, 1000)
@@ -553,13 +554,13 @@ export function UsersPage() {
 
         if (authError) {
           if (authError.message.includes('already registered')) {
-            throw new Error('البريد الإلكتروني مستخدم بالفعل')
+            throw new Error(t('users.errorEmailExists'))
           }
           throw authError
         }
 
         if (!authData.user) {
-          throw new Error('فشل إنشاء حساب المصادقة')
+          throw new Error(t('users.createAuthError'))
         }
 
         // Create user record in users table
@@ -590,7 +591,7 @@ export function UsersPage() {
           throw err
         }
 
-        setSuccess('تم إضافة المستخدم بنجاح')
+        setSuccess(t('users.addSuccess'))
       }
 
       await loadWorkers()
@@ -599,7 +600,7 @@ export function UsersPage() {
       }, 1500)
     } catch (e: any) {
       console.error('Error saving worker:', e)
-      setError(e.message || 'فشل حفظ المستخدم')
+      setError(e.message || t('users.saveError'))
     } finally {
       setSaving(false)
     }
@@ -621,7 +622,7 @@ export function UsersPage() {
       // Get worker to find auth_user_id
       const worker = users.find(w => w.id === workerToDelete)
       if (!worker) {
-        throw new Error('المستخدم غير موجود')
+        throw new Error(t('users.errorUserNotFound'))
       }
 
       // Get auth_user_id from users table
@@ -672,7 +673,7 @@ export function UsersPage() {
       await loadWorkers()
     } catch (e: any) {
       console.error('Error deleting worker:', e)
-      alert('فشل حذف المستخدم: ' + e.message)
+      alert(t('users.deleteError') + ': ' + e.message)
     } finally {
       setDeleting(false)
     }
@@ -689,12 +690,12 @@ export function UsersPage() {
           <div className="flex items-center justify-between flex-wrap gap-3 sm:gap-4">
             <div>
               <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-gray-900 mb-1 sm:mb-2">
-                إدارة المستخدمين
+                {t('users.manageUsersTitle')}
               </h1>
-              <p className="text-xs sm:text-sm text-gray-600">إدارة المستخدمين والعمال</p>
+              <p className="text-xs sm:text-sm text-gray-600">{t('users.manageUsersSubtitle')}</p>
             </div>
             <Button onClick={openCreateDialog} size="sm" className="text-xs sm:text-sm">
-              + إضافة مستخدم جديد
+              + {t('users.addUserNew')}
             </Button>
           </div>
         </div>
@@ -711,15 +712,15 @@ export function UsersPage() {
           <Card className="text-center py-8 sm:py-12">
             <CardContent>
               <div className="inline-block animate-spin rounded-full h-6 w-6 sm:h-8 sm:w-8 border-b-2 border-blue-600"></div>
-              <p className="mt-2 text-xs sm:text-sm text-gray-600">جاري التحميل...</p>
+              <p className="mt-2 text-xs sm:text-sm text-gray-600">{t('users.loading')}</p>
             </CardContent>
           </Card>
         ) : users.length === 0 ? (
           <Card className="text-center py-8 sm:py-12">
             <CardContent>
-              <p className="text-xs sm:text-sm text-gray-500 mb-3 sm:mb-4">لا يوجد مستخدمين حتى الآن</p>
+              <p className="text-xs sm:text-sm text-gray-500 mb-3 sm:mb-4">{t('users.noUsersYet')}</p>
               <Button onClick={openCreateDialog} size="sm" className="text-xs sm:text-sm">
-                إضافة مستخدم جديد
+                {t('users.addUserNew')}
               </Button>
             </CardContent>
           </Card>
@@ -763,14 +764,14 @@ export function UsersPage() {
                       onClick={() => openEditDialog(userRow)}
                       className="text-xs sm:text-sm flex-1"
                     >
-                      تعديل
+                      {t('users.edit')}
                     </Button>
                     {userRow.role !== 'owner' && (
                       <IconButton
                         variant="ghost"
                         size="sm"
                         onClick={() => handleDeleteClick(userRow.id)}
-                        title="حذف"
+                        title={t('users.delete')}
                         className="text-red-600 hover:text-red-700 hover:bg-red-50"
                       >
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -789,7 +790,7 @@ export function UsersPage() {
         <Dialog
           open={dialogOpen}
           onClose={closeDialog}
-          title={editingWorkerId ? 'تعديل مستخدم' : 'إضافة مستخدم جديد'}
+          title={editingWorkerId ? t('users.editUser') : t('users.addUserNew')}
           size="md"
         >
           <div className="space-y-4">
@@ -798,7 +799,7 @@ export function UsersPage() {
 
             {/* Profile Image */}
             <div>
-              <Label htmlFor="image">صورة الملف الشخصي</Label>
+              <Label htmlFor="image">{t('users.profileImage')}</Label>
               <div className="mt-2 flex items-center gap-4">
                 {(imagePreview || formData.image_url) && (
                   <div className="flex-shrink-0 relative">
@@ -835,7 +836,7 @@ export function UsersPage() {
                     }}
                       disabled={saving}
                       className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs hover:bg-red-600 disabled:opacity-50"
-                      title="إزالة الصورة"
+                      title={t('users.removeImage')}
                     >
                       ×
                     </button>
@@ -850,26 +851,26 @@ export function UsersPage() {
                     disabled={saving}
                     className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 disabled:opacity-50"
                   />
-                  <p className="mt-1 text-xs text-gray-500">اختياري - إذا لم تقم باختيار صورة، سيتم استخدام الحرف الأول من الاسم</p>
+                  <p className="mt-1 text-xs text-gray-500">{t('users.optionalImageHint')}</p>
                 </div>
               </div>
             </div>
 
             <div>
-              <Label htmlFor="name">الاسم</Label>
+              <Label htmlFor="name">{t('home.name')}</Label>
               <Input
                 id="name"
                 type="text"
                 value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                 className="mt-1"
-                placeholder="اسم المستخدم"
+                placeholder={t('users.namePlaceholder')}
                 disabled={saving}
               />
             </div>
 
             <div>
-              <Label htmlFor="email">البريد الإلكتروني *</Label>
+              <Label htmlFor="email">{t('users.emailLabel')}</Label>
               <Input
                 id="email"
                 type="email"
@@ -884,7 +885,7 @@ export function UsersPage() {
 
             <div>
               <Label htmlFor="password">
-                {editingWorkerId ? 'كلمة المرور (اتركها فارغة للاحتفاظ بالكلمة الحالية)' : 'كلمة المرور *'}
+                {editingWorkerId ? t('users.passwordOptional') : t('users.passwordRequired')}
               </Label>
               <div className="mt-1 relative">
                 <Input
@@ -893,7 +894,7 @@ export function UsersPage() {
                   value={formData.password}
                   onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                   className="mt-1 pr-10"
-                  placeholder={editingWorkerId ? '•••••••• (اختياري)' : '••••••••'}
+                  placeholder={editingWorkerId ? t('users.passwordPlaceholderOptional') : t('users.passwordPlaceholder')}
                   required={!editingWorkerId}
                   disabled={saving}
                 />
@@ -904,7 +905,7 @@ export function UsersPage() {
                     size="sm"
                     onClick={() => setShowPassword(!showPassword)}
                     className="text-gray-400 hover:text-gray-600"
-                    title={showPassword ? 'إخفاء كلمة المرور' : 'إظهار كلمة المرور'}
+                    title={showPassword ? t('users.hidePasswordTitle') : t('users.showPasswordTitle')}
                   >
                     {showPassword ? (
                       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -922,7 +923,7 @@ export function UsersPage() {
             </div>
 
             <div>
-              <Label htmlFor="phone">رقم الهاتف</Label>
+              <Label htmlFor="phone">{t('home.phone')}</Label>
               <Input
                 id="phone"
                 type="tel"
@@ -935,46 +936,46 @@ export function UsersPage() {
             </div>
 
             <div>
-              <Label htmlFor="place">العنوان / المكان</Label>
+              <Label htmlFor="place">{t('users.placeLabel')}</Label>
               <Input
                 id="place"
                 type="text"
                 value={formData.place}
                 onChange={(e) => setFormData({ ...formData, place: e.target.value })}
                 className="mt-1"
-                placeholder="العنوان الكامل"
+                placeholder={t('users.placePlaceholder')}
                 disabled={saving}
               />
             </div>
 
             <div>
-              <Label htmlFor="title">المسمى الوظيفي</Label>
+              <Label htmlFor="title">{t('home.jobTitle')}</Label>
               <Input
                 id="title"
                 type="text"
                 value={formData.title}
                 onChange={(e) => setFormData({ ...formData, title: e.target.value })}
                 className="mt-1"
-                placeholder="مثال: قائد فريق، مدير فريق..."
+                placeholder={t('users.jobTitlePlaceholder')}
                 disabled={saving}
               />
             </div>
 
             <div>
-              <Label htmlFor="notes">ملاحظات / مهام</Label>
+              <Label htmlFor="notes">{t('users.notesLabel')}</Label>
               <Textarea
                 id="notes"
                 value={formData.notes}
                 onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
                 className="mt-1"
-                placeholder="أضف ملاحظات أو مهام للمستخدم..."
+                placeholder={t('users.notesPlaceholder')}
                 rows={4}
                 disabled={saving}
               />
             </div>
 
             <div>
-              <Label htmlFor="display_order">ترتيب العرض</Label>
+              <Label htmlFor="display_order">{t('users.displayOrderLabel')}</Label>
               <Input
                 id="display_order"
                 type="number"
@@ -985,11 +986,11 @@ export function UsersPage() {
                 min="0"
                 disabled={saving}
               />
-              <p className="mt-1 text-xs text-gray-500">رقم أقل = يظهر أولاً في القائمة</p>
+              <p className="mt-1 text-xs text-gray-500">{t('users.displayOrderHint')}</p>
             </div>
 
             <div>
-              <Label>صلاحيات الوصول للصفحات</Label>
+              <Label>{t('users.pageAccessLabel')}</Label>
               <p className="mt-1 mb-2 text-xs text-gray-500">
                 الترتيب أدناه = ترتيب ظهور الصفحات في القائمة الجانبية. استخدم الأسهم لتغيير الترتيب.
               </p>
@@ -1061,7 +1062,7 @@ export function UsersPage() {
                   })
                 )}
               </div>
-              <p className="mt-2 text-xs font-medium text-gray-600">إضافة صفحة</p>
+              <p className="mt-2 text-xs font-medium text-gray-600">{t('users.addPage')}</p>
               <div className="mt-1 flex flex-wrap gap-1">
                 {availablePages
                   .filter(p => !formData.allowed_pages.includes(p.id))
@@ -1092,7 +1093,7 @@ export function UsersPage() {
               {loadingBatches ? (
                 <div className="mt-2 p-4 text-center text-sm text-gray-500 bg-gray-50 rounded-lg">
                   <div className="inline-block animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600 mb-2"></div>
-                  <div>جاري تحميل الدفعات...</div>
+                  <div>{t('users.loadingBatches')}</div>
                 </div>
               ) : availableBatches.length === 0 ? (
                 <div className="mt-2 p-4 text-center text-sm text-gray-500 bg-gray-50 rounded-lg">
@@ -1135,8 +1136,8 @@ export function UsersPage() {
                       className="w-full text-xs"
                     >
                       {formData.allowed_batches.length === filteredBatches.length && filteredBatches.length > 0
-                        ? 'إلغاء تحديد الكل'
-                        : `تحديد الكل (${filteredBatches.length})`}
+                        ? t('users.deselectAll')
+                        : `${t('users.selectAll')} (${filteredBatches.length})`}
                     </Button>
                   </div>
 
@@ -1221,7 +1222,7 @@ export function UsersPage() {
                               {loadingPieces.has(batch.id) ? (
                                 <div className="text-center py-4 text-sm text-gray-500">
                                   <div className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mb-2"></div>
-                                  <div>جاري تحميل القطع...</div>
+                                  <div>{t('users.loadingPieces')}</div>
                                 </div>
                               ) : batchPieces.get(batch.id)?.length === 0 ? (
                                 <div className="text-center py-4 text-sm text-gray-500">
@@ -1254,8 +1255,8 @@ export function UsersPage() {
                                       disabled={saving}
                                     >
                                       {batchPieces.get(batch.id)?.every(p => formData.allowed_pieces.includes(p.id)) 
-                                        ? 'إلغاء تحديد الكل' 
-                                        : 'تحديد الكل'}
+                                        ? t('users.deselectAll') 
+                                        : t('users.selectAll')}
                                     </button>
                                   </div>
                                   <div className="max-h-48 overflow-y-auto space-y-1">
@@ -1319,14 +1320,14 @@ export function UsersPage() {
                           <span className="font-semibold">القطع المحددة:</span> {formData.allowed_pieces.length} قطعة
                           {formData.allowed_pieces.length > 0 && (
                             <span className="text-blue-700 ml-1">
-                              (سيتم الوصول فقط للقطع المحددة في الدفعات المحددة)
+                              {t('users.accessPiecesOnly')}
                             </span>
                           )}
                         </div>
                       )}
                       {formData.allowed_batches.length > 0 && formData.allowed_pieces.length === 0 && (
                         <div className="text-blue-700">
-                          (سيتم الوصول لجميع القطع في الدفعات المحددة)
+                          {t('users.accessAllPieces')}
                         </div>
                       )}
                     </div>
@@ -1342,11 +1343,11 @@ export function UsersPage() {
                 disabled={saving}
                 className="flex-1"
               >
-                {saving ? 'جاري الحفظ...' : editingWorkerId ? 'تحديث' : 'إضافة'}
+                {saving ? t('users.saving') : editingWorkerId ? t('users.update') : t('users.add')}
               </Button>
               <Button variant="ghost" onClick={closeDialog} disabled={saving}>
-                إلغاء
-              </Button>
+{t('users.cancel')}
+          </Button>
             </div>
           </div>
         </Dialog>
@@ -1359,10 +1360,10 @@ export function UsersPage() {
             setWorkerToDelete(null)
           }}
           onConfirm={handleDeleteWorker}
-          title="تأكيد الحذف"
-          message="هل أنت متأكد من حذف هذا المستخدم؟ لا يمكن التراجع عن هذه العملية."
-          confirmText="حذف"
-          cancelText="إلغاء"
+          title={t('users.confirmDeleteTitle')}
+          message={t('users.confirmDeleteMessage')}
+          confirmText={t('users.delete')}
+          cancelText={t('users.cancel')}
           variant="danger"
           loading={deleting}
         />

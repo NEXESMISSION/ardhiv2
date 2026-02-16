@@ -8,6 +8,7 @@ import { buildSaleQuery, formatSalesWithSellers } from '@/utils/salesQueries'
 import { SaleDetailsDialog } from '@/components/SaleDetailsDialog'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { getPaymentTypeLabel } from '@/utils/paymentTerms'
+import { useLanguage } from '@/i18n/context'
 
 type TimeFilter = 'today' | 'week' | 'month' | 'all'
 
@@ -35,6 +36,7 @@ interface ConfirmationHistoryPageProps {
 }
 
 export function ConfirmationHistoryPage({ onNavigate }: ConfirmationHistoryPageProps) {
+  const { t } = useLanguage()
   const [sales, setSales] = useState<Sale[]>([])
   const [loading, setLoading] = useState(true)
   const [timeFilter, setTimeFilter] = useState<TimeFilter>('all')
@@ -97,10 +99,10 @@ export function ConfirmationHistoryPage({ onNavigate }: ConfirmationHistoryPageP
   }, [sales, timeFilter])
 
   const filterButtons: { value: TimeFilter; label: string }[] = [
-    { value: 'today', label: 'اليوم' },
-    { value: 'week', label: 'هذا الأسبوع' },
-    { value: 'month', label: 'هذا الشهر' },
-    { value: 'all', label: 'الكل' },
+    { value: 'today', label: t('confirmationHistory.filterToday') },
+    { value: 'week', label: t('confirmationHistory.filterWeek') },
+    { value: 'month', label: t('confirmationHistory.filterMonth') },
+    { value: 'all', label: t('confirmationHistory.filterAll') },
   ]
 
   function openRevertConfirm(sale: Sale, e: React.MouseEvent) {
@@ -145,7 +147,7 @@ export function ConfirmationHistoryPage({ onNavigate }: ConfirmationHistoryPageP
       await loadConfirmedSales()
       onNavigate('confirmation')
     } catch (e: any) {
-      setRevertError(e.message || 'فشل إرجاع البيع')
+      setRevertError(e.message || t('confirmationHistory.revertError'))
     } finally {
       setReverting(false)
     }
@@ -154,7 +156,7 @@ export function ConfirmationHistoryPage({ onNavigate }: ConfirmationHistoryPageP
   return (
     <div className="space-y-4 p-3 sm:p-4 lg:p-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <h2 className="text-lg sm:text-xl font-bold text-gray-900">سجل التأكيدات</h2>
+        <h2 className="text-lg sm:text-xl font-bold text-gray-900">{t('confirmationHistory.title')}</h2>
         <Button
           type="button"
           variant="primary"
@@ -162,12 +164,12 @@ export function ConfirmationHistoryPage({ onNavigate }: ConfirmationHistoryPageP
           onClick={() => onNavigate('confirmation')}
           className="w-full sm:w-auto"
         >
-          انتقل إلى التأكيدات
+          {t('confirmationHistory.goToConfirmation')}
         </Button>
       </div>
 
       <p className="text-sm text-gray-600">
-        المبيعات المؤكدة هنا تُعرض في المالية حسب تاريخ التأكيد (اليوم = ما تم تأكيده اليوم).
+        {t('confirmationHistory.description')}
       </p>
 
       <div className="flex flex-wrap gap-2">
@@ -189,7 +191,7 @@ export function ConfirmationHistoryPage({ onNavigate }: ConfirmationHistoryPageP
         </div>
       ) : filteredSales.length === 0 ? (
         <Card className="p-6 text-center text-gray-500">
-          لا توجد تأكيدات في هذه الفترة.
+          {t('confirmationHistory.noConfirmations')}
         </Card>
       ) : (
         <div className="space-y-2">
@@ -230,13 +232,13 @@ export function ConfirmationHistoryPage({ onNavigate }: ConfirmationHistoryPageP
                       className="text-xs"
                       onClick={(e) => openRevertConfirm(sale, e)}
                     >
-                      إرجاع إلى التأكيدات
+                      {t('confirmationHistory.revertToConfirmations')}
                     </Button>
                   </div>
                 </div>
                 {sale.confirmedBy && (
                   <p className="text-xs text-gray-500 mt-1">
-                    تم التأكيد بواسطة: {sale.confirmedBy.name}
+                    {t('confirmationHistory.confirmedBy')} {sale.confirmedBy.name}
                     {sale.confirmedBy.place ? ` (${sale.confirmedBy.place})` : ''}
                   </p>
                 )}
@@ -265,10 +267,10 @@ export function ConfirmationHistoryPage({ onNavigate }: ConfirmationHistoryPageP
           }
         }}
         onConfirm={confirmSendBackToConfirmation}
-        title="إرجاع البيع إلى التأكيدات"
-        description="سيتم إرجاع هذا البيع إلى صفحة التأكيدات (حالة معلقة) ولن يُحسب في المالية كبيع مؤكد. القطعة ستعود إلى حالة محجوزة. هل تتابع؟"
-        confirmText="نعم، إرجاع"
-        cancelText="إلغاء"
+        title={t('confirmationHistory.revertTitle')}
+        description={t('confirmationHistory.revertDescription')}
+        confirmText={t('confirmationHistory.confirmRevert')}
+        cancelText={t('common.cancel')}
         variant="warning"
         loading={reverting}
         disabled={reverting}

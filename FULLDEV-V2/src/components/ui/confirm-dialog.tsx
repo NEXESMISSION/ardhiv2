@@ -2,6 +2,7 @@ import { type ReactNode } from 'react'
 import { Dialog } from './dialog'
 import { Button } from './button'
 import { Alert } from './alert'
+import { useLanguage } from '@/i18n/context'
 
 interface ConfirmDialogProps {
   open: boolean
@@ -26,16 +27,19 @@ export function ConfirmDialog({
   title,
   description,
   message,
-  confirmText = 'تأكيد',
-  cancelText = 'إلغاء',
+  confirmText,
+  cancelText,
   variant = 'destructive',
   disabled = false,
   loading = false,
   errorMessage,
   children,
 }: ConfirmDialogProps) {
+  const { t } = useLanguage()
   const isDisabled = disabled || loading
   const displayText = description || message || ''
+  const resolvedConfirmText = confirmText ?? t('common.confirm')
+  const resolvedCancelText = cancelText ?? t('common.cancel')
   
   const getVariantClass = () => {
     if (variant === 'danger' || variant === 'destructive') {
@@ -56,7 +60,7 @@ export function ConfirmDialog({
       footer={
         <div className="flex justify-end gap-3">
           <Button variant="secondary" onClick={onClose} disabled={isDisabled}>
-            {cancelText}
+            {resolvedCancelText}
           </Button>
           <Button
             variant="primary"
@@ -64,7 +68,7 @@ export function ConfirmDialog({
             disabled={isDisabled}
             className={getVariantClass()}
           >
-            {loading ? 'جاري المعالجة...' : confirmText}
+            {loading ? t('common.processing') : resolvedConfirmText}
           </Button>
         </div>
       }

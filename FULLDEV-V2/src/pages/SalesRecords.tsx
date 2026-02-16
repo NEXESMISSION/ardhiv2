@@ -11,6 +11,7 @@ import { formatPrice } from '@/utils/priceCalculator'
 import { getPaymentTypeLabel } from '@/utils/paymentTerms'
 import { calculateInstallmentWithDeposit } from '@/utils/installmentCalculator'
 import { buildSaleQuery, formatSalesWithSellers } from '@/utils/salesQueries'
+import { useLanguage } from '@/i18n/context'
 
 interface Sale {
   id: string
@@ -65,7 +66,11 @@ interface Sale {
   }
 }
 
+const replaceVars = (str: string, vars: Record<string, string | number>) =>
+  Object.entries(vars).reduce((s, [k, v]) => s.replace(new RegExp(`\\{\\{${k}\\}\\}`, 'g'), String(v)), str)
+
 export function SalesRecordsPage() {
+  const { t } = useLanguage()
   const [sales, setSales] = useState<Sale[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -156,7 +161,7 @@ export function SalesRecordsPage() {
         if (res.count != null) setTotalCount(res.count)
       }).catch(() => {})
     } catch (e: any) {
-      setError(e.message || 'فشل تحميل سجل المبيعات')
+      setError(e.message || t('salesRecords.loadError'))
     } finally {
       setLoading(false)
     }
@@ -260,51 +265,30 @@ export function SalesRecordsPage() {
   }
 
   function getActionDescription(sale: Sale, action: 'revert' | 'cancel' | 'revertFromInstallments' | 'remove'): string {
-    if (action === 'remove') {
-      return `⚠️ تحذير: سيتم حذف البيع نهائياً من قاعدة البيانات:
-      
-• سيتم حذف سجل البيع بالكامل
-• سيتم حذف جميع الأقساط المرتبطة (إن وجدت)
-• القطعة ستصبح متاحة للبيع مرة أخرى
-• جميع المدفوعات المرتبطة ستُحذف
-
-هذا الإجراء لا يمكن التراجع عنه!`
-    }
-    
+    if (action === 'remove') return t('salesRecords.descRemoveSingle')
     if (action === 'cancel') {
-      return `سيتم إلغاء البيع بالكامل:
-      
-• القطعة ${sale.piece?.piece_number || 'غير محدد'} ستصبح متاحة للبيع مرة أخرى
-• جميع الأموال المحصلة (${formatPrice(sale.deposit_amount || 0)} DT) ستعود للعميل
-• سيتم إزالة البيع من صفحة المالية
-• سيتم حذف جميع الأقساط المرتبطة (إن وجدت)
-
-⚠️ تحذير: لا يمكن التراجع عن هذا الإجراء!`
+      return replaceVars(t('salesRecords.descCancelSingle'), {
+        piece: sale.piece?.piece_number || t('shared.unknown'),
+        deposit: formatPrice(sale.deposit_amount || 0),
+      })
     }
-
     if (action === 'revert') {
-      return `سيتم إرجاع البيع إلى صفحة التأكيدات:
-      
-• حالة البيع ستصبح "معلق"
-• سيتم الاحتفاظ بالعربون فقط (${formatPrice(sale.deposit_amount || 0)} DT)
-• سيتم إزالة جميع الأموال الأخرى:
-  ${sale.payment_method === 'installment' ? '  - التسبقة (إن تم دفعها)' : ''}
-  ${sale.payment_method === 'installment' ? '  - جميع الأقساط المدفوعة' : ''}
-  ${sale.payment_method === 'promise' && sale.partial_payment_amount ? '  - الجزء الأول من الدفع' : ''}
-• القطعة ستبقى محجوزة حتى التأكيد النهائي`
+      let extraLines = ''
+      if (sale.payment_method === 'installment') {
+        extraLines = t('salesRecords.lineAdvanceIfPaid') + '\n' + t('salesRecords.lineInstallmentsPaid') + '\n'
+      } else if (sale.payment_method === 'promise' && sale.partial_payment_amount) {
+        extraLines = t('salesRecords.lineFirstPayment') + '\n'
+      }
+      return replaceVars(t('salesRecords.descRevertSingle'), {
+        deposit: formatPrice(sale.deposit_amount || 0),
+        extraLines,
+      })
     }
-
     if (action === 'revertFromInstallments') {
-      return `سيتم إرجاع البيع من الأقساط إلى صفحة التأكيدات:
-      
-• حالة البيع ستصبح "معلق"
-• سيتم الاحتفاظ بالعربون فقط (${formatPrice(sale.deposit_amount || 0)} DT)
-• سيتم إزالة:
-  - التسبقة (إن تم دفعها)
-  - جميع الأقساط المدفوعة
-• القطعة ستبقى محجوزة حتى التأكيد النهائي`
+      return replaceVars(t('salesRecords.descRevertFromInstallmentsSingle'), {
+        deposit: formatPrice(sale.deposit_amount || 0),
+      })
     }
-
     return ''
   }
 
@@ -350,7 +334,7 @@ export function SalesRecordsPage() {
           .in('id', promiseSaleIds)
       }
 
-      alert(`✅ تم إرجاع ${sales.length} بيع إلى صفحة التأكيدات بنجاح`)
+      alert(`✅ ${replaceVars(t('salesRecords.revertSuccessCount'), { count: sales.length })}`)
       setActionDialogOpen(false)
       setSelectedSale(null)
       setSelectedSales(new Set())
@@ -358,7 +342,7 @@ export function SalesRecordsPage() {
       await loadAllSales()
       window.dispatchEvent(new CustomEvent('saleUpdated'))
     } catch (e: any) {
-      setActionError(e.message || 'فشل إرجاع البيع')
+      setActionError(e.message || t('salesRecords.revertError'))
     } finally {
       setProcessing(false)
     }
@@ -401,7 +385,7 @@ export function SalesRecordsPage() {
           .in('sale_id', installmentSaleIds)
       }
 
-      alert(`✅ تم إلغاء ${sales.length} بيع بنجاح. القطع متاحة للبيع مرة أخرى.`)
+      alert(`✅ ${replaceVars(t('salesRecords.cancelSuccessCount'), { count: sales.length })}`)
       setActionDialogOpen(false)
       setSelectedSale(null)
       setSelectedSales(new Set())
@@ -410,7 +394,7 @@ export function SalesRecordsPage() {
       window.dispatchEvent(new CustomEvent('saleUpdated'))
       window.dispatchEvent(new CustomEvent('pieceStatusChanged'))
     } catch (e: any) {
-      setActionError(e.message || 'فشل إلغاء البيع')
+      setActionError(e.message || t('salesRecords.cancelError'))
     } finally {
       setProcessing(false)
     }
@@ -455,7 +439,7 @@ export function SalesRecordsPage() {
 
       if (pieceErr) throw pieceErr
 
-      alert(`✅ تم حذف ${sales.length} بيع نهائياً بنجاح. القطع متاحة للبيع مرة أخرى.`)
+      alert(`✅ ${replaceVars(t('salesRecords.deleteSuccessCount'), { count: sales.length })}`)
       setActionDialogOpen(false)
       setSelectedSale(null)
       setSelectedSales(new Set())
@@ -464,7 +448,7 @@ export function SalesRecordsPage() {
       window.dispatchEvent(new CustomEvent('saleUpdated'))
       window.dispatchEvent(new CustomEvent('pieceStatusChanged'))
     } catch (e: any) {
-      setActionError(e.message || 'فشل حذف البيع')
+      setActionError(e.message || t('salesRecords.deleteError'))
     } finally {
       setProcessing(false)
     }
@@ -475,7 +459,7 @@ export function SalesRecordsPage() {
       // For multi-select operations
       const selectedArray = getSelectedSalesArray()
       if (selectedArray.length === 0) {
-        alert('يرجى تحديد مبيعات أولاً')
+        alert(t('salesRecords.selectFirst'))
         return
       }
       setSelectedSale(null)
@@ -528,13 +512,13 @@ export function SalesRecordsPage() {
 
   function getStatusBadge(status: string) {
     if (status === 'completed') {
-      return <Badge className="bg-green-100 text-green-800">مكتمل</Badge>
+      return <Badge className="bg-green-100 text-green-800">{t('salesRecords.statusCompleted')}</Badge>
     }
     if (status === 'pending') {
-      return <Badge className="bg-yellow-100 text-yellow-800">معلق</Badge>
+      return <Badge className="bg-yellow-100 text-yellow-800">{t('salesRecords.statusPending')}</Badge>
     }
     if (status === 'cancelled') {
-      return <Badge className="bg-red-100 text-red-800">ملغي</Badge>
+      return <Badge className="bg-red-100 text-red-800">{t('salesRecords.statusCancelled')}</Badge>
     }
     return <Badge>{status}</Badge>
   }
@@ -542,7 +526,7 @@ export function SalesRecordsPage() {
   return (
     <div className="px-2 sm:px-4 lg:px-6 py-3 sm:py-4 lg:py-6 space-y-3 sm:space-y-4 lg:space-y-6">
       <div>
-        <h1 className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-900">سجل المبيعات</h1>
+        <h1 className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-900">{t('salesRecords.title')}</h1>
       </div>
 
       {error && (
@@ -554,7 +538,7 @@ export function SalesRecordsPage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
           <Input
             type="text"
-            placeholder="🔍 بحث (عميل، قطعة، دفعة)..."
+            placeholder={`🔍 ${t('salesRecords.searchPlaceholder')}`}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             size="sm"
@@ -565,27 +549,27 @@ export function SalesRecordsPage() {
             onChange={(e) => setStatusFilter(e.target.value)}
             className="text-xs sm:text-sm"
           >
-            <option value="all">جميع الحالات</option>
-            <option value="pending">معلق</option>
-            <option value="completed">مكتمل</option>
-            <option value="cancelled">ملغي</option>
+            <option value="all">{t('salesRecords.statusAll')}</option>
+            <option value="pending">{t('salesRecords.statusPending')}</option>
+            <option value="completed">{t('salesRecords.statusCompleted')}</option>
+            <option value="cancelled">{t('salesRecords.statusCancelled')}</option>
           </Select>
           <Select
             value={paymentMethodFilter}
             onChange={(e) => setPaymentMethodFilter(e.target.value)}
             className="text-xs sm:text-sm"
           >
-            <option value="all">جميع أنواع الدفع</option>
-            <option value="full">نقدي</option>
-            <option value="installment">تقسيط</option>
-            <option value="promise">وعد بالبيع</option>
+            <option value="all">{t('salesRecords.paymentAll')}</option>
+            <option value="full">{t('salesRecords.paymentFull')}</option>
+            <option value="installment">{t('salesRecords.paymentInstallment')}</option>
+            <option value="promise">{t('salesRecords.paymentPromise')}</option>
           </Select>
           <Select
             value={batchFilter}
             onChange={(e) => setBatchFilter(e.target.value)}
             className="text-xs sm:text-sm"
           >
-            <option value="all">جميع الدفعات</option>
+            <option value="all">{t('salesRecords.batchAll')}</option>
             {batches.map(batch => (
               <option key={batch} value={batch}>{batch}</option>
             ))}
@@ -593,10 +577,9 @@ export function SalesRecordsPage() {
         </div>
         <div className="flex items-center justify-between text-xs text-gray-600 flex-wrap gap-2">
           {searchQuery ? (
-            <span>النتائج على هذه الصفحة: {filteredSales.length} من {sales.length}</span>
+            <span>{t('salesRecords.resultsOnPage')}: {filteredSales.length} {t('salesRecords.ofLabel')} {sales.length}</span>
           ) : (
-            <span>عرض {sales.length > 0 ? (currentPage - 1) * itemsPerPage + 1 : 0} -{' '}
-              {Math.min(currentPage * itemsPerPage, totalCount)} من {totalCount}</span>
+            <span>{replaceVars(t('salesRecords.showingRange'), { from: sales.length > 0 ? (currentPage - 1) * itemsPerPage + 1 : 0, to: Math.min(currentPage * itemsPerPage, totalCount), total: totalCount })}</span>
           )}
           {(searchQuery || statusFilter !== 'all' || paymentMethodFilter !== 'all' || batchFilter !== 'all') && (
             <Button
@@ -610,7 +593,7 @@ export function SalesRecordsPage() {
               }}
               className="text-[10px] px-2 py-0.5"
             >
-              إعادة تعيين
+              {t('salesRecords.reset')}
             </Button>
           )}
         </div>
@@ -620,7 +603,7 @@ export function SalesRecordsPage() {
         <div className="flex items-center justify-center py-8 min-h-[120px]">
           <div className="text-center">
             <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600" />
-            <p className="mt-2 text-xs text-gray-500">جاري التحميل...</p>
+            <p className="mt-2 text-xs text-gray-500">{t('salesRecords.loading')}</p>
           </div>
         </div>
       ) : (
@@ -630,7 +613,7 @@ export function SalesRecordsPage() {
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-2 sm:p-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <span className="text-xs sm:text-sm font-medium text-gray-900">
-              تم تحديد {selectedSales.size} بيع
+              {replaceVars(t('salesRecords.selectedCount'), { count: selectedSales.size })}
             </span>
             <Button
               variant="secondary"
@@ -638,7 +621,7 @@ export function SalesRecordsPage() {
               onClick={() => setSelectedSales(new Set())}
               className="text-xs px-2 py-1"
             >
-              إلغاء التحديد
+              {t('salesRecords.cancelSelection')}
             </Button>
           </div>
           <div className="flex flex-wrap gap-1.5">
@@ -649,7 +632,7 @@ export function SalesRecordsPage() {
                 className="text-xs px-2 py-1"
                 onClick={() => openActionDialog(null, 'revert', true)}
               >
-                إرجاع إلى التأكيدات
+                {t('salesRecords.revertToConfirmations')}
               </Button>
             )}
             {filteredSales.filter(s => selectedSales.has(s.id) && (s.status === 'completed' || s.status === 'pending')).length > 0 && (
@@ -659,7 +642,7 @@ export function SalesRecordsPage() {
                 className="text-xs px-2 py-1 bg-orange-600 text-white hover:bg-orange-700"
                 onClick={() => openActionDialog(null, 'cancel', true)}
               >
-                إلغاء
+                {t('salesRecords.cancel')}
               </Button>
             )}
             <Button
@@ -668,7 +651,7 @@ export function SalesRecordsPage() {
               className="text-xs px-2 py-1 bg-red-600 text-white hover:bg-red-700"
               onClick={() => openActionDialog(null, 'remove', true)}
             >
-              إزالة كاملة
+              {t('salesRecords.fullRemoval')}
             </Button>
           </div>
         </div>
@@ -676,7 +659,7 @@ export function SalesRecordsPage() {
 
       {filteredSales.length === 0 ? (
         <Alert className="text-xs sm:text-sm">
-          {sales.length === 0 ? 'لا توجد مبيعات مسجلة' : 'لا توجد نتائج للبحث'}
+          {sales.length === 0 ? t('salesRecords.noSales') : t('salesRecords.noResults')}
         </Alert>
       ) : (
         <>
@@ -689,7 +672,7 @@ export function SalesRecordsPage() {
               className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
             />
             <label className="text-xs sm:text-sm text-gray-700 cursor-pointer" onClick={toggleSelectAll}>
-              تم قراءة الكل ({filteredSales.length})
+              {replaceVars(t('salesRecords.readAll'), { count: filteredSales.length })}
             </label>
           </div>
 
@@ -722,13 +705,13 @@ export function SalesRecordsPage() {
 
                   {/* Client */}
                   <div>
-                    <span className="text-xs sm:text-sm font-medium text-gray-600">العميل:</span>{' '}
+                    <span className="text-xs sm:text-sm font-medium text-gray-600">{t('salesRecords.clientLabel')}:</span>{' '}
                     <span className="text-xs sm:text-sm text-gray-900">{sale.client?.name || '-'}</span>
                     {sale.seller?.name && (
-                      <span className="text-xs text-gray-500">• باعه {sale.seller.name}{sale.seller.place ? ` (${sale.seller.place})` : ''}</span>
+                      <span className="text-xs text-gray-500">• {t('salesRecords.soldBy')} {sale.seller.name}{sale.seller.place ? ` (${sale.seller.place})` : ''}</span>
                     )}
                     {sale.confirmedBy?.name && (
-                      <span className="text-xs text-gray-500">• أكده {sale.confirmedBy.name}{sale.confirmedBy.place ? ` (${sale.confirmedBy.place})` : ''}</span>
+                      <span className="text-xs text-gray-500">• {t('salesRecords.confirmedBy')} {sale.confirmedBy.name}{sale.confirmedBy.place ? ` (${sale.confirmedBy.place})` : ''}</span>
                     )}
                   </div>
 
@@ -744,19 +727,19 @@ export function SalesRecordsPage() {
                   {/* Sale Details */}
                   <div className="space-y-1.5 sm:space-y-2 text-xs sm:text-sm border-t border-gray-200 pt-2 sm:pt-3 lg:pt-4">
                     <div className="flex justify-between">
-                      <span className="text-gray-600">سعر البيع:</span>
+                      <span className="text-gray-600">{t('salesRecords.salePriceLabel')}:</span>
                       <span className="font-semibold text-gray-900">
                         {formatPrice(sale.sale_price)} DT
                       </span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-gray-600">العربون:</span>
+                      <span className="text-gray-600">{t('salesRecords.depositLabel')}:</span>
                       <span className="font-semibold text-gray-900">
                         {formatPrice(sale.deposit_amount || 0)} DT
                       </span>
                     </div>
                     <div className="flex justify-between pt-1.5 sm:pt-2 border-t border-gray-100">
-                      <span className="text-gray-600">التاريخ:</span>
+                      <span className="text-gray-600">{t('salesRecords.dateLabel')}:</span>
                       <span className="text-gray-900 text-xs">{formatDate(sale.sale_date)}</span>
                     </div>
                   </div>
@@ -770,7 +753,7 @@ export function SalesRecordsPage() {
                         className="w-full text-xs sm:text-sm py-1.5 px-2"
                         onClick={() => openActionDialog(sale, 'revert')}
                       >
-                        إرجاع إلى التأكيدات
+                        {t('salesRecords.revertToConfirmations')}
                       </Button>
                     )}
                     {canRevertFromInstallments && (
@@ -780,7 +763,7 @@ export function SalesRecordsPage() {
                         className="w-full text-xs sm:text-sm py-1.5 px-2"
                         onClick={() => openActionDialog(sale, 'revertFromInstallments')}
                         >
-                        إرجاع من الأقساط
+                        {t('salesRecords.revertFromInstallments')}
                         </Button>
                       )}
                     {canCancel && (
@@ -790,7 +773,7 @@ export function SalesRecordsPage() {
                         className="w-full bg-orange-600 text-white hover:bg-orange-700 text-xs sm:text-sm py-1.5 px-2"
                         onClick={() => openActionDialog(sale, 'cancel')}
                         >
-                        إلغاء البيع
+                        {t('salesRecords.revertSale')}
                         </Button>
                       )}
                       <Button
@@ -799,7 +782,7 @@ export function SalesRecordsPage() {
                       className="w-full bg-red-600 text-white hover:bg-red-700 text-xs sm:text-sm py-1.5 px-2"
                       onClick={() => openActionDialog(sale, 'remove')}
                       >
-                      إزالة كاملة
+                      {t('salesRecords.fullRemoval')}
                       </Button>
                   </div>
                 </div>
@@ -808,11 +791,11 @@ export function SalesRecordsPage() {
           })}
         </div>
 
-        {/* Pagination - same style as إدارة العملاء */}
+        {/* Pagination */}
         {!searchQuery && totalPages > 1 && (
           <div className="flex items-center justify-center gap-1.5 sm:gap-2 flex-wrap mt-4">
             <Button variant="secondary" size="sm" onClick={() => goToPage(currentPage - 1)} disabled={!hasPrevPage} className="text-xs sm:text-sm py-1.5 px-2">
-              السابق
+              {t('salesRecords.previous')}
             </Button>
             {totalPages <= 7 ? (
               Array.from({ length: totalPages }, (_, i) => {
@@ -839,7 +822,7 @@ export function SalesRecordsPage() {
               </>
             )}
             <Button variant="secondary" size="sm" onClick={() => goToPage(currentPage + 1)} disabled={!hasNextPage} className="text-xs sm:text-sm py-1.5 px-2">
-              التالي
+              {t('salesRecords.next')}
             </Button>
           </div>
         )}
@@ -884,34 +867,28 @@ export function SalesRecordsPage() {
           }}
           title={
             actionType === 'remove'
-              ? selectedSales.size > 0 ? `إزالة ${selectedSales.size} بيع نهائياً` : 'إزالة البيع نهائياً'
+              ? selectedSales.size > 0 ? replaceVars(t('salesRecords.titleRemoveCount'), { count: selectedSales.size }) : t('salesRecords.titleRemoveSingle')
               : actionType === 'cancel'
-                ? selectedSales.size > 0 ? `إلغاء ${selectedSales.size} بيع` : 'إلغاء البيع'
+                ? selectedSales.size > 0 ? replaceVars(t('salesRecords.titleCancelCount'), { count: selectedSales.size }) : t('salesRecords.titleCancelSingle')
                 : actionType === 'revert'
-                  ? selectedSales.size > 0 ? `إرجاع ${selectedSales.size} بيع إلى التأكيدات` : 'إرجاع البيع إلى التأكيدات'
-                  : 'إرجاع البيع من الأقساط'
+                  ? selectedSales.size > 0 ? replaceVars(t('salesRecords.titleRevertCount'), { count: selectedSales.size }) : t('salesRecords.titleRevertSingle')
+                  : t('salesRecords.revertFromInstallments')
           }
           description={
             selectedSales.size > 0
               ? (() => {
                   const count = selectedSales.size
-                  if (actionType === 'remove') {
-                    return `⚠️ تحذير: سيتم حذف ${count} بيع نهائياً من قاعدة البيانات:\n\n• سيتم حذف سجلات البيع بالكامل\n• سيتم حذف جميع الأقساط المرتبطة (إن وجدت)\n• القطع ستصبح متاحة للبيع مرة أخرى\n• جميع المدفوعات المرتبطة ستُحذف\n\nهذا الإجراء لا يمكن التراجع عنه!`
-                  }
-                  if (actionType === 'cancel') {
-                    return `سيتم إلغاء ${count} بيع:\n\n• القطع ستصبح متاحة للبيع مرة أخرى\n• سيتم إزالة المبيعات من صفحة المالية\n• سيتم حذف جميع الأقساط المرتبطة (إن وجدت)\n\n⚠️ تحذير: لا يمكن التراجع عن هذا الإجراء!`
-                  }
-                  if (actionType === 'revert' || actionType === 'revertFromInstallments') {
-                    return `سيتم إرجاع ${count} بيع إلى صفحة التأكيدات:\n\n• حالة المبيعات ستصبح "معلق"\n• سيتم الاحتفاظ بالعربون فقط\n• سيتم إزالة جميع الأموال الأخرى (التسبقة، الأقساط، إلخ)\n• القطع ستبقى محجوزة حتى التأكيد النهائي`
-                  }
-                  return `سيتم تطبيق هذا الإجراء على ${count} بيع محدد.`
+                  if (actionType === 'remove') return replaceVars(t('salesRecords.descRemoveCount'), { count })
+                  if (actionType === 'cancel') return replaceVars(t('salesRecords.descCancelCount'), { count })
+                  if (actionType === 'revert' || actionType === 'revertFromInstallments') return replaceVars(t('salesRecords.descRevertCount'), { count })
+                  return replaceVars(t('salesRecords.descApplyCount'), { count })
                 })()
               : selectedSale
                 ? getActionDescription(selectedSale, actionType)
                 : ''
           }
-          confirmText={processing ? 'جاري المعالجة...' : 'تأكيد'}
-          cancelText="إلغاء"
+          confirmText={processing ? t('common.processing') : t('salesRecords.confirm')}
+          cancelText={t('salesRecords.cancel')}
           variant="destructive"
           disabled={processing}
           loading={processing}

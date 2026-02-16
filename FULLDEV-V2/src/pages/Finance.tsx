@@ -10,6 +10,7 @@ import { buildSaleQuery, formatSalesWithSellers } from '@/utils/salesQueries'
 import { FinanceDetailsDialog } from '@/components/FinanceDetailsDialog'
 import { InstallmentStatsDialog } from '@/components/InstallmentStatsDialog'
 import { Dialog } from '@/components/ui/dialog'
+import { useLanguage } from '@/i18n/context'
 
 type TimeFilter = 'today' | 'week' | 'month' | 'all'
 
@@ -91,6 +92,7 @@ interface PaymentTypeData {
 }
 
 export function FinancePage() {
+  const { t } = useLanguage()
   const [loading, setLoading] = useState(true)
   const [timeFilter, setTimeFilter] = useState<TimeFilter>('all')
   const [dateFilter, setDateFilter] = useState<string>('')
@@ -591,19 +593,19 @@ export function FinancePage() {
   }, [filteredData.sales, paymentTypes])
 
   const typeLabels: Record<string, string> = {
-    installments: 'بالتقسيط',
-    deposits: 'العربون',
-      full: 'بالحاضر',
-    advance: 'التسبقة',
-    promise: 'وعد بالبيع',
-    commission: 'العمولة',
+    installments: t('finance.typeInstallments'),
+    deposits: t('finance.typeDeposits'),
+    full: t('finance.typeFull'),
+    advance: t('finance.typeAdvance'),
+    promise: t('finance.typePromise'),
+    commission: t('finance.typeCommission'),
   }
 
   return (
     <div className="px-2 sm:px-4 lg:px-6 py-3 sm:py-4 lg:py-6 space-y-3 sm:space-y-4 lg:space-y-6">
       {/* Header - always visible for instant shell */}
       <div className="flex items-center justify-between">
-        <h1 className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-900">المالية</h1>
+        <h1 className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-900">{t('finance.pageTitle')}</h1>
       </div>
 
       {/* Time Filters */}
@@ -615,7 +617,7 @@ export function FinancePage() {
           onClick={() => setTimeFilter('today')}
             className="text-xs sm:text-sm py-1.5 px-2"
         >
-          اليوم
+          {t('finance.filterToday')}
         </Button>
         <Button
             variant={timeFilter === 'week' ? 'primary' : 'secondary'}
@@ -623,7 +625,7 @@ export function FinancePage() {
           onClick={() => setTimeFilter('week')}
             className="text-xs sm:text-sm py-1.5 px-2"
         >
-          هذا الأسبوع
+          {t('finance.filterWeek')}
         </Button>
         <Button
             variant={timeFilter === 'month' ? 'primary' : 'secondary'}
@@ -631,7 +633,7 @@ export function FinancePage() {
           onClick={() => setTimeFilter('month')}
             className="text-xs sm:text-sm py-1.5 px-2"
         >
-          هذا الشهر
+          {t('finance.filterMonth')}
         </Button>
         <Button
             variant={timeFilter === 'all' ? 'primary' : 'secondary'}
@@ -639,7 +641,7 @@ export function FinancePage() {
           onClick={() => setTimeFilter('all')}
             className="text-xs sm:text-sm py-1.5 px-2"
         >
-          الكل
+          {t('finance.filterAll')}
         </Button>
       </div>
         <div className="flex items-center gap-1.5 sm:gap-2">
@@ -648,7 +650,7 @@ export function FinancePage() {
             value={dateFilter}
             onChange={(e) => setDateFilter(e.target.value)}
             className="w-full sm:w-40 text-xs sm:text-sm"
-            placeholder="تاريخ محدد"
+            placeholder={t('finance.datePlaceholder')}
             size="sm"
           />
           {dateFilter && (
@@ -658,7 +660,7 @@ export function FinancePage() {
               onClick={() => setDateFilter('')}
               className="text-xs sm:text-sm py-1.5 px-2"
             >
-              إزالة
+              {t('finance.remove')}
             </Button>
               )}
         </div>
@@ -668,7 +670,7 @@ export function FinancePage() {
         <div className="flex items-center justify-center py-12 min-h-[200px]">
           <div className="text-center">
             <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mb-2" />
-            <p className="text-sm text-gray-500">جاري تحميل البيانات المالية...</p>
+            <p className="text-sm text-gray-500">{t('finance.loadingData')}</p>
           </div>
         </div>
       ) : (
@@ -678,21 +680,21 @@ export function FinancePage() {
         {/* Total Revenue */}
         <Card className="p-4 lg:p-5 bg-gradient-to-br from-blue-50 to-blue-100 border-2 border-blue-300">
           <div className="flex items-center justify-between mb-2">
-            <p className="text-xs sm:text-sm font-semibold text-blue-900">إجمالي الإيرادات</p>
+            <p className="text-xs sm:text-sm font-semibold text-blue-900">{t('finance.totalRevenue')}</p>
             <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
           </div>
           <p className="text-2xl sm:text-3xl lg:text-4xl font-bold text-blue-900 mb-1">{formatPrice(stats.totalRevenue)} DT</p>
           <p className="text-xs text-blue-700">
-            {stats.totalPiecesSold} قطعة | {stats.totalClients} عميل
+            {stats.totalPiecesSold} {t('finance.pieceUnit')} | {stats.totalClients} {t('finance.clientUnit')}
           </p>
         </Card>
 
         {/* Total Collected */}
         <Card className="p-4 lg:p-5 bg-gradient-to-br from-green-50 to-green-100 border-2 border-green-300">
           <div className="flex items-center justify-between mb-2">
-            <p className="text-xs sm:text-sm font-semibold text-green-900">إجمالي المحصل</p>
+            <p className="text-xs sm:text-sm font-semibold text-green-900">{t('finance.totalCollected')}</p>
             <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
@@ -706,7 +708,7 @@ export function FinancePage() {
               ></div>
             </div>
             <p className="text-xs text-green-700 mt-1">
-              {stats.totalRevenue > 0 ? Math.round((stats.totalCollected / stats.totalRevenue) * 100) : 0}% من الإيرادات
+              {stats.totalRevenue > 0 ? Math.round((stats.totalCollected / stats.totalRevenue) * 100) : 0}% {t('finance.percentOfRevenue')}
             </p>
           </div>
         </Card>
@@ -720,14 +722,14 @@ export function FinancePage() {
           }}
         >
           <div className="flex items-center justify-between mb-2">
-            <p className="text-xs sm:text-sm font-semibold text-red-900">المبلغ غير المدفوع</p>
+            <p className="text-xs sm:text-sm font-semibold text-red-900">{t('finance.unpaidAmount')}</p>
             <svg className="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
           </div>
           <p className="text-2xl sm:text-3xl lg:text-4xl font-bold text-red-900 mb-1">{formatPrice(stats.unpaidAmount)} DT</p>
           <p className="text-xs text-red-700">
-            {stats.unpaidInstallments} قسط | {stats.unpaidClients} عميل
+            {stats.unpaidInstallments} {t('finance.installmentUnit')} | {stats.unpaidClients} {t('finance.clientUnit')}
           </p>
         </Card>
 
@@ -740,7 +742,7 @@ export function FinancePage() {
           }}
         >
           <div className="flex items-center justify-between mb-2">
-            <p className="text-xs sm:text-sm font-semibold text-orange-900">المتوقع هذا الشهر</p>
+            <p className="text-xs sm:text-sm font-semibold text-orange-900">{t('finance.expectedThisMonth')}</p>
             <svg className="w-5 h-5 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
             </svg>
@@ -769,7 +771,7 @@ export function FinancePage() {
 
       {/* Payment Types - Mobile-Friendly Cards */}
       <div>
-        <h2 className="text-sm sm:text-base lg:text-lg font-semibold text-gray-900 mb-2 sm:mb-3 lg:mb-4">المدفوعات والعمولة</h2>
+        <h2 className="text-sm sm:text-base lg:text-lg font-semibold text-gray-900 mb-2 sm:mb-3 lg:mb-4">{t('finance.paymentsAndCommission')}</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3">
           {Object.entries(filteredPaymentTypes).map(([type, data]) => (
             <Card
@@ -788,11 +790,11 @@ export function FinancePage() {
                 <div className="flex-1">
                   <p className="text-xs sm:text-sm font-medium text-gray-700 mb-1">{typeLabels[type]}</p>
                   <p className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-900 mb-1">{formatPrice(data.amount)} DT</p>
-                  <p className="text-xs text-gray-500">{data.count} عملية</p>
+                  <p className="text-xs text-gray-500">{data.count} {t('finance.operationCount')}</p>
                 </div>
                 {data.count > 0 && (
                   <Badge variant="info" size="sm" className="text-xs">
-                    {data.pieces} قطعة
+                    {data.pieces} {t('finance.pieceUnit')}
                   </Badge>
                 )}
               </div>
@@ -804,7 +806,7 @@ export function FinancePage() {
       {/* Place-Based Breakdown */}
       {placeBreakdown.length > 0 && (
         <div>
-          <h2 className="text-sm sm:text-base lg:text-lg font-semibold text-gray-900 mb-2 sm:mb-3 lg:mb-4">الإيرادات حسب الموقع</h2>
+          <h2 className="text-sm sm:text-base lg:text-lg font-semibold text-gray-900 mb-2 sm:mb-3 lg:mb-4">{t('finance.placeDetailsTitle')}</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
             {placeBreakdown.map((place) => {
               const collectionRate = place.totalRevenue > 0 
@@ -823,21 +825,21 @@ export function FinancePage() {
                   <div className="flex items-center justify-between mb-3">
                     <h3 className="text-base sm:text-lg font-bold text-purple-900">{place.name}</h3>
                     <Badge variant="info" size="sm" className="text-xs">
-                      {place.batches.size} دفعة
+                      {place.batches.size} {t('finance.batchUnit')}
                     </Badge>
                   </div>
                   
                   <div className="space-y-2 mb-3">
                     <div className="flex justify-between items-center">
-                      <span className="text-xs sm:text-sm text-gray-700">إجمالي الإيرادات:</span>
+                      <span className="text-xs sm:text-sm text-gray-700">{t('finance.totalRevenue')}:</span>
                       <span className="text-sm sm:text-base font-bold text-gray-900">{formatPrice(place.totalRevenue)} DT</span>
                     </div>
                     <div className="flex justify-between items-center">
-                      <span className="text-xs sm:text-sm text-gray-700">إجمالي المحصل:</span>
+                      <span className="text-xs sm:text-sm text-gray-700">{t('finance.totalCollected')}:</span>
                       <span className="text-sm sm:text-base font-bold text-green-600">{formatPrice(place.totalCollected)} DT</span>
                     </div>
                     <div className="flex justify-between items-center">
-                      <span className="text-xs sm:text-sm text-gray-700">معدل التحصيل:</span>
+                      <span className="text-xs sm:text-sm text-gray-700">{t('finance.collectionRate')}:</span>
                       <span className={`text-sm sm:text-base font-bold ${collectionRate >= 70 ? 'text-green-600' : collectionRate >= 50 ? 'text-yellow-600' : 'text-red-600'}`}>
                         {Math.round(collectionRate)}%
                       </span>
@@ -855,9 +857,9 @@ export function FinancePage() {
                   </div>
 
                   <div className="flex justify-between text-xs text-gray-600 pt-2 border-t border-gray-200">
-                    <span>{place.pieces} قطعة</span>
-                    <span>{place.clients.size} عميل</span>
-                    <span>{place.sales.length} عملية</span>
+                    <span>{place.pieces} {t('finance.pieceUnit')}</span>
+                    <span>{place.clients.size} {t('finance.clientUnit')}</span>
+                    <span>{place.sales.length} {t('finance.operationCount')}</span>
                   </div>
                 </Card>
               )
@@ -869,7 +871,7 @@ export function FinancePage() {
       {/* User Performance Tracking */}
       {sellerPerformance.length > 0 && (
         <div>
-          <h2 className="text-sm sm:text-base lg:text-lg font-semibold text-gray-900 mb-2 sm:mb-3 lg:mb-4">أداء البائعين</h2>
+          <h2 className="text-sm sm:text-base lg:text-lg font-semibold text-gray-900 mb-2 sm:mb-3 lg:mb-4">{t('finance.sellerPerformance')}</h2>
           <Card className="p-4 lg:p-5">
             <div className="space-y-3 sm:space-y-4">
               {sellerPerformance.map((seller, index) => {
@@ -894,7 +896,7 @@ export function FinancePage() {
                       </div>
                       <div className="text-right">
                         <p className="text-base sm:text-lg font-bold text-gray-900">{formatPrice(seller.total)} DT</p>
-                        <p className="text-xs text-gray-500">{seller.count} عملية</p>
+                        <p className="text-xs text-gray-500">{seller.count} {t('finance.operationCount')}</p>
                       </div>
                     </div>
                     
@@ -936,18 +938,18 @@ export function FinancePage() {
 
       {/* Statistics Graphs Section */}
       <div>
-        <h2 className="text-sm sm:text-base lg:text-lg font-semibold text-gray-900 mb-3 sm:mb-4">الرسوم البيانية والإحصائيات</h2>
+        <h2 className="text-sm sm:text-base lg:text-lg font-semibold text-gray-900 mb-3 sm:mb-4">{t('finance.chartsTitle')}</h2>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
           {/* Revenue vs Collected Line Chart */}
           <Card className="p-4 lg:p-6">
-            <h3 className="text-sm sm:text-base font-semibold text-gray-900 mb-4">الإيرادات مقابل المحصل</h3>
+            <h3 className="text-sm sm:text-base font-semibold text-gray-900 mb-4">{t('finance.revenueVsCollected')}</h3>
             <div className="space-y-4">
               <div className="flex justify-between items-center mb-2">
-                <span className="text-xs sm:text-sm text-gray-600">إجمالي الإيرادات</span>
+                <span className="text-xs sm:text-sm text-gray-600">{t('finance.totalRevenue')}</span>
                 <span className="font-bold text-blue-600">{formatPrice(stats.totalRevenue)} DT</span>
               </div>
               <div className="flex justify-between items-center mb-2">
-                <span className="text-xs sm:text-sm text-gray-600">إجمالي المحصل</span>
+                <span className="text-xs sm:text-sm text-gray-600">{t('finance.totalCollected')}</span>
                 <span className="font-bold text-green-600">{formatPrice(stats.totalCollected)} DT</span>
               </div>
               <div className="relative h-48 sm:h-56 bg-gray-50 rounded-lg p-4 border border-gray-200">
@@ -1016,16 +1018,16 @@ export function FinancePage() {
                   {/* Labels */}
                   <text x="20" y="170" fontSize="10" fill="#6b7280" textAnchor="middle">0%</text>
                   <text x="20" y="30" fontSize="10" fill="#6b7280" textAnchor="middle">100%</text>
-                  <text x="200" y="185" fontSize="11" fill="#374151" textAnchor="middle" fontWeight="600">الإيرادات</text>
+                  <text x="200" y="185" fontSize="11" fill="#374151" textAnchor="middle" fontWeight="600">{t('finance.revenueShort')}</text>
                 </svg>
                 <div className="absolute bottom-2 left-0 right-0 flex justify-center gap-4 text-xs">
                   <div className="flex items-center gap-1">
                     <div className="w-3 h-0.5 bg-blue-500"></div>
-                    <span className="text-gray-600">إيرادات</span>
+                    <span className="text-gray-600">{t('finance.revenueShort')}</span>
                   </div>
                   <div className="flex items-center gap-1">
                     <div className="w-3 h-0.5 bg-green-500"></div>
-                    <span className="text-gray-600">محصل</span>
+                    <span className="text-gray-600">{t('finance.collectedShort')}</span>
                   </div>
                 </div>
               </div>
@@ -1034,7 +1036,7 @@ export function FinancePage() {
 
           {/* Payment Types Distribution */}
           <Card className="p-4 lg:p-6">
-            <h3 className="text-sm sm:text-base font-semibold text-gray-900 mb-4">توزيع أنواع المدفوعات</h3>
+            <h3 className="text-sm sm:text-base font-semibold text-gray-900 mb-4">{t('finance.paymentTypesDist')}</h3>
             <div className="space-y-3">
               {Object.entries(filteredPaymentTypes)
                 .filter(([, data]) => data.amount > 0)
@@ -1064,13 +1066,13 @@ export function FinancePage() {
                         >
                           {percentage > 15 && (
                             <span className="text-xs font-semibold text-white">
-                              {data.count} عملية
+                              {data.count} {t('finance.operationCount')}
                             </span>
                           )}
                         </div>
                       </div>
                       {percentage <= 15 && (
-                        <p className="text-xs text-gray-500 mt-0.5">{data.count} عملية</p>
+                        <p className="text-xs text-gray-500 mt-0.5">{data.count} {t('finance.operationCount')}</p>
                       )}
                     </div>
                   )
@@ -1080,7 +1082,7 @@ export function FinancePage() {
 
           {/* Monthly Trends Line Chart */}
           <Card className="p-4 lg:p-6">
-            <h3 className="text-sm sm:text-base font-semibold text-gray-900 mb-4">الاتجاهات الشهرية</h3>
+            <h3 className="text-sm sm:text-base font-semibold text-gray-900 mb-4">{t('finance.monthlyTrends')}</h3>
             <div className="relative h-64 sm:h-72 bg-gray-50 rounded-lg p-4 border border-gray-200">
               {(() => {
                 // Group sales by month
@@ -1114,7 +1116,7 @@ export function FinancePage() {
                 if (sortedMonths.length === 0) {
                   return (
                     <div className="flex items-center justify-center h-full text-gray-500 text-sm">
-                      لا توجد بيانات شهرية متاحة
+                      {t('finance.noMonthlyData')}
                     </div>
                   )
                 }
@@ -1239,11 +1241,11 @@ export function FinancePage() {
               <div className="absolute bottom-2 left-0 right-0 flex justify-center gap-4 text-xs">
                 <div className="flex items-center gap-1">
                   <div className="w-3 h-0.5 bg-blue-500"></div>
-                  <span className="text-gray-600">إيرادات</span>
+                  <span className="text-gray-600">{t('finance.revenueShort')}</span>
                 </div>
                 <div className="flex items-center gap-1">
                   <div className="w-3 h-0.5 bg-green-500"></div>
-                  <span className="text-gray-600">محصل</span>
+                  <span className="text-gray-600">{t('finance.collectedShort')}</span>
                 </div>
               </div>
             </div>
@@ -1251,11 +1253,11 @@ export function FinancePage() {
 
           {/* Payment Status Overview */}
           <Card className="p-4 lg:p-6">
-            <h3 className="text-sm sm:text-base font-semibold text-gray-900 mb-4">نظرة عامة على حالة المدفوعات</h3>
+            <h3 className="text-sm sm:text-base font-semibold text-gray-900 mb-4">{t('finance.paymentStatusOverview')}</h3>
             <div className="space-y-4">
               <div>
                 <div className="flex justify-between text-xs sm:text-sm mb-2">
-                  <span className="text-gray-600">مدفوع</span>
+                  <span className="text-gray-600">{t('finance.paid')}</span>
                   <span className="font-bold text-green-600">{formatPrice(stats.paidAmount)} DT</span>
                 </div>
                 <div className="w-full bg-gray-200 rounded-full h-5 sm:h-6">
@@ -1264,14 +1266,14 @@ export function FinancePage() {
                     style={{ width: `${(stats.totalCollected + stats.unpaidAmount) > 0 ? (stats.paidAmount / (stats.totalCollected + stats.unpaidAmount)) * 100 : 0}%` }}
                   >
                     <span className="text-xs sm:text-sm font-semibold text-white">
-                      {stats.paidInstallments} قسط
+                      {stats.paidInstallments} {t('finance.installmentUnit')}
                     </span>
                   </div>
                 </div>
               </div>
               <div>
                 <div className="flex justify-between text-xs sm:text-sm mb-2">
-                  <span className="text-gray-600">غير مدفوع</span>
+                  <span className="text-gray-600">{t('finance.unpaid')}</span>
                   <span className="font-bold text-red-600">{formatPrice(stats.unpaidAmount)} DT</span>
                 </div>
                 <div className="w-full bg-gray-200 rounded-full h-5 sm:h-6">
@@ -1280,14 +1282,14 @@ export function FinancePage() {
                     style={{ width: `${(stats.totalCollected + stats.unpaidAmount) > 0 ? (stats.unpaidAmount / (stats.totalCollected + stats.unpaidAmount)) * 100 : 0}%` }}
                   >
                     <span className="text-xs sm:text-sm font-semibold text-white">
-                      {stats.unpaidInstallments} قسط
+                      {stats.unpaidInstallments} {t('finance.installmentUnit')}
                     </span>
                   </div>
                 </div>
               </div>
               <div>
                 <div className="flex justify-between text-xs sm:text-sm mb-2">
-                  <span className="text-gray-600">المتوقع هذا الشهر</span>
+                  <span className="text-gray-600">المتوقع {t('finance.filterMonth')}</span>
                   <span className="font-bold text-orange-600">{formatPrice(stats.expectedThisMonth)} DT</span>
                 </div>
                 <div className="w-full bg-gray-200 rounded-full h-5 sm:h-6">
@@ -1314,26 +1316,26 @@ export function FinancePage() {
             setPlaceDetailsDialogOpen(false)
             setSelectedPlaceDetails(null)
           }}
-          title={`تفاصيل الموقع: ${selectedPlaceDetails.name}`}
+          title={`${t('finance.placeDetailsTitle')}: ${selectedPlaceDetails.name}`}
           size="xl"
         >
           <div className="space-y-4 sm:space-y-6">
             {/* Summary Cards */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
               <Card className="p-3 sm:p-4 bg-blue-50 border-blue-200">
-                <p className="text-xs sm:text-sm text-gray-600 mb-1">إجمالي الإيرادات</p>
+                <p className="text-xs sm:text-sm text-gray-600 mb-1">{t('finance.totalRevenue')}</p>
                 <p className="text-lg sm:text-xl font-bold text-blue-900">{formatPrice(selectedPlaceDetails.totalRevenue)} DT</p>
               </Card>
               <Card className="p-3 sm:p-4 bg-green-50 border-green-200">
-                <p className="text-xs sm:text-sm text-gray-600 mb-1">إجمالي المحصل</p>
+                <p className="text-xs sm:text-sm text-gray-600 mb-1">{t('finance.totalCollected')}</p>
                 <p className="text-lg sm:text-xl font-bold text-green-900">{formatPrice(selectedPlaceDetails.totalCollected)} DT</p>
               </Card>
               <Card className="p-3 sm:p-4 bg-purple-50 border-purple-200">
-                <p className="text-xs sm:text-sm text-gray-600 mb-1">عدد القطع</p>
+                <p className="text-xs sm:text-sm text-gray-600 mb-1">{t('finance.pieceCount')}</p>
                 <p className="text-lg sm:text-xl font-bold text-purple-900">{selectedPlaceDetails.pieces}</p>
               </Card>
               <Card className="p-3 sm:p-4 bg-orange-50 border-orange-200">
-                <p className="text-xs sm:text-sm text-gray-600 mb-1">عدد العملاء</p>
+                <p className="text-xs sm:text-sm text-gray-600 mb-1">{t('finance.clientCount')}</p>
                 <p className="text-lg sm:text-xl font-bold text-orange-900">{selectedPlaceDetails.clients.size}</p>
               </Card>
             </div>
@@ -1341,7 +1343,7 @@ export function FinancePage() {
             {/* Collection Rate */}
             <Card className="p-4 sm:p-5">
               <div className="flex items-center justify-between mb-3">
-                <p className="text-sm sm:text-base font-semibold text-gray-900">معدل التحصيل</p>
+                <p className="text-sm sm:text-base font-semibold text-gray-900">{t('finance.collectionRate')}</p>
                 <span className={`text-lg sm:text-xl font-bold ${
                   (selectedPlaceDetails.totalCollected / selectedPlaceDetails.totalRevenue) >= 0.7 
                     ? 'text-green-600' 
@@ -1374,7 +1376,7 @@ export function FinancePage() {
 
             {/* Batches */}
             <div>
-              <h3 className="text-sm sm:text-base font-semibold text-gray-900 mb-3">الدفعات ({selectedPlaceDetails.batches.size})</h3>
+              <h3 className="text-sm sm:text-base font-semibold text-gray-900 mb-3">{t('finance.batchesLabel')} ({selectedPlaceDetails.batches.size})</h3>
               <div className="space-y-2">
                 {Array.from(selectedPlaceDetails.batches).map((batchId) => {
                   const batch = availableBatches.find(b => b.id === batchId)
@@ -1390,7 +1392,7 @@ export function FinancePage() {
 
             {/* Sales List */}
             <div>
-              <h3 className="text-sm sm:text-base font-semibold text-gray-900 mb-3">المبيعات ({selectedPlaceDetails.sales.length})</h3>
+              <h3 className="text-sm sm:text-base font-semibold text-gray-900 mb-3">{t('finance.salesLabel')} ({selectedPlaceDetails.sales.length})</h3>
               <div className="space-y-2 max-h-96 overflow-y-auto">
                 {selectedPlaceDetails.sales.map((sale) => (
                   <Card key={sale.id} className="p-3 sm:p-4">
@@ -1398,27 +1400,27 @@ export function FinancePage() {
                       <div className="flex-1">
                         <div className="flex items-center gap-2 mb-2">
                           <p className="text-sm sm:text-base font-semibold text-gray-900">
-                            القطعة {sale.piece?.piece_number || 'غير معروف'}
+                            {t('finance.piece')} {sale.piece?.piece_number || t('shared.unknown')}
                           </p>
                           <Badge 
                             variant={sale.status === 'completed' ? 'success' : sale.status === 'pending' ? 'warning' : 'error'}
                             size="sm"
                           >
-                            {sale.status === 'completed' ? 'مكتمل' : sale.status === 'pending' ? 'معلق' : sale.status}
+                            {sale.status === 'completed' ? t('finance.statusCompleted') : sale.status === 'pending' ? t('finance.statusPending') : sale.status}
                           </Badge>
                         </div>
                         <p className="text-xs sm:text-sm text-gray-600 mb-1">
-                          العميل: {sale.client?.name || 'غير معروف'}
+                          {t('finance.client')}: {sale.client?.name || t('shared.unknown')}
                         </p>
                         <p className="text-xs sm:text-sm text-gray-600 mb-1">
-                          الدفعة: {sale.batch?.name || 'غير معروف'}
+                          {t('finance.batch')}: {sale.batch?.name || t('shared.unknown')}
                         </p>
                         <p className="text-sm sm:text-base font-bold text-gray-900">
-                          السعر: {formatPrice(sale.sale_price)} DT
+                          {t('finance.price')}: {formatPrice(sale.sale_price)} DT
                         </p>
                         {sale.deposit_amount && (
                           <p className="text-xs sm:text-sm text-gray-600">
-                            العربون: {formatPrice(sale.deposit_amount)} DT
+                            {t('finance.deposit')}: {formatPrice(sale.deposit_amount)} DT
                           </p>
                         )}
                       </div>

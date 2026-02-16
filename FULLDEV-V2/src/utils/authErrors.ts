@@ -72,6 +72,45 @@ export function translateAuthError(error: any): string {
   return errorMessage || 'فشل تسجيل الدخول. يرجى التحقق من البريد الإلكتروني وكلمة المرور.'
 }
 
+const errorMapFr: Record<string, string> = {
+  'invalid_credentials': 'E-mail ou mot de passe incorrect',
+  'Invalid login credentials': 'E-mail ou mot de passe incorrect',
+  'Invalid email or password': 'E-mail ou mot de passe incorrect',
+  'invalid_grant': 'E-mail ou mot de passe incorrect',
+  '400': 'E-mail ou mot de passe incorrect',
+  'Email not confirmed': 'Veuillez confirmer votre e-mail avant de vous connecter',
+  'email_not_confirmed': 'Veuillez confirmer votre e-mail avant de vous connecter',
+  'Too many requests': 'Trop de tentatives. Veuillez réessayer plus tard.',
+  'too_many_requests': 'Trop de tentatives. Veuillez réessayer plus tard.',
+  'rate_limit_exceeded': 'Trop de tentatives. Veuillez réessayer plus tard.',
+  'network': 'Échec de la connexion au serveur. Vérifiez votre connexion Internet.',
+  'fetch': 'Échec de la connexion au serveur. Vérifiez votre connexion Internet.',
+  'connection': 'Échec de la connexion au serveur. Vérifiez votre connexion Internet.',
+  'timeout': 'Délai dépassé. Veuillez réessayer.',
+  'User not found': 'Utilisateur introuvable',
+  'user_not_found': 'Utilisateur introuvable',
+  'User already registered': 'Cet e-mail est déjà utilisé',
+  'email_already_exists': 'Cet e-mail est déjà utilisé',
+  'Session expired': 'Session expirée. Veuillez vous reconnecter.',
+  'session_expired': 'Session expirée. Veuillez vous reconnecter.',
+  'invalid_token': 'Jeton invalide. Veuillez vous reconnecter.',
+  'Auth session missing': 'Aucune session. Veuillez vous connecter.',
+  'auth_session_missing': 'Aucune session. Veuillez vous connecter.',
+}
+
+export function translateAuthErrorFr(error: any): string {
+  if (!error) return 'Une erreur inconnue s\'est produite'
+  const errorMessage = error.message || error.toString() || ''
+  const errorCode = error.code || error.status || ''
+  if (errorMapFr[errorMessage]) return errorMapFr[errorMessage]
+  if (errorMapFr[errorCode]) return errorMapFr[errorCode]
+  const lower = errorMessage.toLowerCase()
+  for (const [key, value] of Object.entries(errorMapFr)) {
+    if (lower.includes(key.toLowerCase())) return value
+  }
+  return errorMessage || 'Échec de connexion. Vérifiez votre e-mail et mot de passe.'
+}
+
 /**
  * Check if error is a network/connection error
  */
