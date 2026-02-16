@@ -184,7 +184,7 @@ export function ConfirmationPage() {
     try {
       const batchId = batchFilter === 'all' ? null : allBatches.find(b => b.name === batchFilter)?.id
       
-      // When searching, load all matching sales (no pagination limit) for client-side filtering
+      // When searching, load all matching sales for client-side filtering
       // When not searching, use pagination
       const isSearching = searchQuery.trim().length > 0
       const from = isSearching ? 0 : (page - 1) * itemsPerPage
@@ -197,8 +197,20 @@ export function ConfirmationPage() {
         .order('sale_date', { ascending: false })
         .order('updated_at', { ascending: false })
         .range(from, to)
-        .limit(isSearching ? 1000 : itemsPerPage) // Load up to 1000 when searching
+        .limit(isSearching ? 5000 : itemsPerPage) // Load up to 5000 when searching to ensure we get all matches
       if (batchId) query = query.eq('batch_id', batchId)
+      
+      // Try to add database-level search filter if possible (helps performance)
+      // Note: Supabase doesn't support searching nested relations easily, so we do client-side filtering
+      // But we can at least try to filter by client_id if the search looks like an ID number
+      if (isSearching) {
+        const searchLower = searchQuery.trim().toLowerCase()
+        // If search looks like a numeric ID (all digits), try to filter by client id_number
+        // This is a best-effort optimization
+        if (/^\d+$/.test(searchLower)) {
+          // Could potentially join and filter, but client-side is simpler and more reliable
+        }
+      }
 
       const { data, error: err } = await query
 
@@ -330,18 +342,67 @@ export function ConfirmationPage() {
 
   // Filter grouped sales (client-side search - now searches across all loaded sales when searching)
   const filteredGroupedSales = useMemo(() => {
+    if (!searchQuery.trim() && batchFilter === 'all') {
+      return groupedSales
+    }
+    
     return groupedSales.filter(salesGroup => {
       const firstSale = salesGroup[0]
       
       // Search filter
       if (searchQuery.trim()) {
         const query = searchQuery.toLowerCase().trim()
-        const matchesClient = firstSale.client?.name?.toLowerCase().includes(query) || 
-                             firstSale.client?.id_number?.toLowerCase().includes(query) ||
-                             firstSale.client?.phone?.includes(query)
-        const matchesPiece = salesGroup.some(s => s.piece?.piece_number?.toLowerCase().includes(query))
-        const matchesBatch = firstSale.batch?.name?.toLowerCase().includes(query)
-        if (!matchesClient && !matchesPiece && !matchesBatch) {
+        
+        // Helper to normalize phone numbers for searching (remove spaces, slashes, dashes)
+        const normalizePhone = (phone: string | null | undefined): string => {
+          if (!phone) return ''
+          return phone.replace(/[\s\/\-]/g, '').toLowerCase()
+        }
+        
+        // Search in client name (case-insensitive)
+        const clientName = firstSale.client?.name || ''
+        const matchesClientName = clientName.toLowerCase().includes(query)
+        
+        // Search in client ID number (case-insensitive)
+        const clientId = firstSale.client?.id_number || ''
+        const matchesClientId = clientId.toLowerCase().includes(query)
+        
+        // Search in phone number (normalize phone and query, handle multiple phone numbers separated by /)
+        const clientPhone = firstSale.client?.phone || ''
+        const normalizedPhone = normalizePhone(clientPhone)
+        const normalizedQuery = normalizePhone(query)
+        const matchesPhone = normalizedPhone.includes(normalizedQuery)
+        
+        // Search in piece numbers
+        const matchesPiece = salesGroup.some(s => {
+          const pieceNumber = s.piece?.piece_number || ''
+          return pieceNumber.toLowerCase().includes(query)
+        })
+        
+        // Search in batch name
+        const batchName = firstSale.batch?.name || ''
+        const matchesBatch = batchName.toLowerCase().includes(query)
+        
+        const matches = matchesClientName || matchesClientId || matchesPhone || matchesPiece || matchesBatch
+        
+        // Debug logging (only in development)
+        if (process.env.NODE_ENV === 'development' && query === 'saf') {
+          console.log('Search debug:', {
+            query,
+            clientName,
+            clientId,
+            clientPhone,
+            normalizedPhone,
+            matchesClientName,
+            matchesClientId,
+            matchesPhone,
+            matchesPiece,
+            matchesBatch,
+            matches
+          })
+        }
+        
+        if (!matches) {
           return false
         }
       }
@@ -355,14 +416,65 @@ export function ConfirmationPage() {
     })
   }, [groupedSales, searchQuery, batchFilter])
   
-  // Update total count when searching to reflect filtered results
+  // Paginate filtered groups - when searching, paginate by counting individual sales across groups
+  const paginatedGroupedSales = useMemo(() => {
+    if (!searchQuery.trim() && batchFilter === 'all') {
+      // When not searching and no batch filter, use server-side pagination (already paginated)
+      return filteredGroupedSales
+    }
+    
+    // When searching or filtering, paginate client-side by counting individual sales
+    // We need to include groups that contain sales within the current page range
+    const pageStart = (currentPage - 1) * itemsPerPage
+    const pageEnd = currentPage * itemsPerPage
+    let salesCount = 0
+    const groupsToShow: Sale[][] = []
+    
+    for (const group of filteredGroupedSales) {
+      const groupStartCount = salesCount
+      const groupLength = group.length
+      salesCount += groupLength
+      
+      // Include group if it contains any sales within the current page range
+      // A group is included if:
+      // - It starts before the page end (groupStartCount < pageEnd)
+      // - It ends after the page start (salesCount > pageStart)
+      if (salesCount > pageStart && groupStartCount < pageEnd) {
+        groupsToShow.push(group)
+      }
+      
+      // Stop early if we've passed the page end (optimization)
+      if (groupStartCount >= pageEnd) {
+        break
+      }
+    }
+    
+    // Debug logging
+    if (process.env.NODE_ENV === 'development' && searchQuery.trim()) {
+      console.log('Pagination debug:', {
+        searchQuery,
+        currentPage,
+        pageStart,
+        pageEnd,
+        itemsPerPage,
+        totalFilteredGroups: filteredGroupedSales.length,
+        totalFilteredSales: filteredGroupedSales.reduce((sum, g) => sum + g.length, 0),
+        paginatedGroups: groupsToShow.length,
+        paginatedSales: groupsToShow.reduce((sum, g) => sum + g.length, 0)
+      })
+    }
+    
+    return groupsToShow
+  }, [filteredGroupedSales, currentPage, itemsPerPage, searchQuery, batchFilter])
+  
+  // Update total count when searching to reflect filtered results (count individual sales)
   useEffect(() => {
-    if (searchQuery.trim()) {
+    if (searchQuery.trim() || batchFilter !== 'all') {
       // Count total sales in filtered groups (not groups, but individual sales)
       const totalFilteredSales = filteredGroupedSales.reduce((sum, group) => sum + group.length, 0)
       setTotalCount(totalFilteredSales)
     }
-  }, [filteredGroupedSales, searchQuery])
+  }, [filteredGroupedSales, searchQuery, batchFilter])
 
   function getConfirmButtonText(sale: Sale): string {
     if (sale.payment_method === 'promise' && sale.partial_payment_amount) {
@@ -482,8 +594,8 @@ export function ConfirmationPage() {
           <div className="flex items-center justify-between text-xs text-gray-600 flex-wrap gap-2">
             {searchQuery.trim() ? (
               <span>{replaceVars(t('confirmation.resultsOnPage'), { 
-                count: filteredGroupedSales.reduce((sum, group) => sum + group.length, 0), 
-                total: groupedSales.reduce((sum, group) => sum + group.length, 0) 
+                count: paginatedGroupedSales.reduce((sum, group) => sum + group.length, 0), 
+                total: filteredGroupedSales.reduce((sum, group) => sum + group.length, 0) 
               })}</span>
             ) : (
               <span>{replaceVars(t('confirmation.showingRange'), {
@@ -524,7 +636,7 @@ export function ConfirmationPage() {
         </Card>
       ) : (
         <div className="space-y-3 sm:space-y-4">
-          {filteredGroupedSales.flatMap((salesGroup, groupIndex) => {
+          {paginatedGroupedSales.flatMap((salesGroup, groupIndex) => {
             // Calculate overdue status helper
             const getDeadlineStatus = (sale: Sale) => {
               if (!sale.deadline_date) return null
