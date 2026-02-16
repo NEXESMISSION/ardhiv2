@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useLanguage } from '@/i18n/context'
 import { supabase } from '@/lib/supabase'
@@ -34,6 +34,19 @@ export function HomePage({ onNavigate }: HomePageProps) {
   const { t } = useLanguage()
   const { systemUser, refreshSystemUser, isOwner } = useAuth()
   const [editDialogOpen, setEditDialogOpen] = useState(false)
+  
+  // Debug: Log allowed_pages when systemUser changes
+  useEffect(() => {
+    if (systemUser) {
+      console.log('HomePage - systemUser:', {
+        email: systemUser.email,
+        role: systemUser.role,
+        allowed_pages: systemUser.allowed_pages,
+        allowed_pages_type: typeof systemUser.allowed_pages,
+        allowed_pages_is_array: Array.isArray(systemUser.allowed_pages),
+      })
+    }
+  }, [systemUser])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
@@ -399,31 +412,41 @@ export function HomePage({ onNavigate }: HomePageProps) {
           </p>
         </div>
 
-        {/* Pages Grid - 2 boxes per row */}
-        <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:gap-6">
-          {pages.map((page) => (
-            <Card
-              key={page.id}
-              className="p-3 sm:p-4 lg:p-5 hover:shadow-lg transition-all duration-200 cursor-pointer group border-2 hover:border-blue-300 active:scale-95"
-              onTouchStart={(e) => handleTouchStart(page.id, e)}
-              onTouchMove={(e) => handleTouchMove(page.id, e)}
-              onTouchEnd={(e) => handleTouchEnd(page.id, e)}
-              onClick={(e) => handleClick(page.id, e)}
-            >
-              <div className="flex flex-col items-center text-center space-y-2 sm:space-y-3">
-                <div className="text-3xl sm:text-4xl lg:text-5xl mb-1 sm:mb-2 group-hover:scale-110 transition-transform duration-200">
-                  {page.icon}
+        {/* Show message if no pages available */}
+        {pages.length === 0 ? (
+          <Card className="p-6 sm:p-8 text-center border-2 border-yellow-200 bg-yellow-50">
+            <div className="text-4xl sm:text-5xl mb-4">⚠️</div>
+            <p className="text-sm sm:text-base text-gray-700 font-medium">
+              {t('home.noPagesAvailable')}
+            </p>
+          </Card>
+        ) : (
+          /* Pages Grid - 2 boxes per row */
+          <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:gap-6">
+            {pages.map((page) => (
+              <Card
+                key={page.id}
+                className="p-3 sm:p-4 lg:p-5 hover:shadow-lg transition-all duration-200 cursor-pointer group border-2 hover:border-blue-300 active:scale-95"
+                onTouchStart={(e) => handleTouchStart(page.id, e)}
+                onTouchMove={(e) => handleTouchMove(page.id, e)}
+                onTouchEnd={(e) => handleTouchEnd(page.id, e)}
+                onClick={(e) => handleClick(page.id, e)}
+              >
+                <div className="flex flex-col items-center text-center space-y-2 sm:space-y-3">
+                  <div className="text-3xl sm:text-4xl lg:text-5xl mb-1 sm:mb-2 group-hover:scale-110 transition-transform duration-200">
+                    {page.icon}
+                  </div>
+                  <h2 className="text-sm sm:text-base lg:text-lg font-semibold text-gray-900">
+                    {page.label}
+                  </h2>
+                  <p className="text-xs sm:text-sm text-gray-600 line-clamp-2">
+                    {page.description}
+                  </p>
                 </div>
-                <h2 className="text-sm sm:text-base lg:text-lg font-semibold text-gray-900">
-                  {page.label}
-                </h2>
-                <p className="text-xs sm:text-sm text-gray-600 line-clamp-2">
-                  {page.description}
-                </p>
-              </div>
-            </Card>
-          ))}
-        </div>
+              </Card>
+            ))}
+          </div>
+        )}
 
       </div>
 

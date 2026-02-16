@@ -330,15 +330,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setLoading(true)
         if (DEBUG_AUTH) console.log('Loading system user for auth_user_id:', authUserId, retryCount > 0 ? `(retry ${retryCount}/${MAX_RETRIES})` : '')
       
-        // Query immediately - only select columns that definitely exist
-        // Using minimal required columns first, then expand if needed
+        // Query immediately - select all required columns including allowed_pages
         // FIXED: Removed status, page_order, sidebar_order - they don't exist in the database
         // FIXED: Using auth_user_id=eq. instead of id=eq.
-        // Use minimal column set to avoid 400 (missing columns in DB).
-        // Extras (name, allowed_pages, etc.) may be added by ALTER scripts; we handle nulls.
+        // CRITICAL: Must include allowed_pages, allowed_batches, allowed_pieces, image_url, name, display_order
+        // Note: preferred_language may not exist in all databases, so we handle it gracefully
         const queryPromise = supabase
           .from('users')
-          .select('id, email, phone, place, title, notes, role, created_at, updated_at, auth_user_id')
+          .select('id, email, name, phone, place, title, notes, role, image_url, allowed_pages, allowed_batches, allowed_pieces, display_order, created_at, updated_at')
           .eq('auth_user_id', authUserId) // CRITICAL: Use auth_user_id, not id
           .maybeSingle()
         
@@ -592,6 +591,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
         if (DEBUG_AUTH) console.log('System user loaded successfully:', data.email, data.role)
+        // Helper to ensure array fields are arrays (handle JSON strings or null)
+        const ensureArray = (value: any): string[] | null => {
+          if (value === null || value === undefined) return null
+          if (Array.isArray(value)) return value
+          if (typeof value === 'string') {
+            try {
+              const parsed = JSON.parse(value)
+              return Array.isArray(parsed) ? parsed : null
+            } catch {
+              return null
+            }
+          }
+          return null
+        }
+        
         // Ensure all fields are set (main query uses minimal columns; missing ones are null)
         const formattedUser: SystemUser = {
           id: data.id,
@@ -603,13 +617,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           notes: data.notes ?? null,
           role: data.role,
           image_url: data.image_url ?? null,
-          allowed_pages: data.allowed_pages ?? null,
-          allowed_batches: data.allowed_batches ?? null,
-          allowed_pieces: data.allowed_pieces ?? null,
+          allowed_pages: ensureArray(data.allowed_pages),
+          allowed_batches: ensureArray(data.allowed_batches),
+          allowed_pieces: ensureArray(data.allowed_pieces),
           display_order: data.display_order ?? null,
-          preferred_language: data.preferred_language ?? null,
+          preferred_language: (data as any).preferred_language ?? null, // May not exist in DB
           created_at: data.created_at,
           updated_at: data.updated_at,
+        }
+        
+        if (DEBUG_AUTH) {
+          console.log('Formatted user allowed_pages:', formattedUser.allowed_pages)
+          console.log('Raw data allowed_pages:', data.allowed_pages)
         }
         setSystemUser(formattedUser)
         systemUserRef.current = formattedUser // Update ref

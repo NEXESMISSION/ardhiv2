@@ -101,6 +101,7 @@ const ar: Record<string, unknown> = {
     errorUpload: 'فشل رفع الصورة',
     successProfile: 'تم تحديث الملف الشخصي بنجاح',
     errorUpdateProfile: 'فشل تحديث الملف الشخصي',
+    noPagesAvailable: 'لا توجد صفحات متاحة لك. يرجى الاتصال بالمدير لإضافة الصلاحيات.',
   },
   homePageDesc: {
     confirmation: 'تأكيد المبيعات المعلقة',
@@ -885,6 +886,7 @@ const fr: Record<string, unknown> = {
     errorUpload: 'Échec du téléchargement de l\'image',
     successProfile: 'Profil mis à jour avec succès',
     errorUpdateProfile: 'Échec de la mise à jour du profil',
+    noPagesAvailable: 'Aucune page disponible pour vous. Veuillez contacter l\'administrateur pour ajouter des autorisations.',
   },
   homePageDesc: {
     confirmation: 'Confirmer les ventes en attente',
@@ -900,7 +902,7 @@ const fr: Record<string, unknown> = {
     users: 'Gestion des utilisateurs',
   },
   sidebar: {
-    appTitle: 'Application',
+    appTitle: 'Système',
     owner: 'Propriétaire',
     worker: 'Employé',
     logout: 'Déconnexion',
