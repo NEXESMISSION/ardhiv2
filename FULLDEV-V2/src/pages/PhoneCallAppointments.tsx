@@ -13,6 +13,7 @@ import { Select } from '@/components/ui/select'
 import { NotificationDialog } from '@/components/ui/notification-dialog'
 import { IconButton } from '@/components/ui/icon-button'
 import { logPhoneCallAppointmentCreated, logPhoneCallAppointmentUpdated, getAuditLogs, type AuditLog } from '@/utils/auditLog'
+import { useLanguage } from '@/i18n/context'
 
 interface PhoneCallAppointment {
   id: string
@@ -44,6 +45,7 @@ const englishMonths = [
 
 export function PhoneCallAppointmentsPage() {
   const { systemUser } = useAuth()
+  const { t } = useLanguage()
   const [appointments, setAppointments] = useState<PhoneCallAppointment[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -125,7 +127,7 @@ export function PhoneCallAppointmentsPage() {
 
       setAppointments(formattedAppointments)
     } catch (e: any) {
-      setError(e.message || 'فشل تحميل المواعيد')
+      setError(e.message || t('phoneCallAppointments.loadError'))
     } finally {
       setLoading(false)
     }
@@ -216,13 +218,13 @@ export function PhoneCallAppointmentsPage() {
   const getStatusLabel = (status: string) => {
     switch (status) {
       case 'scheduled':
-        return 'مجدول'
+        return t('phoneCallAppointments.statusScheduled')
       case 'completed':
-        return 'مكتمل'
+        return t('phoneCallAppointments.statusCompleted')
       case 'cancelled':
-        return 'ملغي'
+        return t('phoneCallAppointments.statusCancelled')
       case 'no_show':
-        return 'لم يحضر'
+        return t('phoneCallAppointments.statusNoShow')
       default:
         return status
     }
@@ -237,7 +239,7 @@ export function PhoneCallAppointmentsPage() {
 
   async function handleAddAppointment() {
     if (!appointmentDateTime || !phoneNumber.trim() || !name.trim()) {
-      setErrorMessage('يرجى ملء جميع الحقول المطلوبة')
+      setErrorMessage(t('phoneCallAppointments.fillRequired'))
       setShowErrorDialog(true)
       return
     }
@@ -317,7 +319,7 @@ export function PhoneCallAppointmentsPage() {
         )
       }
 
-      setSuccessMessage('تم إضافة الموعد بنجاح!')
+      setSuccessMessage(t('phoneCallAppointments.addSuccess'))
       setShowSuccessDialog(true)
       setAddAppointmentDialogOpen(false)
       setAppointmentDateTime('')
@@ -340,8 +342,8 @@ export function PhoneCallAppointmentsPage() {
       {/* Header - always visible */}
       <div className="mb-3 sm:mb-4 lg:mb-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-900 mb-1">مواعيد المكالمات</h1>
-          <p className="text-xs sm:text-sm text-gray-600">إدارة مواعيد المكالمات الهاتفية</p>
+          <h1 className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-900 mb-1">{t('phoneCallAppointments.title')}</h1>
+          <p className="text-xs sm:text-sm text-gray-600">{t('phoneCallAppointments.subtitle')}</p>
         </div>
         <Button
           onClick={() => {
@@ -373,7 +375,7 @@ export function PhoneCallAppointmentsPage() {
         <div className="flex items-center justify-center py-8 min-h-[160px]">
           <div className="text-center">
             <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600" />
-            <p className="mt-2 text-xs text-gray-500">جاري التحميل...</p>
+            <p className="mt-2 text-xs text-gray-500">{t('phoneCallAppointments.loading')}</p>
           </div>
         </div>
       ) : (
@@ -413,7 +415,7 @@ export function PhoneCallAppointmentsPage() {
             onClick={goToToday}
             className="text-xs sm:text-sm"
           >
-            اليوم
+            {t('phoneCallAppointments.today')}
           </Button>
         </div>
 
@@ -496,14 +498,14 @@ export function PhoneCallAppointmentsPage() {
                   setDialogSelectedDate(null)
                 }}
               >
-                إغلاق
+                {t('phoneCallAppointments.close')}
               </Button>
             </div>
           }
         >
           {getAppointmentsForDate(dialogSelectedDate).length === 0 ? (
             <div className="text-center py-8">
-              <p className="text-sm text-gray-500">لا توجد مواعيد في هذا التاريخ</p>
+              <p className="text-sm text-gray-500">{t('phoneCallAppointments.noAppointmentsForDate')}</p>
             </div>
           ) : (
             <div className="space-y-2">
@@ -718,7 +720,7 @@ export function PhoneCallAppointmentsPage() {
                   <Button
                     onClick={async () => {
                       if (!editAppointmentDateTime) {
-                        setErrorMessage('يرجى ملء التاريخ والوقت')
+                        setErrorMessage(t('phoneCallAppointments.fillDateTime'))
                         setShowErrorDialog(true)
                         return
                       }
@@ -844,7 +846,7 @@ export function PhoneCallAppointmentsPage() {
                       setSelectedAppointment(null)
                     }}
                   >
-                    إغلاق
+                    {t('phoneCallAppointments.close')}
                   </Button>
                   <Button
                     onClick={() => {
@@ -919,9 +921,9 @@ export function PhoneCallAppointmentsPage() {
               <div className="mt-4 pt-4 border-t border-gray-200">
                 <h4 className="text-sm font-bold text-gray-900 mb-3">📋 سجل التغييرات</h4>
                 {loadingAuditLogs ? (
-                  <p className="text-xs text-gray-500">جاري التحميل...</p>
+                  <p className="text-xs text-gray-500">{t('phoneCallAppointments.loading')}</p>
                 ) : auditLogs.length === 0 ? (
-                  <p className="text-xs text-gray-500">لا توجد تغييرات مسجلة</p>
+                  <p className="text-xs text-gray-500">{t('shared.noChanges') || 'لا توجد تغييرات مسجلة'}</p>
                 ) : (
                   <div className="space-y-2 max-h-60 overflow-y-auto">
                     {auditLogs.map((log) => (

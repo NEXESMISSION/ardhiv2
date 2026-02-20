@@ -8,6 +8,7 @@ import { Dialog } from '@/components/ui/dialog'
 import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { IconButton } from '@/components/ui/icon-button'
+import { useLanguage } from '@/i18n/context'
 
 interface ContractWriter {
   id: string
@@ -19,6 +20,7 @@ interface ContractWriter {
 }
 
 export function ContractWritersPage() {
+  const { t } = useLanguage()
   const [writers, setWriters] = useState<ContractWriter[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -46,7 +48,7 @@ export function ContractWritersPage() {
       if (err) throw err
       setWriters(data || [])
     } catch (e: any) {
-      setError(e.message || 'فشل تحميل محررين العقود')
+      setError(e.message || t('contractWriters.loadError'))
     } finally {
       setLoading(false)
     }
@@ -118,12 +120,12 @@ export function ContractWritersPage() {
       setDialogOpen(false)
       await loadWriters()
     } catch (e: any) {
-      setError(e.message || 'فشل حفظ محرر العقد')
+      setError(e.message || t('contractWriters.saveError'))
     }
   }
 
   async function handleDelete(id: string) {
-    if (!confirm('هل أنت متأكد من حذف هذا المحرر؟')) return
+    if (!confirm(t('contractWriters.deleteConfirm'))) return
 
     try {
       const { error: err } = await supabase
@@ -134,7 +136,7 @@ export function ContractWritersPage() {
       if (err) throw err
       await loadWriters()
     } catch (e: any) {
-      alert('فشل حذف محرر العقد: ' + e.message)
+      alert(t('contractWriters.deleteError') + ': ' + e.message)
     }
   }
 
@@ -142,10 +144,10 @@ export function ContractWritersPage() {
     <div className="container mx-auto p-6">
       <div className="mb-6 flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 mb-2">محررين العقد</h1>
-          <p className="text-gray-600">إدارة محررين العقود</p>
+          <h1 className="text-2xl font-bold text-gray-900 mb-2">{t('contractWriters.title')}</h1>
+          <p className="text-gray-600">{t('contractWriters.subtitle')}</p>
         </div>
-        <Button onClick={openAddDialog}>+ إضافة محرر</Button>
+        <Button onClick={openAddDialog}>{t('contractWriters.addWriter')}</Button>
       </div>
 
       {error && (
@@ -158,13 +160,13 @@ export function ContractWritersPage() {
         <div className="flex items-center justify-center py-8 min-h-[120px]">
           <div className="text-center">
             <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600" />
-            <p className="mt-2 text-xs text-gray-500">جاري التحميل...</p>
+            <p className="mt-2 text-xs text-gray-500">{t('contractWriters.loading')}</p>
           </div>
         </div>
       ) : writers.length === 0 ? (
         <Card className="p-8 text-center">
-          <p className="text-gray-500 text-lg mb-4">لا يوجد محررين عقود</p>
-          <Button onClick={openAddDialog}>إضافة محرر جديد</Button>
+          <p className="text-gray-500 text-lg mb-4">{t('contractWriters.noWriters')}</p>
+          <Button onClick={openAddDialog}>{t('contractWriters.addWriterNew')}</Button>
         </Card>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -177,7 +179,7 @@ export function ContractWritersPage() {
                     <Badge variant="info" size="sm">{writer.type}</Badge>
                   </div>
                   <p className="text-sm text-gray-600">
-                    <span className="font-medium">المكان:</span> {writer.location}
+                    <span className="font-medium">{t('contractWriters.location')}:</span> {writer.location}
                   </p>
                 </div>
               </div>
@@ -188,14 +190,14 @@ export function ContractWritersPage() {
                   size="sm"
                   onClick={() => openEditDialog(writer)}
                 >
-                  ✏️ تعديل
+                  ✏️ {t('contractWriters.edit')}
                 </IconButton>
                 <IconButton
                   variant="danger"
                   size="sm"
                   onClick={() => handleDelete(writer.id)}
                 >
-                  🗑️ حذف
+                  🗑️ {t('contractWriters.deleteError').replace('فشل حذف محرر العقد', 'حذف')}
                 </IconButton>
               </div>
             </Card>
@@ -207,15 +209,15 @@ export function ContractWritersPage() {
       <Dialog
         open={dialogOpen}
         onClose={() => setDialogOpen(false)}
-        title={editingWriter ? 'تعديل محرر العقد' : 'إضافة محرر جديد'}
+        title={editingWriter ? t('contractWriters.editWriter') : t('contractWriters.addWriterTitle')}
         size="md"
         footer={
           <div className="flex justify-end gap-3">
             <Button variant="secondary" onClick={() => setDialogOpen(false)}>
-              إلغاء
+              {t('contractWriters.cancel')}
             </Button>
             <Button onClick={handleSubmit}>
-              {editingWriter ? 'حفظ التعديلات' : 'إضافة'}
+              {editingWriter ? t('contractWriters.saveChanges') : t('contractWriters.add')}
             </Button>
           </div>
         }
@@ -229,37 +231,37 @@ export function ContractWritersPage() {
         <div className="space-y-4">
           <div className="space-y-2">
             <Label className="text-gray-700 font-medium">
-              النوع <span className="text-red-500">*</span>
+              {t('contractWriters.type')} <span className="text-red-500">*</span>
             </Label>
             <Input
               type="text"
               value={formType}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFormType(e.target.value)}
-              placeholder="مثال: محامي، كاتب عدل، إلخ"
+              placeholder={t('contractWriters.typePlaceholder')}
             />
           </div>
 
           <div className="space-y-2">
             <Label className="text-gray-700 font-medium">
-              الاسم <span className="text-red-500">*</span>
+              {t('contractWriters.name')} <span className="text-red-500">*</span>
             </Label>
             <Input
               type="text"
               value={formName}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFormName(e.target.value)}
-              placeholder="اسم المحرر"
+              placeholder={t('contractWriters.namePlaceholder')}
             />
           </div>
 
           <div className="space-y-2">
             <Label className="text-gray-700 font-medium">
-              المكان <span className="text-red-500">*</span>
+              {t('contractWriters.location')} <span className="text-red-500">*</span>
             </Label>
             <Input
               type="text"
               value={formLocation}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFormLocation(e.target.value)}
-              placeholder="مكان المحرر"
+              placeholder={t('contractWriters.locationPlaceholder')}
             />
           </div>
         </div>

@@ -13,7 +13,9 @@ import { Select } from '@/components/ui/select'
 import { NotificationDialog } from '@/components/ui/notification-dialog'
 import { formatDate, formatDateShort } from '@/utils/priceCalculator'
 import { IconButton } from '@/components/ui/icon-button'
-import { logAppointmentCreated, logAppointmentUpdated, getAuditLogs, type AuditLog } from '@/utils/auditLog'
+import { logAppointmentCreated, logAppointmentUpdated, logAppointmentDeleted, getAuditLogs, type AuditLog } from '@/utils/auditLog'
+import { useLanguage } from '@/i18n/context'
+import { replaceVars } from '@/utils/replaceVars'
 
 interface Appointment {
   id: string
@@ -65,6 +67,8 @@ const englishMonths = [
 
 export function AppointmentsPage() {
   const { systemUser } = useAuth()
+  const { t } = useLanguage()
+  const isOwner = systemUser?.role === 'owner'
   const [appointments, setAppointments] = useState<Appointment[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -95,6 +99,53 @@ export function AppointmentsPage() {
   useEffect(() => {
     loadAppointments()
     loadAvailableSales()
+
+    // Listen for refresh events
+    const handlePageRefresh = () => {
+      loadAppointments()
+      loadAvailableSales()
+    }
+
+    const handleAppointmentCreated = () => {
+      loadAppointments()
+      loadAvailableSales()
+    }
+
+    // Listen for page visibility changes (when user navigates back to this page)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        loadAppointments()
+        loadAvailableSales()
+      }
+    }
+
+    window.addEventListener('pageRefresh', handlePageRefresh)
+    window.addEventListener('appointmentCreated', handleAppointmentCreated)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+
+    // Real-time subscription for appointments
+    const channel = supabase
+      .channel('appointments-realtime')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'appointments',
+        },
+        (payload) => {
+          console.log('Real-time appointment change:', payload.eventType)
+          loadAppointments()
+        }
+      )
+      .subscribe()
+
+    return () => {
+      window.removeEventListener('pageRefresh', handlePageRefresh)
+      window.removeEventListener('appointmentCreated', handleAppointmentCreated)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      supabase.removeChannel(channel)
+    }
   }, [])
 
   // Load audit logs when appointment is selected
@@ -158,7 +209,19 @@ export function AppointmentsPage() {
         .order('appointment_date', { ascending: true })
         .order('appointment_time', { ascending: true })
 
-      if (err) throw err
+      if (err) {
+        console.error('Error loading appointments:', err)
+        throw err
+      }
+
+      console.log('Loaded appointments:', data?.length || 0, 'appointments')
+      if (data && data.length > 0) {
+        console.log('Sample appointment dates:', data.slice(0, 3).map((apt: any) => ({
+          id: apt.id,
+          raw_date: apt.appointment_date,
+          sale_id: apt.sale_id
+        })))
+      }
 
       // Format appointments with nested data
       const formattedAppointments = (data || []).map((apt: any) => {
@@ -174,8 +237,30 @@ export function AppointmentsPage() {
           inferredPaymentMethod = 'installment'
         }
 
+        // Ensure appointment_date is in YYYY-MM-DD format
+        let appointmentDate = apt.appointment_date
+        if (appointmentDate) {
+          // If it contains 'T', it's a timestamp - extract just the date part
+          if (appointmentDate.includes('T')) {
+            appointmentDate = appointmentDate.split('T')[0]
+          }
+          // Validate it's in YYYY-MM-DD format (10 characters)
+          // If not, try to parse it, but avoid timezone conversion issues
+          if (appointmentDate.length !== 10 || !/^\d{4}-\d{2}-\d{2}$/.test(appointmentDate)) {
+            // Try parsing, but use local date components to avoid timezone shift
+            const dateObj = new Date(appointmentDate + 'T12:00:00') // Use noon to avoid timezone edge cases
+            if (!isNaN(dateObj.getTime())) {
+              const year = dateObj.getFullYear()
+              const month = String(dateObj.getMonth() + 1).padStart(2, '0')
+              const day = String(dateObj.getDate()).padStart(2, '0')
+              appointmentDate = `${year}-${month}-${day}`
+            }
+          }
+        }
+
         return {
           ...apt,
+          appointment_date: appointmentDate, // Normalize date format
           sale: sale ? {
             ...sale,
             payment_method: inferredPaymentMethod || sale.payment_method,
@@ -187,9 +272,11 @@ export function AppointmentsPage() {
         }
       })
 
+      console.log('Formatted appointments:', formattedAppointments.length)
       setAppointments(formattedAppointments)
     } catch (e: any) {
-      setError(e.message || 'فشل تحميل المواعيد')
+      console.error('Error in loadAppointments:', e)
+      setError(e.message || t('appointments.loadError'))
     } finally {
       setLoading(false)
     }
@@ -243,12 +330,35 @@ export function AppointmentsPage() {
   const appointmentsByDate = useMemo(() => {
     const map = new Map<string, Appointment[]>()
     appointments.forEach(apt => {
-      const dateKey = apt.appointment_date
-      if (!map.has(dateKey)) {
-        map.set(dateKey, [])
+      // Normalize date to YYYY-MM-DD format
+      let dateKey = apt.appointment_date
+      if (dateKey) {
+        // Handle different date formats
+        if (dateKey.includes('T')) {
+          dateKey = dateKey.split('T')[0]
+        }
+        // Validate it's in YYYY-MM-DD format (10 characters)
+        // If already in correct format, use it directly to avoid timezone conversion issues
+        if (dateKey.length === 10 && /^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
+          // Already in YYYY-MM-DD format, use it directly
+        } else {
+          // Try parsing, but use local date components to avoid timezone shift
+          const dateObj = new Date(dateKey + 'T12:00:00') // Use noon to avoid timezone edge cases
+          if (!isNaN(dateObj.getTime())) {
+            const year = dateObj.getFullYear()
+            const month = String(dateObj.getMonth() + 1).padStart(2, '0')
+            const day = String(dateObj.getDate()).padStart(2, '0')
+            dateKey = `${year}-${month}-${day}`
+          }
+        }
+        
+        if (!map.has(dateKey)) {
+          map.set(dateKey, [])
+        }
+        map.get(dateKey)!.push(apt)
       }
-      map.get(dateKey)!.push(apt)
     })
+    console.log('Appointments by date map:', Array.from(map.entries()).map(([date, apts]) => `${date}: ${apts.length}`))
     return map
   }, [appointments])
 
@@ -285,7 +395,12 @@ export function AppointmentsPage() {
   }
 
   const getAppointmentsForDate = (date: Date): Appointment[] => {
-    const dateKey = date.toISOString().split('T')[0]
+    // Use local date components instead of toISOString() to avoid timezone shifts
+    // This ensures that clicking on Feb 21 shows appointments for Feb 21, not Feb 20 or 22
+    const year = date.getFullYear()
+    const month = String(date.getMonth() + 1).padStart(2, '0')
+    const day = String(date.getDate()).padStart(2, '0')
+    const dateKey = `${year}-${month}-${day}`
     return appointmentsByDate.get(dateKey) || []
   }
 
@@ -307,13 +422,13 @@ export function AppointmentsPage() {
   const getStatusLabel = (status: string) => {
     switch (status) {
       case 'scheduled':
-        return 'مجدول'
+        return t('appointments.statusScheduled')
       case 'completed':
-        return 'مكتمل'
+        return t('appointments.statusCompleted')
       case 'cancelled':
-        return 'ملغي'
+        return t('appointments.statusCancelled')
       case 'no_show':
-        return 'لم يحضر'
+        return t('appointments.statusNoShow')
       default:
         return status
     }
@@ -326,11 +441,11 @@ export function AppointmentsPage() {
     try {
       // Get sale to get client_id
       const selectedSale = availableSales.find(s => s.id === selectedSaleId)
-      if (!selectedSale) throw new Error('البيع المحدد غير موجود')
+      if (!selectedSale) throw new Error(t('appointments.saleNotFound'))
 
       // Validate client_id exists
       if (!selectedSale.client_id) {
-        throw new Error('خطأ: البيع المحدد لا يحتوي على معرف عميل. يرجى التحقق من بيانات البيع.')
+        throw new Error(t('appointments.saleNoClientId'))
       }
 
       // Build appointment data - include created_by/updated_by only if columns exist
@@ -392,7 +507,7 @@ export function AppointmentsPage() {
         )
       }
 
-      setSuccessMessage('تم إضافة الموعد بنجاح!')
+      setSuccessMessage(t('appointments.addSuccess'))
       setShowSuccessDialog(true)
       setAddAppointmentDialogOpen(false)
       setAppointmentDate('')
@@ -401,10 +516,53 @@ export function AppointmentsPage() {
       setSelectedSaleId('')
       loadAppointments()
     } catch (e: any) {
-      setErrorMessage(e.message || 'فشل إضافة الموعد')
+      setErrorMessage(e.message || t('appointments.addError'))
       setShowErrorDialog(true)
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function handleDeleteAppointment(appointment: Appointment) {
+    if (!confirm(t('appointments.deleteConfirm'))) {
+      return
+    }
+
+    try {
+      // Log the deletion before deleting
+      await logAppointmentDeleted(
+        appointment.id,
+        {
+          sale_id: appointment.sale_id,
+          client_id: appointment.client_id,
+          appointment_date: appointment.appointment_date,
+          appointment_time: appointment.appointment_time,
+          notes: appointment.notes,
+          status: appointment.status
+        },
+        systemUser?.id,
+        systemUser?.email,
+        systemUser?.name || systemUser?.email
+      )
+
+      // Delete the appointment
+      const { error } = await supabase
+        .from('appointments')
+        .delete()
+        .eq('id', appointment.id)
+
+      if (error) throw error
+
+      // Reload appointments
+      await loadAppointments()
+      
+      // Close dialogs if open
+      setDateAppointmentsDialogOpen(false)
+      setAppointmentDetailsDialogOpen(false)
+      setSelectedAppointment(null)
+    } catch (e: any) {
+      console.error('Error deleting appointment:', e)
+      alert(t('appointments.deleteError') + ': ' + (e.message || t('appointments.deleteErrorUnknown')))
     }
   }
 
@@ -412,8 +570,8 @@ export function AppointmentsPage() {
     <div className="container mx-auto px-2 sm:px-4 lg:px-6 py-3 sm:py-4 lg:py-6 max-w-7xl">
       {/* Header - always visible */}
       <div className="mb-3 sm:mb-4 lg:mb-6">
-          <h1 className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-900 mb-1">موعد اتمام البيع</h1>
-          <p className="text-xs sm:text-sm text-gray-600">إدارة مواعيد البيع (Rendez-vous de vente)</p>
+          <h1 className="text-lg sm:text-xl lg:text-2xl font-bold text-gray-900 mb-1">{t('appointments.title')}</h1>
+          <p className="text-xs sm:text-sm text-gray-600">{t('appointments.subtitle')}</p>
       </div>
 
       {error && (
@@ -422,13 +580,35 @@ export function AppointmentsPage() {
         </div>
       )}
 
+      {/* Debug info - show appointment count */}
+      {!loading && appointments.length > 0 && (
+        <div className="mb-4">
+          <Card className="p-2 bg-blue-50 border-blue-200">
+            <p className="text-xs text-blue-700">
+              تم تحميل {appointments.length} موعد
+            </p>
+          </Card>
+        </div>
+      )}
+
       {loading ? (
         <div className="flex items-center justify-center py-8 min-h-[160px]">
           <div className="text-center">
             <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600" />
-            <p className="mt-2 text-xs text-gray-500">جاري التحميل...</p>
+            <p className="mt-2 text-xs text-gray-500">{t('appointments.loading')}</p>
           </div>
         </div>
+      ) : appointments.length === 0 ? (
+        <Card className="p-6 text-center">
+          <p className="text-sm text-gray-500 mb-4">{t('appointments.noAppointments')}</p>
+          <Button
+            variant="primary"
+            onClick={() => setAddAppointmentDialogOpen(true)}
+            size="sm"
+          >
+            {t('appointments.addAppointment')}
+          </Button>
+        </Card>
       ) : (
         <>
       {/* Calendar */}
@@ -466,7 +646,7 @@ export function AppointmentsPage() {
             onClick={goToToday}
             className="text-xs sm:text-sm"
           >
-            اليوم
+            {t('appointments.today')}
           </Button>
         </div>
 
@@ -519,12 +699,12 @@ export function AppointmentsPage() {
                       }}
                       title={`${apt.client?.name || ''} - ${apt.appointment_time}`}
                     >
-                      {apt.appointment_time} - {apt.client?.name || 'غير محدد'}
+                      {apt.appointment_time} - {apt.client?.name || t('shared.unknown')}
                     </div>
                   ))}
                   {dateAppointments.length > 2 && (
                     <div className="text-[8px] sm:text-[10px] text-gray-500 px-1">
-                      +{dateAppointments.length - 2} أكثر
+                      +{dateAppointments.length - 2} {t('appointments.more')}
                     </div>
                   )}
                 </div>
@@ -555,14 +735,14 @@ export function AppointmentsPage() {
                   setDialogSelectedDate(null)
                 }}
               >
-                إغلاق
+                {t('appointments.close')}
               </Button>
             </div>
           }
         >
           {getAppointmentsForDate(dialogSelectedDate).length === 0 ? (
             <div className="text-center py-8">
-              <p className="text-sm text-gray-500">لا توجد مواعيد في هذا التاريخ</p>
+              <p className="text-sm text-gray-500">{t('appointments.noAppointmentsForDate')}</p>
             </div>
           ) : (
             <div className="space-y-2">
@@ -571,15 +751,17 @@ export function AppointmentsPage() {
                 .map((apt) => (
                   <div
                     key={apt.id}
-                    className="border border-gray-200 rounded-lg p-3 hover:border-blue-300 hover:shadow-sm transition-all cursor-pointer"
-                    onClick={() => {
-                      setSelectedAppointment(apt)
-                      setDateAppointmentsDialogOpen(false)
-                      setAppointmentDetailsDialogOpen(true)
-                    }}
+                    className="border border-gray-200 rounded-lg p-3 hover:border-blue-300 hover:shadow-sm transition-all"
                   >
                     <div className="flex items-start justify-between gap-2">
-                      <div className="flex-1 min-w-0">
+                      <div 
+                        className="flex-1 min-w-0 cursor-pointer"
+                        onClick={() => {
+                          setSelectedAppointment(apt)
+                          setDateAppointmentsDialogOpen(false)
+                          setAppointmentDetailsDialogOpen(true)
+                        }}
+                      >
                         <div className="flex items-center gap-2 mb-1">
                           <span className="text-sm font-bold text-gray-900">{apt.appointment_time}</span>
                           <Badge className={`text-[10px] ${getStatusColor(apt.status)}`}>
@@ -587,7 +769,7 @@ export function AppointmentsPage() {
                           </Badge>
                         </div>
                         <p className="text-sm font-semibold text-gray-900 mb-1">
-                          {apt.client?.name || 'غير محدد'}
+                          {apt.client?.name || t('shared.unknown')}
                         </p>
                         <p className="text-xs text-gray-600">
                           {apt.sale?.batch?.name || '-'} - {apt.sale?.piece?.piece_number || '-'}
@@ -596,6 +778,22 @@ export function AppointmentsPage() {
                           <p className="text-xs text-gray-500 mt-1">📝 {apt.notes}</p>
                         )}
                       </div>
+                      {isOwner && (
+                        <IconButton
+                          variant="ghost"
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleDeleteAppointment(apt)
+                          }}
+                          className="text-red-600 hover:text-red-700 hover:bg-red-50 flex-shrink-0"
+                          title={t('appointments.deleteTitle')}
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                        </IconButton>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -614,7 +812,7 @@ export function AppointmentsPage() {
           setAppointmentNotes('')
           setSelectedSaleId('')
         }}
-        title="موعد البيع (Rendez-vous de vente)"
+        title={t('appointments.appointmentTitle')}
         size="md"
         footer={
           <div className="flex justify-end gap-3">
@@ -629,30 +827,30 @@ export function AppointmentsPage() {
               }}
               disabled={saving}
             >
-              إلغاء
+              {t('appointments.cancel')}
             </Button>
             <Button
               onClick={handleAddAppointment}
               disabled={saving || !appointmentDate || !appointmentTime || !selectedSaleId}
               className="bg-green-600 hover:bg-green-700 active:bg-green-800"
             >
-              {saving ? 'جاري الحفظ...' : '💾 حفظ الموعد'}
+              {saving ? t('appointments.saving') : '💾 ' + t('appointments.save')}
             </Button>
           </div>
         }
       >
         <div className="space-y-3 sm:space-y-4">
           <div className="space-y-1.5 sm:space-y-2">
-            <Label className="text-xs sm:text-sm">البيع *</Label>
+            <Label className="text-xs sm:text-sm">{t('appointments.selectSale')} *</Label>
             <Select
               value={selectedSaleId}
               onChange={(e) => setSelectedSaleId(e.target.value)}
               className="text-xs sm:text-sm"
             >
-              <option value="">اختر البيع...</option>
+              <option value="">{t('appointments.selectSale')}...</option>
               {availableSales.map((sale) => (
                 <option key={sale.id} value={sale.id}>
-                  {sale.client?.name || 'غير محدد'} - {sale.batch?.name || '-'} - {sale.piece?.piece_number || '-'} (#{sale.id.substring(0, 8)})
+                  {sale.client?.name || t('shared.unknown')} - {sale.batch?.name || '-'} - {sale.piece?.piece_number || '-'} (#{sale.id.substring(0, 8)})
                 </option>
               ))}
             </Select>
@@ -663,15 +861,15 @@ export function AppointmentsPage() {
                 const selectedSale = availableSales.find(s => s.id === selectedSaleId)
                 return selectedSale ? (
                   <>
-                    <p><span className="font-medium text-blue-900">العميل:</span> <span className="text-gray-700">{selectedSale.client?.name || 'غير محدد'}</span></p>
-                    <p><span className="font-medium text-blue-900">رقم البيع:</span> <span className="text-gray-700">#{selectedSale.id.substring(0, 8)}</span></p>
+                    <p><span className="font-medium text-blue-900">{t('appointments.client')}:</span> <span className="text-gray-700">{selectedSale.client?.name || t('shared.unknown')}</span></p>
+                    <p><span className="font-medium text-blue-900">{t('appointments.saleNumber')}:</span> <span className="text-gray-700">#{selectedSale.id.substring(0, 8)}</span></p>
                   </>
                 ) : null
               })()}
             </div>
           )}
           <div className="space-y-1.5 sm:space-y-2">
-            <Label className="text-xs sm:text-sm">التاريخ *</Label>
+            <Label className="text-xs sm:text-sm">{t('appointments.date')} *</Label>
             <Input
               type="date"
               value={appointmentDate}
@@ -682,7 +880,7 @@ export function AppointmentsPage() {
             />
           </div>
           <div className="space-y-1.5 sm:space-y-2">
-            <Label className="text-xs sm:text-sm">الوقت *</Label>
+            <Label className="text-xs sm:text-sm">{t('appointments.time')} *</Label>
             <Input
               type="time"
               value={appointmentTime}
@@ -692,11 +890,11 @@ export function AppointmentsPage() {
             />
           </div>
           <div className="space-y-1.5 sm:space-y-2">
-            <Label className="text-xs sm:text-sm">ملاحظات</Label>
+            <Label className="text-xs sm:text-sm">{t('appointments.notes')}</Label>
             <Textarea
               value={appointmentNotes}
               onChange={(e) => setAppointmentNotes(e.target.value)}
-              placeholder="ملاحظات إضافية حول الموعد..."
+              placeholder={t('appointments.notesPlaceholder')}
               rows={3}
               size="sm"
               className="text-xs sm:text-sm"
@@ -868,7 +1066,7 @@ export function AppointmentsPage() {
                   setSelectedAppointment(null)
                 }}
               >
-                إغلاق
+                {t('appointments.close')}
               </Button>
                   <Button
                     onClick={() => {
@@ -877,7 +1075,7 @@ export function AppointmentsPage() {
                       setEditAppointmentTime(selectedAppointment.appointment_time)
                     }}
                   >
-                    ✏️ تعديل الوقت
+                    ✏️ {t('appointments.editTime')}
                   </Button>
                 </>
               )}
@@ -886,15 +1084,15 @@ export function AppointmentsPage() {
         >
           <div className="space-y-3 sm:space-y-4">
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-2 sm:p-3 space-y-1.5 text-xs sm:text-sm">
-              <p><span className="font-medium text-blue-900">العميل:</span> <span className="text-gray-700">{selectedAppointment.client?.name || 'غير محدد'}</span></p>
-              <p><span className="font-medium text-blue-900">رقم الهوية:</span> <span className="text-gray-700">{selectedAppointment.client?.id_number || '-'}</span></p>
-              <p><span className="font-medium text-blue-900">الهاتف:</span> <span className="text-gray-700">{selectedAppointment.client?.phone || '-'}</span></p>
+              <p><span className="font-medium text-blue-900">{t('appointments.client')}:</span> <span className="text-gray-700">{selectedAppointment.client?.name || t('shared.unknown')}</span></p>
+              <p><span className="font-medium text-blue-900">{t('clients.idNumber')}:</span> <span className="text-gray-700">{selectedAppointment.client?.id_number || '-'}</span></p>
+              <p><span className="font-medium text-blue-900">{t('clients.phone')}:</span> <span className="text-gray-700">{selectedAppointment.client?.phone || '-'}</span></p>
             </div>
             {isEditingAppointment ? (
               <div className="space-y-3 sm:space-y-4">
                 <div className="space-y-1.5 sm:space-y-2">
                   <Label className="text-xs sm:text-sm">
-                    التاريخ * <span className="text-red-500">*</span>
+                    {t('appointments.date')} <span className="text-red-500">*</span>
                   </Label>
                   <Input
                     type="date"
@@ -905,7 +1103,7 @@ export function AppointmentsPage() {
                 </div>
                 <div className="space-y-1.5 sm:space-y-2">
                   <Label className="text-xs sm:text-sm">
-                    الوقت * <span className="text-red-500">*</span>
+                    {t('appointments.time')} <span className="text-red-500">*</span>
                   </Label>
                   <Input
                     type="time"
@@ -917,45 +1115,45 @@ export function AppointmentsPage() {
               </div>
             ) : (
             <div className="space-y-1.5 text-xs sm:text-sm">
-              <p><span className="font-medium text-gray-700">التاريخ:</span> {formatDate(selectedAppointment.appointment_date, { day: 'numeric', month: 'long', year: 'numeric' })}</p>
-              <p><span className="font-medium text-gray-700">الوقت:</span> {selectedAppointment.appointment_time}</p>
-              <p><span className="font-medium text-gray-700">الحالة:</span> <Badge className={getStatusColor(selectedAppointment.status)}>{getStatusLabel(selectedAppointment.status)}</Badge></p>
+              <p><span className="font-medium text-gray-700">{t('appointments.date')}:</span> {formatDate(selectedAppointment.appointment_date, { day: 'numeric', month: 'long', year: 'numeric' })}</p>
+              <p><span className="font-medium text-gray-700">{t('appointments.time')}:</span> {selectedAppointment.appointment_time}</p>
+              <p><span className="font-medium text-gray-700">{t('appointments.status')}:</span> <Badge className={getStatusColor(selectedAppointment.status)}>{getStatusLabel(selectedAppointment.status)}</Badge></p>
               {selectedAppointment.sale && (
                 <>
-                  <p><span className="font-medium text-gray-700">القطعة:</span> {selectedAppointment.sale.batch?.name || '-'} - {selectedAppointment.sale.piece?.piece_number || '-'}</p>
-                  <p><span className="font-medium text-gray-700">المساحة:</span> {selectedAppointment.sale.piece?.surface_m2.toLocaleString() || '-'} م²</p>
-                  <p><span className="font-medium text-gray-700">سعر البيع:</span> {selectedAppointment.sale.sale_price.toLocaleString()} دت</p>
+                  <p><span className="font-medium text-gray-700">{t('appointments.piece')}:</span> {selectedAppointment.sale.batch?.name || '-'} - {selectedAppointment.sale.piece?.piece_number || '-'}</p>
+                  <p><span className="font-medium text-gray-700">{t('appointments.surface')}:</span> {selectedAppointment.sale.piece?.surface_m2.toLocaleString() || '-'} م²</p>
+                  <p><span className="font-medium text-gray-700">{t('appointments.salePrice')}:</span> {selectedAppointment.sale.sale_price.toLocaleString()} دت</p>
                   {selectedAppointment.sale.deposit_amount && (
-                    <p><span className="font-medium text-gray-700">العربون:</span> {selectedAppointment.sale.deposit_amount.toLocaleString()} دت</p>
+                    <p><span className="font-medium text-gray-700">{t('appointments.deposit')}:</span> {selectedAppointment.sale.deposit_amount.toLocaleString()} دت</p>
                   )}
-                  <p><span className="font-medium text-gray-700">طريقة الدفع:</span> {
+                  <p><span className="font-medium text-gray-700">{t('appointments.paymentMethod')}:</span> {
                     (() => {
                       const method = selectedAppointment.sale.payment_method
-                      if (method === 'full') return 'نقدي'
-                      if (method === 'installment') return 'تقسيط'
-                      if (method === 'promise') return 'وعد بالبيع'
+                      if (method === 'full') return t('appointments.fullPayment')
+                      if (method === 'installment') return t('appointments.installmentPayment')
+                      if (method === 'promise') return t('appointments.promisePayment')
                       // Infer from payment_offer_id if method is null
-                      if (!method && selectedAppointment.sale.payment_offer_id) return 'تقسيط'
-                      if (!method && selectedAppointment.sale.payment_offer) return 'تقسيط'
-                      return method || 'غير محدد'
+                      if (!method && selectedAppointment.sale.payment_offer_id) return t('appointments.installmentPayment')
+                      if (!method && selectedAppointment.sale.payment_offer) return t('appointments.installmentPayment')
+                      return method || t('shared.unknown')
                     })()
                   }</p>
                   {selectedAppointment.sale.payment_offer && (
                     <div className="mt-2 pt-2 border-t border-gray-200">
-                      <p className="font-medium text-gray-700 mb-1">عرض التقسيط:</p>
+                      <p className="font-medium text-gray-700 mb-1">{t('appointments.paymentOffer')}:</p>
                       <div className="text-xs sm:text-sm space-y-1 text-gray-600">
-                        <p>• الاسم: {selectedAppointment.sale.payment_offer.name || 'بدون اسم'}</p>
-                        <p>• السعر لكل م²: {selectedAppointment.sale.payment_offer.price_per_m2_installment.toLocaleString()} دت</p>
-                        <p>• التسبقة: {
+                        <p>• {t('appointments.offerName')}: {selectedAppointment.sale.payment_offer.name || t('appointments.noName')}</p>
+                        <p>• {t('appointments.pricePerM2')}: {selectedAppointment.sale.payment_offer.price_per_m2_installment.toLocaleString()} دت</p>
+                        <p>• {t('appointments.advance')}: {
                           selectedAppointment.sale.payment_offer.advance_mode === 'fixed' 
                             ? `${selectedAppointment.sale.payment_offer.advance_value.toLocaleString()} دت`
                             : `${selectedAppointment.sale.payment_offer.advance_value}%`
                         }</p>
                         {selectedAppointment.sale.payment_offer.calc_mode === 'monthlyAmount' && selectedAppointment.sale.payment_offer.monthly_amount && (
-                          <p>• المبلغ الشهري: {selectedAppointment.sale.payment_offer.monthly_amount.toLocaleString()} دت</p>
+                          <p>• {t('appointments.monthlyAmount')}: {selectedAppointment.sale.payment_offer.monthly_amount.toLocaleString()} دت</p>
                         )}
                         {selectedAppointment.sale.payment_offer.calc_mode === 'months' && selectedAppointment.sale.payment_offer.months && (
-                          <p>• عدد الأشهر: {selectedAppointment.sale.payment_offer.months} شهر</p>
+                          <p>• {t('appointments.monthsCount')}: {selectedAppointment.sale.payment_offer.months} {t('appointments.month')}</p>
                         )}
                       </div>
                     </div>
@@ -964,7 +1162,7 @@ export function AppointmentsPage() {
               )}
               {selectedAppointment.notes && (
                 <div className="mt-2 pt-2 border-t border-gray-200">
-                  <p><span className="font-medium text-gray-700">ملاحظات:</span></p>
+                  <p><span className="font-medium text-gray-700">{t('appointments.notes')}:</span></p>
                   <p className="text-gray-600">{selectedAppointment.notes}</p>
                 </div>
               )}

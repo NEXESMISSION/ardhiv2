@@ -24,6 +24,7 @@ import { buildSaleQuery, formatSalesWithSellers } from '@/utils/salesQueries'
 import { prefetchContractWriters } from '@/utils/contractWritersCache'
 import { useAuth } from '@/contexts/AuthContext'
 import { useLanguage } from '@/i18n/context'
+import { useSalesRealtime } from '@/hooks/useSalesRealtime'
 
 function replaceVars(str: string, vars: Record<string, string | number>): string {
   return Object.entries(vars).reduce((s, [k, v]) => s.replace(new RegExp(`\\{\\{${k}\\}\\}`, 'g'), String(v)), str)
@@ -162,6 +163,20 @@ export function ConfirmationPage() {
       window.removeEventListener('saleUpdated', handleSaleUpdated)
     }
   }, [])
+
+  // Real-time updates for sales
+  useSalesRealtime({
+    onSaleCreated: () => {
+      setCurrentPage(1)
+      loadPendingSales(1)
+    },
+    onSaleUpdated: () => {
+      // Only reload if we're not currently loading to avoid conflicts
+      if (!loading) {
+        loadPendingSales()
+      }
+    },
+  })
 
   async function loadAllBatches() {
     try {
@@ -1051,19 +1066,37 @@ export function ConfirmationPage() {
 
                   setSavingAppointment(true)
                   try {
+                    // Ensure appointment_date is in YYYY-MM-DD format
+                    let normalizedDate = appointmentDate
+                    if (normalizedDate && normalizedDate.includes('T')) {
+                      normalizedDate = normalizedDate.split('T')[0]
+                    }
+                    
+                    console.log('Creating appointment with date:', {
+                      original: appointmentDate,
+                      normalized: normalizedDate,
+                      saleId: selectedSale.id,
+                      clientId: selectedSale.client_id
+                    })
+                    
                     // Create appointment record
                     const { error: appointmentError } = await supabase
                       .from('appointments')
                       .insert({
                         sale_id: selectedSale.id,
                         client_id: selectedSale.client_id,
-                        appointment_date: appointmentDate,
+                        appointment_date: normalizedDate,
                         appointment_time: appointmentTime,
                         notes: appointmentNotes.trim() || null,
                         status: 'scheduled',
                       })
 
-                    if (appointmentError) throw appointmentError
+                    if (appointmentError) {
+                      console.error('Error creating appointment:', appointmentError)
+                      throw appointmentError
+                    }
+                    
+                    console.log('Appointment created successfully')
 
                     // Notify owners about appointment creation
                     const clientName = selectedSale.client?.name || t('confirmation.clientUnknown')
@@ -1092,6 +1125,9 @@ export function ConfirmationPage() {
                     setAppointmentTime('')
                     setAppointmentNotes('')
                     loadPendingSales()
+                    
+                    // Dispatch event to notify other pages (like Appointments page) to refresh
+                    window.dispatchEvent(new CustomEvent('appointmentCreated'))
                   } catch (e: any) {
                     setErrorMessage(e.message || t('confirmation.appointmentError'))
                     setShowErrorDialog(true)

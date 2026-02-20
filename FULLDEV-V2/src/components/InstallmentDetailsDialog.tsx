@@ -212,29 +212,6 @@ export function InstallmentDetailsDialog({
     }
   }, [sale, installments, loadedPaymentOffer])
 
-  function getDeadlineStatus() {
-    if (!sale.deadline_date) return null
-
-    const deadline = new Date(sale.deadline_date)
-    const now = new Date()
-    const diffMs = now.getTime() - deadline.getTime()
-    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
-    const diffHours = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60))
-
-    if (diffMs > 0) {
-      return {
-        overdue: true,
-        days: diffDays,
-        hours: diffHours,
-      }
-    }
-
-    return {
-      overdue: false,
-      days: Math.abs(diffDays),
-      hours: Math.abs(diffHours),
-    }
-  }
 
   function getTimeUntilDue(dueDate: string) {
     const due = new Date(dueDate)
@@ -309,8 +286,6 @@ export function InstallmentDetailsDialog({
       setPaying(false)
     }
   }
-
-  const deadlineStatus = getDeadlineStatus()
 
   // Don't return null if stats is null, show loading or error instead
   if (!stats) {
@@ -441,15 +416,6 @@ export function InstallmentDetailsDialog({
               </div>
             </div>
           </Card>
-
-          {/* Deadline Warning */}
-          {deadlineStatus && deadlineStatus.overdue && (
-            <Alert variant="error" className="text-xs sm:text-sm">
-              ⚠ تجاوز الموعد بـ {deadlineStatus.days} أيام و {deadlineStatus.hours} ساعات
-              <br />
-              <span className="text-xs">آخر أجل لإتمام الإجراءات: {formatDateShort(sale.deadline_date!)}</span>
-            </Alert>
-          )}
 
           {/* Contract Writer & Other Info - Mobile optimized */}
           {(sale.contract_writer || sale.sold_by || sale.confirmed_by) && (

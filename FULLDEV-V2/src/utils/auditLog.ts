@@ -310,6 +310,30 @@ export async function logAppointmentUpdated(
 }
 
 /**
+ * Log appointment deletion
+ */
+export async function logAppointmentDeleted(
+  appointmentId: string,
+  appointmentData: Record<string, any>,
+  userId?: string,
+  userEmail?: string,
+  userName?: string
+): Promise<void> {
+  await logAuditEvent(
+    'deleted',
+    'appointment',
+    appointmentId,
+    { notes: 'Appointment deleted' },
+    userId,
+    userEmail,
+    userName,
+    appointmentData,
+    undefined,
+    undefined
+  )
+}
+
+/**
  * Log phone call appointment creation
  */
 export async function logPhoneCallAppointmentCreated(

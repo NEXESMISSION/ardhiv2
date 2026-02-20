@@ -11,6 +11,7 @@ import { FinanceDetailsDialog } from '@/components/FinanceDetailsDialog'
 import { InstallmentStatsDialog } from '@/components/InstallmentStatsDialog'
 import { Dialog } from '@/components/ui/dialog'
 import { useLanguage } from '@/i18n/context'
+import { useSalesRealtime } from '@/hooks/useSalesRealtime'
 
 type TimeFilter = 'today' | 'week' | 'month' | 'all'
 
@@ -124,6 +125,16 @@ export function FinancePage() {
       window.removeEventListener('saleUpdated', handleSaleUpdated)
     }
   }, [timeFilter, dateFilter])
+
+  // Real-time updates for sales
+  useSalesRealtime({
+    onSaleUpdated: () => {
+      // Reload finance data when sales are updated
+      if (!loading) {
+        loadData()
+      }
+    },
+  })
 
   async function loadData() {
     setLoading(true)

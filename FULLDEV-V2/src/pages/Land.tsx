@@ -290,8 +290,11 @@ export function LandPage() {
     const debouncedRefresh = () => {
       if (refreshTimeout) clearTimeout(refreshTimeout)
       refreshTimeout = setTimeout(() => {
-        loadBatches()
-      }, 200) // Reduced to 200ms for faster response
+        // Only refresh if not already loading
+        if (!loadingBatchesRef.current) {
+          loadBatches()
+        }
+      }, 500) // Increased to 500ms to prevent rapid-fire refreshes
     }
 
     // Listen for sale and piece status events to refresh data (debounced)
@@ -334,7 +337,8 @@ export function LandPage() {
       if (refreshTimeout) clearTimeout(refreshTimeout)
       if (safetyTimeout) clearTimeout(safetyTimeout)
     }
-  }, []) // Empty dependencies - only run once on mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []) // Empty dependencies - only run once on mount. pieceDialogOpen and selectedBatchForPieces are checked inside handlers
 
   // Sync ref with current displayed stats
   useEffect(() => {
@@ -421,7 +425,18 @@ export function LandPage() {
   // DATA LOADING FUNCTIONS
   // ============================================================================
 
+  // Guard to prevent multiple simultaneous calls
+  const loadingBatchesRef = useRef(false)
+  
   async function loadBatches() {
+    // Prevent multiple simultaneous calls
+    if (loadingBatchesRef.current) {
+      console.log('loadBatches already in progress, skipping...')
+      return
+    }
+    
+    loadingBatchesRef.current = true
+    
     // Don't show loading if we already have data (optimistic update)
     const isInitialLoad = batches.length === 0
     if (isInitialLoad) {
@@ -477,6 +492,7 @@ export function LandPage() {
         console.error('Error loading batches:', err)
         setLoading(false)
         setListError(err.message || t('land.loadError'))
+        loadingBatchesRef.current = false
         // Keep existing batches if any, otherwise set empty
         if (batches.length === 0) {
           setBatches([])
@@ -487,6 +503,7 @@ export function LandPage() {
       if (!data || data.length === 0) {
         setBatches([])
         setLoading(false)
+        loadingBatchesRef.current = false
         return
       }
       
@@ -501,6 +518,7 @@ export function LandPage() {
       console.log(`Loaded ${batchesWithDefaults.length} batches`)
       setBatches(batchesWithDefaults)
       setLoading(false)
+      loadingBatchesRef.current = false
       
       // Load stats in background (completely non-blocking)
       const batchIdsList = data.map(b => b.id)
@@ -561,6 +579,7 @@ export function LandPage() {
       console.error('Exception loading batches:', e)
       setListError(e.message || t('land.loadError'))
       setLoading(false)
+      loadingBatchesRef.current = false
       // Keep existing batches if any, otherwise set empty
       if (batches.length === 0) {
         setBatches([])

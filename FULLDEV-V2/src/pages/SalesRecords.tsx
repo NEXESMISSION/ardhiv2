@@ -12,6 +12,7 @@ import { getPaymentTypeLabel } from '@/utils/paymentTerms'
 import { calculateInstallmentWithDeposit } from '@/utils/installmentCalculator'
 import { buildSaleQuery, formatSalesWithSellers } from '@/utils/salesQueries'
 import { useLanguage } from '@/i18n/context'
+import { useSalesRealtime } from '@/hooks/useSalesRealtime'
 
 interface Sale {
   id: string
@@ -87,8 +88,10 @@ export function SalesRecordsPage() {
   const [currentPage, setCurrentPage] = useState(1)
   const [totalCount, setTotalCount] = useState(0)
   const [allBatches, setAllBatches] = useState<Array<{ id: string; name: string }>>([])
+  const [allSales, setAllSales] = useState<Sale[]>([]) // Store all sales for search
   const itemsPerPage = 20
   const prevFiltersRef = useRef({ statusFilter, paymentMethodFilter, batchFilter })
+  const prevSearchQueryRef = useRef(searchQuery)
 
   useEffect(() => {
     supabase.from('land_batches').select('id, name').order('name', { ascending: true }).then(({ data }) => {
@@ -100,13 +103,16 @@ export function SalesRecordsPage() {
     const filtersChanged = prevFiltersRef.current.statusFilter !== statusFilter ||
       prevFiltersRef.current.paymentMethodFilter !== paymentMethodFilter ||
       prevFiltersRef.current.batchFilter !== batchFilter
-    if (filtersChanged) {
+    const searchChanged = prevSearchQueryRef.current !== searchQuery
+    
+    if (filtersChanged || searchChanged) {
       prevFiltersRef.current = { statusFilter, paymentMethodFilter, batchFilter }
+      prevSearchQueryRef.current = searchQuery
       setCurrentPage(1)
     }
     setSelectedSales(new Set()) // clear selection when page or filters change
-    loadAllSales(filtersChanged ? 1 : currentPage)
-  }, [currentPage, statusFilter, paymentMethodFilter, batchFilter, allBatches.length])
+    loadAllSales(filtersChanged || searchChanged ? 1 : currentPage)
+  }, [currentPage, statusFilter, paymentMethodFilter, batchFilter, searchQuery, allBatches.length])
 
   useEffect(() => {
     const handleSaleCreated = () => loadAllSales()
@@ -119,47 +125,90 @@ export function SalesRecordsPage() {
     }
   }, [])
 
+  // Real-time updates for sales
+  useSalesRealtime({
+    onSaleCreated: () => {
+      setCurrentPage(1)
+      loadAllSales(1)
+    },
+    onSaleUpdated: () => {
+      if (!loading) {
+        loadAllSales()
+      }
+    },
+    onSaleDeleted: () => {
+      if (!loading) {
+        loadAllSales()
+      }
+    },
+  })
+
   async function loadAllSales(overridePage?: number) {
     const page = overridePage ?? currentPage
     if (sales.length === 0 && !loading) setLoading(true)
     setError(null)
     try {
-      const from = (page - 1) * itemsPerPage
-      const to = from + itemsPerPage - 1
       const batchId = batchFilter === 'all' ? null : allBatches.find(b => b.name === batchFilter)?.id
 
-      let query = supabase
-        .from('sales')
-        .select(buildSaleQuery())
-        .order('created_at', { ascending: false })
-        .range(from, to)
-        .limit(itemsPerPage)
-      if (statusFilter !== 'all') query = query.eq('status', statusFilter)
-      if (paymentMethodFilter !== 'all') query = query.eq('payment_method', paymentMethodFilter)
-      if (batchId) query = query.eq('batch_id', batchId)
+      // If searching, load all data (up to reasonable limit) for client-side filtering
+      // Otherwise, use server-side pagination
+      if (searchQuery.trim()) {
+        let query = supabase
+          .from('sales')
+          .select(buildSaleQuery())
+          .order('created_at', { ascending: false })
+          .limit(1000) // Load more for search
 
-      const { data, error: err } = await query
+        if (statusFilter !== 'all') query = query.eq('status', statusFilter)
+        if (paymentMethodFilter !== 'all') query = query.eq('payment_method', paymentMethodFilter)
+        if (batchId) query = query.eq('batch_id', batchId)
 
-      if (err) throw err
+        const { data, error: err } = await query
 
-      const formattedSales = await formatSalesWithSellers(data || [])
+        if (err) throw err
 
-      setSales(formattedSales)
-
-      const loaded = (data || []).length
-      if (loaded === itemsPerPage) {
-        setTotalCount((page * itemsPerPage) + 1)
+        const formattedSales = await formatSalesWithSellers(data || [])
+        setAllSales(formattedSales)
+        setSales(formattedSales) // Use all sales for filtering
+        setTotalCount(formattedSales.length)
       } else {
-        setTotalCount((page - 1) * itemsPerPage + loaded)
-      }
+        // Server-side pagination when not searching
+        const from = (page - 1) * itemsPerPage
+        const to = from + itemsPerPage - 1
 
-      let countQuery = supabase.from('sales').select('*', { count: 'exact', head: true })
-      if (statusFilter !== 'all') countQuery = countQuery.eq('status', statusFilter)
-      if (paymentMethodFilter !== 'all') countQuery = countQuery.eq('payment_method', paymentMethodFilter)
-      if (batchId) countQuery = countQuery.eq('batch_id', batchId)
-      void Promise.resolve(countQuery).then((res: { count: number | null }) => {
-        if (res.count != null) setTotalCount(res.count)
-      }).catch(() => {})
+        let query = supabase
+          .from('sales')
+          .select(buildSaleQuery())
+          .order('created_at', { ascending: false })
+          .range(from, to)
+          .limit(itemsPerPage)
+        if (statusFilter !== 'all') query = query.eq('status', statusFilter)
+        if (paymentMethodFilter !== 'all') query = query.eq('payment_method', paymentMethodFilter)
+        if (batchId) query = query.eq('batch_id', batchId)
+
+        const { data, error: err } = await query
+
+        if (err) throw err
+
+        const formattedSales = await formatSalesWithSellers(data || [])
+
+        setSales(formattedSales)
+
+        const loaded = (data || []).length
+        if (loaded === itemsPerPage) {
+          setTotalCount((page * itemsPerPage) + 1)
+        } else {
+          setTotalCount((page - 1) * itemsPerPage + loaded)
+        }
+
+        let countQuery = supabase.from('sales').select('*', { count: 'exact', head: true })
+        if (statusFilter !== 'all') countQuery = countQuery.eq('status', statusFilter)
+        if (paymentMethodFilter !== 'all') countQuery = countQuery.eq('payment_method', paymentMethodFilter)
+        if (batchId) countQuery = countQuery.eq('batch_id', batchId)
+        void Promise.resolve(countQuery).then((res: { count: number | null }) => {
+          if (res.count != null) setTotalCount(res.count)
+        }).catch(() => {})
+      }
     } catch (e: any) {
       setError(e.message || t('salesRecords.loadError'))
     } finally {
@@ -170,11 +219,42 @@ export function SalesRecordsPage() {
   // Batches for filter dropdown (from land_batches)
   const batches = useMemo(() => allBatches.map(b => b.name).sort(), [allBatches])
 
-  const totalPages = Math.max(1, Math.ceil(totalCount / itemsPerPage))
+  // Calculate total count for pagination
+  const totalFilteredCount = useMemo(() => {
+    if (searchQuery.trim()) {
+      // When searching, count filtered results
+      const query = searchQuery.trim().toLowerCase()
+      return sales.filter(sale => {
+        const clientName = sale.client?.name?.toLowerCase() || ''
+        const clientCIN = sale.client?.id_number?.toLowerCase() || ''
+        const pieceNumber = sale.piece?.piece_number?.toLowerCase() || ''
+        const batchName = sale.batch?.name?.toLowerCase() || ''
+        const sellerName = sale.seller?.name?.toLowerCase() || ''
+        const confirmedByName = sale.confirmedBy?.name?.toLowerCase() || ''
+        const saleId = sale.id?.toLowerCase() || ''
+        const notes = sale.notes?.toLowerCase() || ''
+
+        return clientName.includes(query) || 
+               clientCIN.includes(query) || 
+               pieceNumber.includes(query) ||
+               batchName.includes(query) ||
+               sellerName.includes(query) ||
+               confirmedByName.includes(query) ||
+               saleId.includes(query) ||
+               notes.includes(query)
+      }).length
+    }
+    return totalCount
+  }, [sales, searchQuery, totalCount])
+
+  const totalPages = Math.max(1, Math.ceil(totalFilteredCount / itemsPerPage))
   const hasNextPage = currentPage < totalPages
   const hasPrevPage = currentPage > 1
   function goToPage(page: number) {
-    if (page >= 1 && page <= totalPages) setCurrentPage(page)
+    if (page >= 1 && page <= totalPages) {
+      setCurrentPage(page)
+      window.scrollTo(0, 0)
+    }
   }
 
   // Scroll to top when page changes for better UX
@@ -182,39 +262,66 @@ export function SalesRecordsPage() {
     window.scrollTo(0, 0)
   }, [currentPage])
 
-  // Filter sales (client-side search on current page)
+  // Filter sales (client-side search and filters)
   const filteredSales = useMemo(() => {
-    return sales.filter(sale => {
-      // Search filter
-      if (searchQuery) {
-        const query = searchQuery.toLowerCase()
-        const matchesClient = sale.client?.name?.toLowerCase().includes(query) || 
-                             sale.client?.id_number?.includes(query)
-        const matchesPiece = sale.piece?.piece_number?.toLowerCase().includes(query)
-        const matchesBatch = sale.batch?.name?.toLowerCase().includes(query)
-        if (!matchesClient && !matchesPiece && !matchesBatch) {
-          return false
-        }
-      }
+    let filtered = sales
 
-      // Status filter
-      if (statusFilter !== 'all' && sale.status !== statusFilter) {
-        return false
-      }
+    // Search filter - comprehensive search across multiple fields
+    if (searchQuery.trim()) {
+      const query = searchQuery.trim().toLowerCase()
+      filtered = filtered.filter(sale => {
+        // Client name
+        const clientName = sale.client?.name?.toLowerCase() || ''
+        // CIN (ID number) - case-insensitive
+        const clientCIN = sale.client?.id_number?.toLowerCase() || ''
+        // Piece number
+        const pieceNumber = sale.piece?.piece_number?.toLowerCase() || ''
+        // Batch name
+        const batchName = sale.batch?.name?.toLowerCase() || ''
+        // Seller name
+        const sellerName = sale.seller?.name?.toLowerCase() || ''
+        // ConfirmedBy name
+        const confirmedByName = sale.confirmedBy?.name?.toLowerCase() || ''
+        // Sale ID (partial match)
+        const saleId = sale.id?.toLowerCase() || ''
+        // Notes
+        const notes = sale.notes?.toLowerCase() || ''
 
-      // Payment method filter
-      if (paymentMethodFilter !== 'all' && sale.payment_method !== paymentMethodFilter) {
-        return false
-      }
+        return clientName.includes(query) || 
+               clientCIN.includes(query) || 
+               pieceNumber.includes(query) ||
+               batchName.includes(query) ||
+               sellerName.includes(query) ||
+               confirmedByName.includes(query) ||
+               saleId.includes(query) ||
+               notes.includes(query)
+      })
+    }
 
-      // Batch filter
-      if (batchFilter !== 'all' && sale.batch?.name !== batchFilter) {
-        return false
-      }
+    // Status filter (already applied server-side, but keep for consistency)
+    if (statusFilter !== 'all') {
+      filtered = filtered.filter(sale => sale.status === statusFilter)
+    }
 
-      return true
-    })
-  }, [sales, searchQuery, statusFilter, paymentMethodFilter, batchFilter])
+    // Payment method filter (already applied server-side, but keep for consistency)
+    if (paymentMethodFilter !== 'all') {
+      filtered = filtered.filter(sale => sale.payment_method === paymentMethodFilter)
+    }
+
+    // Batch filter (already applied server-side, but keep for consistency)
+    if (batchFilter !== 'all') {
+      filtered = filtered.filter(sale => sale.batch?.name === batchFilter)
+    }
+
+    // When searching, paginate client-side
+    if (searchQuery.trim()) {
+      const start = (currentPage - 1) * itemsPerPage
+      const end = start + itemsPerPage
+      return filtered.slice(start, end)
+    }
+
+    return filtered
+  }, [sales, searchQuery, statusFilter, paymentMethodFilter, batchFilter, currentPage])
 
   async function getTotalPaidAmount(sale: Sale): Promise<number> {
     let totalPaid = sale.deposit_amount || 0
@@ -577,7 +684,11 @@ export function SalesRecordsPage() {
         </div>
         <div className="flex items-center justify-between text-xs text-gray-600 flex-wrap gap-2">
           {searchQuery ? (
-            <span>{t('salesRecords.resultsOnPage')}: {filteredSales.length} {t('salesRecords.ofLabel')} {sales.length}</span>
+            <span>{replaceVars(t('salesRecords.showingRange'), {
+              from: filteredSales.length > 0 ? (currentPage - 1) * itemsPerPage + 1 : 0,
+              to: Math.min(currentPage * itemsPerPage, totalFilteredCount),
+              total: totalFilteredCount,
+            })}</span>
           ) : (
             <span>{replaceVars(t('salesRecords.showingRange'), { from: sales.length > 0 ? (currentPage - 1) * itemsPerPage + 1 : 0, to: Math.min(currentPage * itemsPerPage, totalCount), total: totalCount })}</span>
           )}
@@ -792,7 +903,7 @@ export function SalesRecordsPage() {
         </div>
 
         {/* Pagination */}
-        {!searchQuery && totalPages > 1 && (
+        {totalPages > 1 && (
           <div className="flex items-center justify-center gap-1.5 sm:gap-2 flex-wrap mt-4">
             <Button variant="secondary" size="sm" onClick={() => goToPage(currentPage - 1)} disabled={!hasPrevPage} className="text-xs sm:text-sm py-1.5 px-2">
               {t('salesRecords.previous')}

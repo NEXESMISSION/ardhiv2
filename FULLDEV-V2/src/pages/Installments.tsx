@@ -4,11 +4,13 @@ import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Alert } from '@/components/ui/alert'
+import { Input } from '@/components/ui/input'
 import { formatPrice, formatDateShort } from '@/utils/priceCalculator'
 import { calculateInstallmentWithDeposit } from '@/utils/installmentCalculator'
 import { buildSaleQuery, formatSalesWithSellers } from '@/utils/salesQueries'
 import { InstallmentDetailsDialog } from '@/components/InstallmentDetailsDialog'
 import { useLanguage } from '@/i18n/context'
+import { useSalesRealtime } from '@/hooks/useSalesRealtime'
 
 interface Sale {
   id: string
@@ -84,20 +86,31 @@ interface InstallmentPayment {
 
 const ITEMS_PER_PAGE = 20
 
+function replaceVars(str: string, vars: Record<string, string | number>): string {
+  return Object.entries(vars).reduce((s, [k, v]) => s.replace(new RegExp(`\\{\\{${k}\\}\\}`, 'g'), String(v)), str)
+}
+
 interface InstallmentsPageProps {
   onNavigate?: (page: string) => void
+}
+
+interface ClientGroup {
+  client: Sale['client']
+  offerGroups: Array<{ offer: Sale['payment_offer'] | null; sales: Sale[] }>
 }
 
 export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
   const { t } = useLanguage()
   const [sales, setSales] = useState<Sale[]>([])
   const [groupedSales, setGroupedSales] = useState<Sale[][]>([])
+  const [clientGroups, setClientGroups] = useState<ClientGroup[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null)
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false)
   const [currentPage, setCurrentPage] = useState(1)
   const [totalCount, setTotalCount] = useState(0)
+  const [searchQuery, setSearchQuery] = useState('')
 
   useEffect(() => {
     loadInstallmentSales()
@@ -112,6 +125,16 @@ export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
       window.removeEventListener('saleUpdated', handleSaleUpdated)
     }
   }, [currentPage])
+
+  // Real-time updates for sales
+  useSalesRealtime({
+    onSaleUpdated: () => {
+      // Only reload if sale status changed to completed or payment_method changed to installment
+      if (!loading) {
+        loadInstallmentSales()
+      }
+    },
+  })
 
   async function loadInstallmentSales() {
     if (sales.length === 0 && !loading) setLoading(true)
@@ -144,23 +167,59 @@ export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
           : sale.contract_writers,
       }))
 
-      // Group sales by client + payment_offer_id (for current page only)
-      const groupedSalesMap = new Map<string, Sale[]>()
+      // Group sales by client first, then by payment_offer_id within each client
+      // Structure: Map<client_id, Map<payment_offer_id, Sale[]>>
+      const clientGroupsMap = new Map<string, Map<string, Sale[]>>()
       
       formattedSales.forEach((sale) => {
-        const groupKey = sale.payment_offer_id
-          ? `${sale.client_id}-${sale.payment_offer_id}`
-          : `${sale.client_id}-no-offer`
+        const clientId = sale.client_id
+        const offerKey = sale.payment_offer_id || 'no-offer'
         
-        if (!groupedSalesMap.has(groupKey)) {
-          groupedSalesMap.set(groupKey, [])
+        if (!clientGroupsMap.has(clientId)) {
+          clientGroupsMap.set(clientId, new Map())
         }
-        groupedSalesMap.get(groupKey)!.push(sale)
+        
+        const offerGroupsMap = clientGroupsMap.get(clientId)!
+        if (!offerGroupsMap.has(offerKey)) {
+          offerGroupsMap.set(offerKey, [])
+        }
+        
+        offerGroupsMap.get(offerKey)!.push(sale)
       })
 
-      const salesGroups = Array.from(groupedSalesMap.values())
-      setSales(salesGroups.flat())
-      setGroupedSales(salesGroups)
+      // Convert to nested array structure: [clientGroup][offerGroup][sales]
+      const clientGroups: Array<{ client: Sale['client']; offerGroups: Array<{ offer: Sale['payment_offer'] | null; sales: Sale[] }> }> = []
+      
+      clientGroupsMap.forEach((offerGroupsMap, clientId) => {
+        const firstSale = Array.from(offerGroupsMap.values())[0]?.[0]
+        const offerGroups: Array<{ offer: Sale['payment_offer'] | null; sales: Sale[] }> = []
+        
+        offerGroupsMap.forEach((sales, offerKey) => {
+          offerGroups.push({
+            offer: sales[0]?.payment_offer || null,
+            sales: sales
+          })
+        })
+        
+        clientGroups.push({
+          client: firstSale?.client,
+          offerGroups: offerGroups
+        })
+      })
+
+      // Flatten for backward compatibility
+      const allSalesGroups: Sale[][] = []
+      clientGroups.forEach(clientGroup => {
+        clientGroup.offerGroups.forEach(offerGroup => {
+          allSalesGroups.push(offerGroup.sales)
+        })
+      })
+
+      setSales(allSalesGroups.flat())
+      setGroupedSales(allSalesGroups)
+      
+      // Store client groups for rendering
+      setClientGroups(clientGroups)
 
       // Approximate total count
       const loaded = (data || []).length
@@ -262,6 +321,43 @@ export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
     setSelectedSale(null)
   }
 
+  // Filter client groups based on search query
+  const filteredClientGroups = useMemo(() => {
+    if (!searchQuery.trim()) {
+      return clientGroups
+    }
+
+    const query = searchQuery.trim().toLowerCase()
+    return clientGroups
+      .map(clientGroup => {
+        // Filter offer groups within this client
+        const filteredOfferGroups = clientGroup.offerGroups
+          .map(offerGroup => ({
+            ...offerGroup,
+            sales: offerGroup.sales.filter(sale => {
+              const clientName = sale.client?.name?.toLowerCase() || ''
+              const clientCIN = sale.client?.id_number?.toLowerCase() || ''
+              const pieceNumber = sale.piece?.piece_number?.toLowerCase() || ''
+              
+              return clientName.includes(query) || 
+                     clientCIN.includes(query) || 
+                     pieceNumber.includes(query)
+            })
+          }))
+          .filter(offerGroup => offerGroup.sales.length > 0)
+        
+        // Only include client if they have matching sales
+        if (filteredOfferGroups.length > 0) {
+          return {
+            ...clientGroup,
+            offerGroups: filteredOfferGroups
+          }
+        }
+        return null
+      })
+      .filter((group): group is ClientGroup => group !== null)
+  }, [clientGroups, searchQuery])
+
   const totalPages = Math.max(1, Math.ceil(totalCount / ITEMS_PER_PAGE))
   const hasNextPage = currentPage < totalPages
   const hasPrevPage = currentPage > 1
@@ -285,7 +381,7 @@ export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
             </Button>
           )}
         </div>
-        {totalCount > 0 && (
+        {totalCount > 0 && !searchQuery && (
           <span className="text-xs sm:text-sm text-gray-600">
             {t('installments.showingRange')
               .replace('{{from}}', String(sales.length > 0 ? (currentPage - 1) * ITEMS_PER_PAGE + 1 : 0))
@@ -293,6 +389,38 @@ export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
               .replace('{{total}}', String(totalCount))}
           </span>
         )}
+        {searchQuery && (
+          <span className="text-xs sm:text-sm text-gray-600">
+            {replaceVars(t('installments.showingResults'), { 
+              count: filteredClientGroups.reduce((sum, cg) => sum + cg.offerGroups.reduce((s, og) => s + og.sales.length, 0), 0)
+            })}
+          </span>
+        )}
+      </div>
+
+      {/* Search Bar */}
+      <div className="bg-white border border-gray-200 rounded-lg p-2 sm:p-3 shadow-sm">
+        <div className="relative">
+          <Input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder={t('installments.searchPlaceholder')}
+            size="sm"
+            className="text-xs sm:text-sm pr-10"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+              title={t('installments.clearSearch')}
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          )}
+        </div>
       </div>
 
       {error && (
@@ -306,112 +434,110 @@ export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
             <p className="mt-2 text-xs text-gray-500">{t('installments.loading')}</p>
           </div>
         </div>
-      ) : groupedSales.length === 0 ? (
+      ) : (searchQuery ? filteredClientGroups : clientGroups).length === 0 ? (
         <Card className="p-3 sm:p-4 lg:p-6 text-center">
-          <p className="text-xs sm:text-sm text-gray-500">{t('installments.noInstallmentSales')}</p>
+          <p className="text-xs sm:text-sm text-gray-500">
+            {searchQuery ? t('installments.noSearchResults') : t('installments.noInstallmentSales')}
+          </p>
         </Card>
       ) : (
         <>
-        <div className="space-y-2 sm:space-y-3">
-          {groupedSales.map((salesGroup, groupIndex) => {
-            const firstSale = salesGroup[0]
-            const canGroupTogether = salesGroup.length > 1 && 
-              salesGroup.every(s => s.client_id === firstSale.client_id) &&
-              salesGroup.every(s => s.payment_offer_id === firstSale.payment_offer_id)
-
-            if (canGroupTogether) {
-              // Render as grouped card - mobile optimized
-              return (
-                <Card key={`group-${groupIndex}`} className="p-2 sm:p-3 lg:p-4 hover:shadow-md transition-shadow">
-                  <div className="mb-2 sm:mb-3">
-                    <div className="flex flex-wrap items-center gap-1 sm:gap-2 mb-1">
-                      <h3 className="text-sm sm:text-base font-semibold text-gray-900 truncate">
-                        {firstSale.client?.name || t('shared.unknown')}
-                      </h3>
-                      <Badge variant="info" size="sm" className="text-xs">
-                        {salesGroup.length} {salesGroup.length === 1 ? t('installments.piece') : t('installments.pieces')}
-                      </Badge>
-                      {firstSale.payment_offer && (
-                        <Badge variant="secondary" size="sm" className="text-xs">
-                          {firstSale.payment_offer.name || t('installments.offerLabel')}
-                        </Badge>
-                      )}
-                    </div>
-                    <p className="text-xs text-gray-500">{firstSale.client?.id_number || ''}</p>
+        <div className="space-y-4 sm:space-y-5">
+          {(searchQuery ? filteredClientGroups : clientGroups).map((clientGroup, clientIndex) => {
+            const totalPieces = clientGroup.offerGroups.reduce((sum, og) => sum + og.sales.length, 0)
+            
+            return (
+              <Card key={`client-${clientIndex}`} className="p-4 sm:p-5 lg:p-6 hover:shadow-xl transition-shadow border-2 border-blue-200 rounded-lg bg-gradient-to-br from-blue-50 to-white">
+                {/* Client Header */}
+                <div className="mb-4 pb-4 border-b-2 border-blue-200">
+                  <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-2">
+                    <h2 className="text-xl sm:text-2xl font-bold text-gray-900 truncate">
+                      👤 {clientGroup.client?.name || t('shared.unknown')}
+                    </h2>
+                    <Badge variant="info" size="lg" className="text-sm font-semibold">
+                      {totalPieces} {totalPieces === 1 ? t('installments.piece') : t('installments.pieces')}
+                    </Badge>
                   </div>
-
-                  {/* Mobile: Card layout, Desktop: Table layout */}
-                  <div className="space-y-2 sm:space-y-2 lg:hidden">
-                    {salesGroup.map((sale) => (
-                      <SaleCard key={sale.id} sale={sale} onClick={() => handleSaleClick(sale)} />
-                    ))}
-                  </div>
-
-                  {/* Desktop table */}
-                  <div className="hidden lg:block overflow-x-auto">
-                    <table className="w-full text-sm border-collapse">
-                      <thead>
-                        <tr className="border-b-2 border-gray-300 bg-gray-50">
-                          <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.dealColumn')}</th>
-                          <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.piecesColumn')}</th>
-                          <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.installmentsColumn')}</th>
-                          <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.paidColumn')}</th>
-                          <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.remainingColumn')}</th>
-                          <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.overdueColumn')}</th>
-                          <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.dueDateColumn')}</th>
-                          <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.statusColumn')}</th>
-                          <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.actionColumn')}</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {salesGroup.map((sale) => (
-                          <SaleRow key={sale.id} sale={sale} onClick={() => handleSaleClick(sale)} />
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </Card>
-              )
-            } else {
-              // Render individual sales - mobile optimized
-              return (
-                <div key={`group-${groupIndex}`}>
-                  {/* Mobile: Card layout */}
-                  <div className="space-y-2 lg:hidden">
-                    {salesGroup.map((sale) => (
-                      <SaleCard key={sale.id} sale={sale} onClick={() => handleSaleClick(sale)} />
-                    ))}
-                  </div>
-
-                  {/* Desktop table */}
-                  <div className="hidden lg:block overflow-x-auto">
-                    <table className="w-full text-sm border-collapse">
-                      {groupIndex === 0 && (
-                        <thead>
-                          <tr className="border-b-2 border-gray-300 bg-gray-50">
-                            <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.clientColumn')}</th>
-                            <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.dealColumn')}</th>
-                            <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.piecesColumn')}</th>
-                            <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.installmentsColumn')}</th>
-                            <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.paidColumn')}</th>
-                            <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.remainingColumn')}</th>
-                            <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.overdueColumn')}</th>
-                            <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.dueDateColumn')}</th>
-                            <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.statusColumn')}</th>
-                            <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.actionColumn')}</th>
-                          </tr>
-                        </thead>
-                      )}
-                      <tbody>
-                        {salesGroup.map((sale) => (
-                          <SaleRow key={sale.id} sale={sale} onClick={() => handleSaleClick(sale)} />
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                  <p className="text-sm sm:text-base text-gray-600 font-medium">
+                    CIN: {clientGroup.client?.id_number || ''}
+                  </p>
                 </div>
+
+                {/* Payment Offer Groups */}
+                <div className="space-y-4">
+                  {clientGroup.offerGroups.map((offerGroup, offerIndex) => {
+                    const offerSales = offerGroup.sales
+                    const firstSale = offerSales[0]
+                    
+                    return (
+                      <Card 
+                        key={`offer-${clientIndex}-${offerIndex}`} 
+                        className="p-3 sm:p-4 border-2 border-gray-200 hover:border-gray-300 bg-white rounded-lg"
+                      >
+                        {/* Payment Offer Header */}
+                        {offerGroup.offer && (
+                          <div className="mb-3 pb-3 border-b border-gray-200">
+                            <div className="flex flex-wrap items-center gap-2 mb-1">
+                              <Badge variant="secondary" size="md" className="text-xs sm:text-sm font-semibold">
+                                📋 {offerGroup.offer.name || t('installments.offerLabel')}
+                              </Badge>
+                              <Badge variant="info" size="sm" className="text-xs">
+                                {offerSales.length} {offerSales.length === 1 ? t('installments.piece') : t('installments.pieces')}
+                              </Badge>
+                            </div>
+                            <div className="text-xs sm:text-sm text-gray-600 space-y-0.5">
+                              <div>💰 المبلغ الشهري: {offerGroup.offer.monthly_amount?.toLocaleString() || '-'} DT</div>
+                              {offerGroup.offer.months && (
+                                <div>📅 عدد الأشهر: {offerGroup.offer.months}</div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                        
+                        {!offerGroup.offer && offerSales.length > 1 && (
+                          <div className="mb-3 pb-3 border-b border-gray-200">
+                            <Badge variant="secondary" size="sm" className="text-xs">
+                              {offerSales.length} {offerSales.length === 1 ? t('installments.piece') : t('installments.pieces')} بدون عرض
+                            </Badge>
+                          </div>
+                        )}
+
+                        {/* Mobile: Card layout - 2 columns smart design */}
+                        <div className="grid grid-cols-2 gap-2 sm:gap-3 lg:hidden">
+                          {offerSales.map((sale) => (
+                            <SaleCard key={sale.id} sale={sale} onClick={() => handleSaleClick(sale)} />
+                          ))}
+                        </div>
+
+                        {/* Desktop table */}
+                        <div className="hidden lg:block overflow-x-auto">
+                          <table className="w-full text-sm border-collapse">
+                            <thead>
+                              <tr className="border-b-2 border-gray-300 bg-gray-50">
+                                <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.dealColumn')}</th>
+                                <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.piecesColumn')}</th>
+                                <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.installmentsColumn')}</th>
+                                <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.paidColumn')}</th>
+                                <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.remainingColumn')}</th>
+                                <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.overdueColumn')}</th>
+                                <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.dueDateColumn')}</th>
+                                <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.statusColumn')}</th>
+                                <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.actionColumn')}</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {offerSales.map((sale) => (
+                                <SaleRow key={sale.id} sale={sale} onClick={() => handleSaleClick(sale)} />
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </Card>
+                    )
+                  })}
+                </div>
+              </Card>
             )
-            }
           })}
         </div>
 
@@ -933,84 +1059,97 @@ function SaleCard({ sale, onClick }: { sale: Sale; onClick: () => void }) {
 
               return (
     <Card 
-      className="p-2 hover:shadow-md transition-shadow cursor-pointer" 
+      className="p-2.5 sm:p-3 hover:shadow-lg transition-all cursor-pointer border border-gray-200 hover:border-blue-400 bg-white rounded-lg h-full flex flex-col" 
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
       onClick={handleClick}
     >
-      <div className="space-y-1.5">
-        {/* Header */}
-        <div className="flex items-start justify-between">
+      <div className="space-y-2 flex-1 flex flex-col">
+        {/* Header - Client Name & Status */}
+        <div className="flex items-start justify-between gap-1.5 pb-2 border-b border-gray-100">
           <div className="flex-1 min-w-0">
-            <div className="font-semibold text-xs text-gray-900 truncate">
+            <div className="font-bold text-xs sm:text-sm text-gray-900 truncate leading-tight mb-0.5">
               {sale.client?.name || t('shared.unknown')}
-                      </div>
-            <div className="text-xs text-gray-500">{sale.client?.id_number || ''}</div>
-                      </div>
-          {getStatusBadge()}
-                      </div>
-
-        {/* Piece info */}
-        <div className="flex items-center gap-2 text-xs">
-          <span className="text-gray-600">{t('installments.pieceLabel')}:</span>
-          <span className="font-medium">{sale.piece?.piece_number || '-'}</span>
-          <span className="text-gray-400">|</span>
-          <span className="text-gray-600">{t('installments.dateLabel')}:</span>
-          <span>{formatDateShort(sale.sale_date)}</span>
-                          </div>
-
-        {/* Installments progress */}
-        <div className="flex items-center justify-between text-xs">
-          <div className="flex items-center gap-1.5">
-            <span className="text-gray-600">{t('installments.installmentsLabel')}:</span>
-            <span className="font-semibold">{stats.paidCount}/{stats.totalCount}</span>
-                        </div>
-          {stats.nextDueDate && (
-            <div className="text-gray-500">
-              {formatDateShort(stats.nextDueDate)} ({formatNextDueDate()})
-          </div>
-        )}
-          </div>
-
-        {/* Amounts */}
-        <div className="grid grid-cols-2 gap-2 pt-1 border-t border-gray-100">
-                <div>
-            <div className="text-xs text-gray-500">{t('installments.paidLabel')}</div>
-            <div className="font-semibold text-xs text-green-600">{formatPrice(stats.totalPaid)} DT</div>
-                </div>
-                <div>
-            <div className="text-xs text-gray-500">{t('installments.remainingLabel')}</div>
-            <div className="font-semibold text-xs text-gray-700">{formatPrice(stats.remaining)} DT</div>
-                </div>
-                </div>
-
-        {/* Overdue */}
-        {stats.overdueAmount > 0 && (
-          <div className="pt-1 border-t border-red-100">
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-red-600 font-semibold">{t('installments.overdueLabel')}:</span>
-              <span className="text-xs text-red-600 font-semibold">{formatPrice(stats.overdueAmount)} DT</span>
-              </div>
             </div>
+            <div className="text-[10px] sm:text-xs text-gray-500 truncate">
+              {sale.client?.id_number || ''}
+            </div>
+          </div>
+          <div className="flex-shrink-0">
+            {getStatusBadge()}
+          </div>
+        </div>
+
+        {/* Piece & Date - Compact */}
+        <div className="flex items-center justify-between text-[10px] sm:text-xs">
+          <div className="flex items-center gap-1">
+            <span className="text-gray-500">📋</span>
+            <span className="font-semibold text-gray-900">{sale.piece?.piece_number || '-'}</span>
+          </div>
+          <div className="text-gray-500">
+            {formatDateShort(sale.sale_date)}
+          </div>
+        </div>
+
+        {/* Installments Progress - Compact & Visual */}
+        <div className="bg-gradient-to-r from-blue-50 to-blue-100 rounded-md p-2 border border-blue-200">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[10px] sm:text-xs font-medium text-gray-700">{t('installments.installmentsLabel')}</span>
+            <span className="font-bold text-sm sm:text-base text-blue-600">{stats.paidCount}/{stats.totalCount}</span>
+          </div>
+          {/* Progress bar */}
+          <div className="w-full bg-blue-200 rounded-full h-1.5 mb-1">
+            <div
+              className="bg-blue-600 h-1.5 rounded-full transition-all"
+              style={{ width: `${stats.totalCount > 0 ? (stats.paidCount / stats.totalCount) * 100 : 0}%` }}
+            />
+          </div>
+          {stats.nextDueDate && (
+            <div className="text-[9px] sm:text-[10px] text-gray-600 truncate">
+              ⏰ {formatDateShort(stats.nextDueDate)}
+            </div>
+          )}
+        </div>
+
+        {/* Financial Summary - Compact Grid */}
+        <div className="grid grid-cols-2 gap-1.5">
+          <div className="bg-green-50 rounded-md p-1.5 sm:p-2 border border-green-200">
+            <div className="text-[9px] sm:text-[10px] text-gray-600 mb-0.5">💰 {t('installments.paidLabel')}</div>
+            <div className="font-bold text-xs sm:text-sm text-green-700 leading-tight">{formatPrice(stats.totalPaid)}</div>
+          </div>
+          <div className="bg-gray-50 rounded-md p-1.5 sm:p-2 border border-gray-200">
+            <div className="text-[9px] sm:text-[10px] text-gray-600 mb-0.5">📊 {t('installments.remainingLabel')}</div>
+            <div className="font-bold text-xs sm:text-sm text-gray-800 leading-tight">{formatPrice(stats.remaining)}</div>
+          </div>
+        </div>
+
+        {/* Overdue Alert - Compact */}
+        {stats.overdueAmount > 0 && (
+          <div className="bg-red-50 rounded-md p-1.5 sm:p-2 border border-red-300">
+            <div className="flex items-center justify-between">
+              <span className="text-[9px] sm:text-[10px] font-semibold text-red-700">⚠️ {t('installments.overdueLabel')}</span>
+              <span className="font-bold text-xs sm:text-sm text-red-700">{formatPrice(stats.overdueAmount)}</span>
+            </div>
+          </div>
         )}
 
-        {/* Action button */}
-        <div className="pt-1">
-                            <Button
-                              size="sm"
-            variant="secondary" 
+        {/* Action Button - Compact */}
+        <div className="pt-1.5 mt-auto">
+          <Button
+            size="sm"
+            variant="primary" 
             onClick={(e) => { 
               e.preventDefault()
               e.stopPropagation()
               onClick()
-                              }}
-            className="w-full text-xs py-1"
+            }}
+            className="w-full text-[10px] sm:text-xs py-1.5 px-2 font-semibold"
           >
             📋 {t('installments.viewDetails')}
-                            </Button>
-            </div>
-          </div>
+          </Button>
+        </div>
+      </div>
     </Card>
   )
 }
