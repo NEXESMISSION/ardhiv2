@@ -1,10 +1,12 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Alert } from '@/components/ui/alert'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Dialog } from '@/components/ui/dialog'
 import { formatPrice, formatDateShort } from '@/utils/priceCalculator'
 import { calculateInstallmentWithDeposit } from '@/utils/installmentCalculator'
 import { buildSaleQuery, formatSalesWithSellers } from '@/utils/salesQueries'
@@ -85,9 +87,67 @@ interface InstallmentPayment {
 
 
 const ITEMS_PER_PAGE = 20
+/** When user is searching, load this many installment sales so search can find matches across all data */
+const SEARCH_LOAD_LIMIT = 5000
+/** Debounce search so we don't refetch on every keystroke */
+const SEARCH_DEBOUNCE_MS = 400
+/** Max sales to load installments for in search mode (keeps batch requests low) */
+const SEARCH_DISPLAY_CAP = 200
 
 function replaceVars(str: string, vars: Record<string, string | number>): string {
   return Object.entries(vars).reduce((s, [k, v]) => s.replace(new RegExp(`\\{\\{${k}\\}\\}`, 'g'), String(v)), str)
+}
+
+type SaleStats = {
+  totalPaid: number
+  remaining: number
+  paidCount: number
+  totalCount: number
+  nextDueDate: string | null
+  overdueAmount: number
+  overdueCount: number
+}
+
+function computeStatsFromInstallments(sale: Sale, installments: InstallmentPayment[]): SaleStats {
+  let totalPaid = sale.deposit_amount || 0
+  if (sale.payment_offer && sale.piece) {
+    const calc = calculateInstallmentWithDeposit(
+      sale.piece.surface_m2,
+      {
+        price_per_m2_installment: sale.payment_offer.price_per_m2_installment,
+        advance_mode: sale.payment_offer.advance_mode,
+        advance_value: sale.payment_offer.advance_value,
+        calc_mode: sale.payment_offer.calc_mode,
+        monthly_amount: sale.payment_offer.monthly_amount,
+        months: sale.payment_offer.months,
+      },
+      sale.deposit_amount || 0
+    )
+    totalPaid += calc.advanceAfterDeposit
+  }
+  totalPaid += installments.filter(i => i.status === 'paid').reduce((sum, i) => sum + (i.amount_paid || 0), 0)
+  const remaining = sale.sale_price - totalPaid
+  const paidCount = installments.filter(i => i.status === 'paid').length
+  const totalCount = installments.length
+  const now = new Date()
+  const nextDue = installments.find(i => {
+    const dueDate = new Date(i.due_date)
+    return i.status === 'pending' && dueDate >= now
+  })
+  const overdue = installments.filter(i => {
+    const dueDate = new Date(i.due_date)
+    return i.status === 'pending' && dueDate < now
+  })
+  const overdueAmount = overdue.reduce((sum, i) => sum + (i.amount_due - i.amount_paid), 0)
+  return {
+    totalPaid,
+    remaining,
+    paidCount,
+    totalCount,
+    nextDueDate: nextDue?.due_date || null,
+    overdueAmount,
+    overdueCount: overdue.length,
+  }
 }
 
 interface InstallmentsPageProps {
@@ -111,12 +171,45 @@ export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
   const [currentPage, setCurrentPage] = useState(1)
   const [totalCount, setTotalCount] = useState(0)
   const [searchQuery, setSearchQuery] = useState('')
+  /** Debounced search: triggers load after user stops typing so search isn't slow on every keystroke */
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('')
+  const [showPieceSearchDialog, setShowPieceSearchDialog] = useState(false)
+  const [pieceNumberSearchValue, setPieceNumberSearchValue] = useState('')
+  /** When true, filter only by piece number (set when user searches from "Search by piece number" dialog) */
+  const [searchByPieceOnly, setSearchByPieceOnly] = useState(false)
+  /** Track search mode so we only load all data when user first enters search, not on every keystroke */
+  const wasSearchModeRef = useRef(false)
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  /** Batched installment data for visible sales to avoid N requests per page (ERR_INSUFFICIENT_RESOURCES) */
+  const [installmentsBySaleId, setInstallmentsBySaleId] = useState<Record<string, InstallmentPayment[]>>({})
+  const [loadingInstallments, setLoadingInstallments] = useState(false)
+
+  // Debounce search input
+  useEffect(() => {
+    if (!searchQuery.trim()) {
+      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current)
+      searchDebounceRef.current = null
+      setDebouncedSearchQuery('')
+      return
+    }
+    searchDebounceRef.current = setTimeout(() => setDebouncedSearchQuery(searchQuery.trim()), SEARCH_DEBOUNCE_MS)
+    return () => {
+      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current)
+    }
+  }, [searchQuery])
 
   useEffect(() => {
-    loadInstallmentSales()
+    const isSearchMode = debouncedSearchQuery.length > 0
+    if (isSearchMode) {
+      if (!wasSearchModeRef.current) loadInstallmentSales(true)
+      wasSearchModeRef.current = true
+    } else {
+      loadInstallmentSales(false)
+      wasSearchModeRef.current = false
+    }
 
     const handleSaleUpdated = () => {
-      loadInstallmentSales()
+      loadInstallmentSales(debouncedSearchQuery.length > 0)
     }
 
     window.addEventListener('saleUpdated', handleSaleUpdated)
@@ -124,7 +217,7 @@ export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
     return () => {
       window.removeEventListener('saleUpdated', handleSaleUpdated)
     }
-  }, [currentPage])
+  }, [currentPage, debouncedSearchQuery])
 
   // Real-time updates for sales
   useSalesRealtime({
@@ -136,12 +229,13 @@ export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
     },
   })
 
-  async function loadInstallmentSales() {
+  async function loadInstallmentSales(forSearch?: boolean) {
     if (sales.length === 0 && !loading) setLoading(true)
     setError(null)
     try {
-      const from = (currentPage - 1) * ITEMS_PER_PAGE
-      const to = from + ITEMS_PER_PAGE - 1
+      const isSearchMode = forSearch === true
+      const from = isSearchMode ? 0 : (currentPage - 1) * ITEMS_PER_PAGE
+      const to = isSearchMode ? SEARCH_LOAD_LIMIT - 1 : from + ITEMS_PER_PAGE - 1
 
       const { data, error: err } = await supabase
         .from('sales')
@@ -152,7 +246,7 @@ export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
         .eq('payment_method', 'installment')
         .order('sale_date', { ascending: false })
         .range(from, to)
-        .limit(ITEMS_PER_PAGE)
+        .limit(isSearchMode ? SEARCH_LOAD_LIMIT : ITEMS_PER_PAGE)
 
       if (err) throw err
 
@@ -188,7 +282,7 @@ export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
       })
 
       // Convert to nested array structure: [clientGroup][offerGroup][sales]
-      const clientGroups: Array<{ client: Sale['client']; offerGroups: Array<{ offer: Sale['payment_offer'] | null; sales: Sale[] }> }> = []
+      let clientGroups: Array<{ client: Sale['client']; offerGroups: Array<{ offer: Sale['payment_offer'] | null; sales: Sale[] }> }> = []
       
       clientGroupsMap.forEach((offerGroupsMap, clientId) => {
         const firstSale = Array.from(offerGroupsMap.values())[0]?.[0]
@@ -206,6 +300,19 @@ export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
           offerGroups: offerGroups
         })
       })
+
+      // Merge any duplicate client entries (same client.id) into one box with all offer groups
+      const mergedByClientId = new Map<string, { client: Sale['client']; offerGroups: Array<{ offer: Sale['payment_offer'] | null; sales: Sale[] }> }>()
+      clientGroups.forEach((cg) => {
+        const id = cg.client?.id ?? `key-${mergedByClientId.size}`
+        if (mergedByClientId.has(id)) {
+          const existing = mergedByClientId.get(id)!
+          existing.offerGroups.push(...cg.offerGroups)
+        } else {
+          mergedByClientId.set(id, { client: cg.client ?? undefined, offerGroups: [...cg.offerGroups] })
+        }
+      })
+      clientGroups = Array.from(mergedByClientId.values())
 
       // Flatten for backward compatibility
       const allSalesGroups: Sale[][] = []
@@ -319,34 +426,40 @@ export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
   function handleDetailsClose() {
     setDetailsDialogOpen(false)
     setSelectedSale(null)
+    // Refresh list when closing so totals/stats are up to date when user returns
+    loadInstallmentSales(searchQuery.trim().length > 0)
   }
 
-  // Filter client groups based on search query
+  // Filter client groups based on search query (optionally by piece number only)
   const filteredClientGroups = useMemo(() => {
     if (!searchQuery.trim()) {
       return clientGroups
     }
 
     const query = searchQuery.trim().toLowerCase()
+    const normalizePhone = (p: string | null | undefined) => (p || '').replace(/[\s\/\-]/g, '').toLowerCase()
     return clientGroups
       .map(clientGroup => {
-        // Filter offer groups within this client
         const filteredOfferGroups = clientGroup.offerGroups
           .map(offerGroup => ({
             ...offerGroup,
             sales: offerGroup.sales.filter(sale => {
+              const pieceNumber = sale.piece?.piece_number?.toLowerCase() || ''
+              if (searchByPieceOnly) {
+                return pieceNumber.includes(query)
+              }
               const clientName = sale.client?.name?.toLowerCase() || ''
               const clientCIN = sale.client?.id_number?.toLowerCase() || ''
-              const pieceNumber = sale.piece?.piece_number?.toLowerCase() || ''
-              
-              return clientName.includes(query) || 
-                     clientCIN.includes(query) || 
+              const clientPhone = normalizePhone(sale.client?.phone)
+              const qNorm = normalizePhone(query)
+              return clientName.includes(query) ||
+                     clientCIN.includes(query) ||
+                     (qNorm.length >= 2 && clientPhone.includes(qNorm)) ||
                      pieceNumber.includes(query)
             })
           }))
           .filter(offerGroup => offerGroup.sales.length > 0)
         
-        // Only include client if they have matching sales
         if (filteredOfferGroups.length > 0) {
           return {
             ...clientGroup,
@@ -356,7 +469,82 @@ export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
         return null
       })
       .filter((group): group is ClientGroup => group !== null)
-  }, [clientGroups, searchQuery])
+  }, [clientGroups, searchQuery, searchByPieceOnly])
+
+  // Sale IDs currently displayed (for batch loading installments); cap in search to avoid slow loads
+  const displayedSaleIds = useMemo(() => {
+    const groups = searchQuery.trim() ? filteredClientGroups : clientGroups
+    const ids: string[] = []
+    groups.forEach(cg => cg.offerGroups.forEach(og => og.sales.forEach(s => ids.push(s.id))))
+    if (searchQuery.trim() && ids.length > SEARCH_DISPLAY_CAP) {
+      return ids.slice(0, SEARCH_DISPLAY_CAP)
+    }
+    return ids
+  }, [clientGroups, searchQuery, filteredClientGroups])
+
+  // When search is capped, only render groups/sales we loaded installments for
+  const groupsToRender = useMemo(() => {
+    const groups = searchQuery.trim() ? filteredClientGroups : clientGroups
+    if (!searchQuery.trim() || displayedSaleIds.length < SEARCH_DISPLAY_CAP) return groups
+    const idSet = new Set(displayedSaleIds)
+    return groups
+      .map(cg => ({
+        ...cg,
+        offerGroups: cg.offerGroups
+          .map(og => ({ ...og, sales: og.sales.filter(s => idSet.has(s.id)) }))
+          .filter(og => og.sales.length > 0),
+      }))
+      .filter(cg => cg.offerGroups.length > 0)
+  }, [searchQuery, filteredClientGroups, clientGroups, displayedSaleIds])
+
+  // Batch load installment_payments; run multiple chunks in parallel (faster than strictly sequential)
+  const BATCH_SIZE = 100
+  const PARALLEL_CHUNKS = 5
+  useEffect(() => {
+    if (displayedSaleIds.length === 0) {
+      setInstallmentsBySaleId({})
+      setLoadingInstallments(false)
+      return
+    }
+    let cancelled = false
+    setLoadingInstallments(true)
+    const run = async () => {
+      const map: Record<string, InstallmentPayment[]> = {}
+      const chunks: string[][] = []
+      for (let i = 0; i < displayedSaleIds.length; i += BATCH_SIZE) {
+        chunks.push(displayedSaleIds.slice(i, i + BATCH_SIZE))
+      }
+      for (let i = 0; i < chunks.length; i += PARALLEL_CHUNKS) {
+        if (cancelled) return
+        const batch = chunks.slice(i, i + PARALLEL_CHUNKS)
+        const results = await Promise.all(
+          batch.map(chunk =>
+            supabase
+              .from('installment_payments')
+              .select('id, sale_id, installment_number, amount_due, amount_paid, due_date, paid_date, status')
+              .in('sale_id', chunk)
+              .order('installment_number', { ascending: true })
+          )
+        )
+        if (cancelled) return
+        results.forEach(({ data }) => {
+          if (data) {
+            data.forEach((row: InstallmentPayment) => {
+              if (!map[row.sale_id]) map[row.sale_id] = []
+              map[row.sale_id].push(row)
+            })
+          }
+        })
+      }
+      if (!cancelled) {
+        displayedSaleIds.forEach(id => { if (!(id in map)) map[id] = [] })
+        setInstallmentsBySaleId(map)
+        setLoadingInstallments(false)
+      }
+    }
+    run()
+    return () => { cancelled = true }
+  }, [displayedSaleIds])
 
   const totalPages = Math.max(1, Math.ceil(totalCount / ITEMS_PER_PAGE))
   const hasNextPage = currentPage < totalPages
@@ -391,27 +579,37 @@ export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
         )}
         {searchQuery && (
           <span className="text-xs sm:text-sm text-gray-600">
-            {replaceVars(t('installments.showingResults'), { 
-              count: filteredClientGroups.reduce((sum, cg) => sum + cg.offerGroups.reduce((s, og) => s + og.sales.length, 0), 0)
-            })}
+            {(() => {
+              const totalFiltered = filteredClientGroups.reduce((sum, cg) => sum + cg.offerGroups.reduce((s, og) => s + og.sales.length, 0), 0)
+              if (totalFiltered > SEARCH_DISPLAY_CAP) {
+                return replaceVars(t('installments.showingFirstResults'), { cap: SEARCH_DISPLAY_CAP })
+              }
+              return replaceVars(t('installments.showingResults'), { count: totalFiltered })
+            })()}
           </span>
         )}
       </div>
 
       {/* Search Bar */}
-      <div className="bg-white border border-gray-200 rounded-lg p-2 sm:p-3 shadow-sm">
+      <div className="bg-white border border-gray-200 rounded-lg p-2 sm:p-3 shadow-sm space-y-2">
         <div className="relative">
           <Input
             type="text"
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder={t('installments.searchPlaceholder')}
+            onChange={(e) => {
+              setSearchQuery(e.target.value)
+              setSearchByPieceOnly(false)
+            }}
+            placeholder={searchByPieceOnly ? t('installments.pieceNumberPlaceholder') : t('installments.searchPlaceholder')}
             size="sm"
             className="text-xs sm:text-sm pr-10"
           />
           {searchQuery && (
             <button
-              onClick={() => setSearchQuery('')}
+              onClick={() => {
+                setSearchQuery('')
+                setSearchByPieceOnly(false)
+              }}
               className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
               title={t('installments.clearSearch')}
             >
@@ -421,7 +619,69 @@ export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
             </button>
           )}
         </div>
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          className="w-full sm:w-auto text-xs"
+          onClick={() => {
+            setPieceNumberSearchValue(searchQuery.trim())
+            setShowPieceSearchDialog(true)
+          }}
+        >
+          🔍 {t('installments.searchByPieceNumber')}
+        </Button>
       </div>
+
+      {/* Search by piece number dialog */}
+      <Dialog
+        open={showPieceSearchDialog}
+        onClose={() => setShowPieceSearchDialog(false)}
+        title={t('installments.searchByPieceNumber')}
+        size="sm"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setShowPieceSearchDialog(false)} size="sm">
+              {t('common.cancel')}
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => {
+                const q = pieceNumberSearchValue.trim()
+                setSearchQuery(q)
+                setDebouncedSearchQuery(q)
+                setSearchByPieceOnly(true)
+                setShowPieceSearchDialog(false)
+                setPieceNumberSearchValue('')
+              }}
+            >
+              {t('installments.search')}
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-2">
+          <Label className="text-xs sm:text-sm">{t('installments.pieceNumber')}</Label>
+          <Input
+            type="text"
+            value={pieceNumberSearchValue}
+            onChange={(e) => setPieceNumberSearchValue(e.target.value)}
+            placeholder={t('installments.pieceNumberPlaceholder')}
+            size="sm"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                const q = pieceNumberSearchValue.trim()
+                setSearchQuery(q)
+                setDebouncedSearchQuery(q)
+                setSearchByPieceOnly(true)
+                setShowPieceSearchDialog(false)
+                setPieceNumberSearchValue('')
+              }
+            }}
+          />
+        </div>
+      </Dialog>
 
       {error && (
         <Alert variant="error" className="text-xs sm:text-sm">{error}</Alert>
@@ -434,20 +694,25 @@ export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
             <p className="mt-2 text-xs text-gray-500">{t('installments.loading')}</p>
           </div>
         </div>
-      ) : (searchQuery ? filteredClientGroups : clientGroups).length === 0 ? (
+      ) : groupsToRender.length === 0 ? (
         <Card className="p-3 sm:p-4 lg:p-6 text-center">
           <p className="text-xs sm:text-sm text-gray-500">
             {searchQuery ? t('installments.noSearchResults') : t('installments.noInstallmentSales')}
           </p>
+          {searchQuery && (
+            <p className="text-xs text-gray-400 mt-2 max-w-md mx-auto">
+              {t('installments.reservedPiecesHint')}
+            </p>
+          )}
         </Card>
       ) : (
         <>
         <div className="space-y-4 sm:space-y-5">
-          {(searchQuery ? filteredClientGroups : clientGroups).map((clientGroup, clientIndex) => {
+          {groupsToRender.map((clientGroup, clientIndex) => {
             const totalPieces = clientGroup.offerGroups.reduce((sum, og) => sum + og.sales.length, 0)
             
             return (
-              <Card key={`client-${clientIndex}`} className="p-4 sm:p-5 lg:p-6 hover:shadow-xl transition-shadow border-2 border-blue-200 rounded-lg bg-gradient-to-br from-blue-50 to-white">
+              <Card key={clientGroup.client?.id ?? `client-${clientIndex}`} className="p-4 sm:p-5 lg:p-6 hover:shadow-xl transition-shadow border-2 border-blue-200 rounded-lg bg-gradient-to-br from-blue-50 to-white">
                 {/* Client Header */}
                 <div className="mb-4 pb-4 border-b-2 border-blue-200">
                   <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-2">
@@ -463,20 +728,18 @@ export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
                   </p>
                 </div>
 
-                {/* Payment Offer Groups */}
-                <div className="space-y-4">
+                {/* One box per client: inside it, sections by offer (no extra boxes) */}
+                <div className="space-y-5">
                   {clientGroup.offerGroups.map((offerGroup, offerIndex) => {
                     const offerSales = offerGroup.sales
-                    const firstSale = offerSales[0]
-                    
                     return (
-                      <Card 
-                        key={`offer-${clientIndex}-${offerIndex}`} 
-                        className="p-3 sm:p-4 border-2 border-gray-200 hover:border-gray-300 bg-white rounded-lg"
+                      <div
+                        key={`offer-${clientIndex}-${offerIndex}`}
+                        className="rounded-lg border border-gray-200 bg-gray-50/50 p-3 sm:p-4"
                       >
-                        {/* Payment Offer Header */}
+                        {/* Offer section header (not a card, just a label) */}
                         {offerGroup.offer && (
-                          <div className="mb-3 pb-3 border-b border-gray-200">
+                          <div className="mb-3 pb-2 border-b border-gray-200">
                             <div className="flex flex-wrap items-center gap-2 mb-1">
                               <Badge variant="secondary" size="md" className="text-xs sm:text-sm font-semibold">
                                 📋 {offerGroup.offer.name || t('installments.offerLabel')}
@@ -493,19 +756,18 @@ export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
                             </div>
                           </div>
                         )}
-                        
                         {!offerGroup.offer && offerSales.length > 1 && (
-                          <div className="mb-3 pb-3 border-b border-gray-200">
+                          <div className="mb-3 pb-2 border-b border-gray-200">
                             <Badge variant="secondary" size="sm" className="text-xs">
                               {offerSales.length} {offerSales.length === 1 ? t('installments.piece') : t('installments.pieces')} بدون عرض
                             </Badge>
                           </div>
                         )}
 
-                        {/* Mobile: Card layout - 2 columns smart design */}
+                        {/* Mobile: grid of piece cards */}
                         <div className="grid grid-cols-2 gap-2 sm:gap-3 lg:hidden">
                           {offerSales.map((sale) => (
-                            <SaleCard key={sale.id} sale={sale} onClick={() => handleSaleClick(sale)} />
+                            <SaleCard key={sale.id} sale={sale} onClick={() => handleSaleClick(sale)} installments={installmentsBySaleId[sale.id] ?? []} loadingInstallments={loadingInstallments} />
                           ))}
                         </div>
 
@@ -527,12 +789,12 @@ export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
                             </thead>
                             <tbody>
                               {offerSales.map((sale) => (
-                                <SaleRow key={sale.id} sale={sale} onClick={() => handleSaleClick(sale)} />
+                                <SaleRow key={sale.id} sale={sale} onClick={() => handleSaleClick(sale)} installments={installmentsBySaleId[sale.id] ?? []} loadingInstallments={loadingInstallments} />
                               ))}
                             </tbody>
                           </table>
                         </div>
-                      </Card>
+                      </div>
                     )
                   })}
                 </div>
@@ -585,8 +847,8 @@ export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
           onClose={handleDetailsClose}
           sale={selectedSale}
           onPaymentSuccess={() => {
-            loadInstallmentSales()
-            handleDetailsClose()
+            // Do not refresh parent list here: dialog stays open and already refreshed its own installments
+            // List will refresh when user closes the dialog (handleDetailsClose)
           }}
         />
       )}
@@ -594,103 +856,13 @@ export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
   )
 }
 
-// Separate component for sale row to handle async stats
-function SaleRow({ sale, onClick }: { sale: Sale; onClick: () => void }) {
+// Separate component for sale row; stats from batched installments (no per-row fetch)
+function SaleRow({ sale, onClick, installments = [], loadingInstallments = false }: { sale: Sale; onClick: () => void; installments?: InstallmentPayment[]; loadingInstallments?: boolean }) {
   const { t } = useLanguage()
-  const [stats, setStats] = useState<{
-    totalPaid: number
-    remaining: number
-    paidCount: number
-    totalCount: number
-    nextDueDate: string | null
-    overdueAmount: number
-    overdueCount: number
-  } | null>(null)
-  const [loadingStats, setLoadingStats] = useState(true)
   const [touchStart, setTouchStart] = useState<{ x: number; y: number; time: number; isScrolling?: boolean } | null>(null)
+  const stats = useMemo(() => (loadingInstallments ? null : computeStatsFromInstallments(sale, installments)), [sale, installments, loadingInstallments])
 
-  useEffect(() => {
-    async function loadStats() {
-      setLoadingStats(true)
-      try {
-        // Calculate total paid
-        let totalPaid = sale.deposit_amount || 0
-
-        if (sale.payment_offer && sale.piece) {
-          const calc = calculateInstallmentWithDeposit(
-            sale.piece.surface_m2,
-            {
-              price_per_m2_installment: sale.payment_offer.price_per_m2_installment,
-              advance_mode: sale.payment_offer.advance_mode,
-              advance_value: sale.payment_offer.advance_value,
-              calc_mode: sale.payment_offer.calc_mode,
-              monthly_amount: sale.payment_offer.monthly_amount,
-              months: sale.payment_offer.months,
-            },
-            sale.deposit_amount || 0
-          )
-
-          totalPaid += calc.advanceAfterDeposit
-
-          // Get paid installments - optimized query
-          const { data: installments } = await supabase
-            .from('installment_payments')
-            .select('amount_paid')
-            .eq('sale_id', sale.id)
-            .eq('status', 'paid')
-
-          if (installments) {
-            totalPaid += installments.reduce((sum: number, inst: any) => sum + (inst.amount_paid || 0), 0)
-          }
-        }
-
-        const remaining = sale.sale_price - totalPaid
-
-        // Get installment payments for stats - optimized query (only needed fields)
-        const { data: allInstallments } = await supabase
-        .from('installment_payments')
-          .select('installment_number, amount_due, amount_paid, due_date, status')
-          .eq('sale_id', sale.id)
-          .order('installment_number', { ascending: true })
-
-        const paidCount = allInstallments?.filter((i: any) => i.status === 'paid').length || 0
-        const totalCount = allInstallments?.length || 0
-
-        // Find next due date
-        const now = new Date()
-        const nextDue = allInstallments?.find((i: any) => {
-          const dueDate = new Date(i.due_date)
-          return i.status === 'pending' && dueDate >= now
-        })
-
-        // Find overdue
-        const overdue = allInstallments?.filter((i: any) => {
-          const dueDate = new Date(i.due_date)
-          return i.status === 'pending' && dueDate < now
-        }) || []
-
-        const overdueAmount = overdue.reduce((sum: number, i: any) => sum + (i.amount_due - i.amount_paid), 0)
-
-        setStats({
-          totalPaid,
-          remaining,
-          paidCount,
-          totalCount,
-          nextDueDate: nextDue?.due_date || null,
-          overdueAmount,
-          overdueCount: overdue.length,
-        })
-      } catch (e) {
-        console.error('Error loading stats:', e)
-    } finally {
-        setLoadingStats(false)
-    }
-  }
-
-    loadStats()
-  }, [sale])
-
-  if (loadingStats) {
+  if (loadingInstallments || !stats) {
     return (
       <tr>
         <td colSpan={10} className="py-2 sm:py-3 lg:py-4 text-center text-xs sm:text-sm text-gray-500">
@@ -699,8 +871,6 @@ function SaleRow({ sale, onClick }: { sale: Sale; onClick: () => void }) {
       </tr>
     )
   }
-
-  if (!stats) return null
 
   const getStatusBadge = () => {
     if (stats.overdueCount > 0) {
@@ -862,107 +1032,19 @@ function SaleRow({ sale, onClick }: { sale: Sale; onClick: () => void }) {
             )
 }
 
-// Mobile-optimized card component
-function SaleCard({ sale, onClick }: { sale: Sale; onClick: () => void }) {
+// Mobile-optimized card component; stats from batched installments (no per-card fetch)
+function SaleCard({ sale, onClick, installments = [], loadingInstallments = false }: { sale: Sale; onClick: () => void; installments?: InstallmentPayment[]; loadingInstallments?: boolean }) {
   const { t } = useLanguage()
-  const [stats, setStats] = useState<{
-    totalPaid: number
-    remaining: number
-    paidCount: number
-    totalCount: number
-    nextDueDate: string | null
-    overdueAmount: number
-    overdueCount: number
-  } | null>(null)
-  const [loadingStats, setLoadingStats] = useState(true)
   const [touchStart, setTouchStart] = useState<{ x: number; y: number; time: number } | null>(null)
+  const stats = useMemo(() => (loadingInstallments ? null : computeStatsFromInstallments(sale, installments)), [sale, installments, loadingInstallments])
 
-  useEffect(() => {
-    async function loadStats() {
-      setLoadingStats(true)
-      try {
-        let totalPaid = sale.deposit_amount || 0
-
-        if (sale.payment_offer && sale.piece) {
-          const calc = calculateInstallmentWithDeposit(
-            sale.piece.surface_m2,
-            {
-                    price_per_m2_installment: sale.payment_offer.price_per_m2_installment,
-                    advance_mode: sale.payment_offer.advance_mode,
-                    advance_value: sale.payment_offer.advance_value,
-                    calc_mode: sale.payment_offer.calc_mode,
-                    monthly_amount: sale.payment_offer.monthly_amount,
-                    months: sale.payment_offer.months,
-            },
-            sale.deposit_amount || 0
-          )
-
-          totalPaid += calc.advanceAfterDeposit
-
-          const { data: installments } = await supabase
-            .from('installment_payments')
-            .select('amount_paid')
-            .eq('sale_id', sale.id)
-            .eq('status', 'paid')
-
-          if (installments) {
-            totalPaid += installments.reduce((sum: number, inst: any) => sum + (inst.amount_paid || 0), 0)
-          }
-        }
-
-        const remaining = sale.sale_price - totalPaid
-
-        // Optimized query - only select needed fields
-        const { data: allInstallments } = await supabase
-          .from('installment_payments')
-          .select('installment_number, amount_due, amount_paid, due_date, status')
-          .eq('sale_id', sale.id)
-          .order('installment_number', { ascending: true })
-
-        const paidCount = allInstallments?.filter((i: any) => i.status === 'paid').length || 0
-        const totalCount = allInstallments?.length || 0
-
-        const now = new Date()
-        const nextDue = allInstallments?.find((i: any) => {
-          const dueDate = new Date(i.due_date)
-          return i.status === 'pending' && dueDate >= now
-        })
-
-        const overdue = allInstallments?.filter((i: any) => {
-          const dueDate = new Date(i.due_date)
-          return i.status === 'pending' && dueDate < now
-        }) || []
-
-        const overdueAmount = overdue.reduce((sum: number, i: any) => sum + (i.amount_due - i.amount_paid), 0)
-
-        setStats({
-          totalPaid,
-          remaining,
-          paidCount,
-          totalCount,
-          nextDueDate: nextDue?.due_date || null,
-          overdueAmount,
-          overdueCount: overdue.length,
-        })
-      } catch (e) {
-        console.error('Error loading stats:', e)
-      } finally {
-        setLoadingStats(false)
-      }
-    }
-
-    loadStats()
-  }, [sale])
-
-  if (loadingStats) {
-              return (
+  if (loadingInstallments || !stats) {
+    return (
       <Card className="p-2">
         <div className="text-center py-2 text-xs text-gray-500">{t('installments.loading')}</div>
-              </Card>
-            )
+      </Card>
+    )
   }
-
-  if (!stats) return null
 
   const getStatusBadge = () => {
     if (stats.overdueCount > 0) {

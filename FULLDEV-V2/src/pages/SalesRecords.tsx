@@ -13,6 +13,7 @@ import { calculateInstallmentWithDeposit } from '@/utils/installmentCalculator'
 import { buildSaleQuery, formatSalesWithSellers } from '@/utils/salesQueries'
 import { useLanguage } from '@/i18n/context'
 import { useSalesRealtime } from '@/hooks/useSalesRealtime'
+import { SaleDetailsDialog } from '@/components/SaleDetailsDialog'
 
 interface Sale {
   id: string
@@ -48,6 +49,7 @@ interface Sale {
   }
   payment_offer?: {
     id: string
+    name: string | null
     price_per_m2_installment: number
     advance_mode: 'fixed' | 'percent'
     advance_value: number
@@ -76,6 +78,8 @@ export function SalesRecordsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [actionDialogOpen, setActionDialogOpen] = useState(false)
+  const [detailsDialogOpen, setDetailsDialogOpen] = useState(false)
+  const [detailsSale, setDetailsSale] = useState<Sale | null>(null)
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null)
   const [selectedSales, setSelectedSales] = useState<Set<string>>(new Set())
   const [actionType, setActionType] = useState<'revert' | 'cancel' | 'revertFromInstallments' | 'remove' | null>(null)
@@ -798,7 +802,7 @@ export function SalesRecordsPage() {
             return (
               <Card key={sale.id} className={`p-3 sm:p-4 lg:p-6 ${selectedSales.has(sale.id) ? 'ring-2 ring-blue-500 border-blue-500' : ''}`}>
                 <div className="space-y-2 sm:space-y-3 lg:space-y-4">
-                  {/* Header with Checkbox */}
+                  {/* Header with Checkbox, Title, View details (eye), Status */}
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2 flex-1 min-w-0">
                       <input
@@ -806,12 +810,29 @@ export function SalesRecordsPage() {
                         checked={selectedSales.has(sale.id)}
                         onChange={() => toggleSaleSelection(sale.id)}
                         className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 flex-shrink-0"
+                        onClick={(e) => e.stopPropagation()}
                       />
                     <h3 className="text-sm sm:text-base lg:text-lg font-semibold text-gray-900 truncate flex-1 min-w-0">
                       {batchName} - {pieceNumber}
                     </h3>
                     </div>
-                    <div className="ml-2 flex-shrink-0">{getStatusBadge(sale.status)}</div>
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => { setDetailsSale(sale); setDetailsDialogOpen(true) }}
+                        className="p-1.5 min-w-0 text-gray-600 hover:text-blue-600 hover:bg-blue-50 border border-gray-200"
+                        title={t('salesRecords.viewDetails')}
+                        aria-label={t('salesRecords.viewDetails')}
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                        </svg>
+                      </Button>
+                      {getStatusBadge(sale.status)}
+                    </div>
                   </div>
 
                   {/* Client */}
@@ -1006,6 +1027,15 @@ export function SalesRecordsPage() {
           errorMessage={actionError}
         />
         )}
+
+      {/* Sale details dialog (eye icon) */}
+      {detailsSale && (
+        <SaleDetailsDialog
+          open={detailsDialogOpen}
+          onClose={() => { setDetailsDialogOpen(false); setDetailsSale(null) }}
+          sale={detailsSale as any}
+        />
+      )}
     </div>
   )
 }

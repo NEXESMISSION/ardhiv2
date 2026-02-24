@@ -2127,11 +2127,8 @@ export function LandPage() {
       }
       
       window.dispatchEvent(new CustomEvent('saleCreated'))
-      
-      // Only refresh if piece dialog is still open
-      if (pieceDialogOpen && selectedBatchForPieces) {
-        window.dispatchEvent(new CustomEvent('pieceStatusChanged'))
-      }
+      // Always dispatch so pieces popup (and any open batch view) can refresh without page reload
+      window.dispatchEvent(new CustomEvent('pieceStatusChanged'))
     } catch (e: any) {
       console.error('Sale creation failed:', e)
       console.log(`Rollback state: ${reservedPieceIds.length} pieces reserved, ${createdSaleIds.length} sales created`)
@@ -2206,11 +2203,7 @@ export function LandPage() {
       
       // Trigger refresh events (debounced in useEffect)
       window.dispatchEvent(new CustomEvent('saleUpdated'))
-      
-      // Only refresh pieces if dialog is still open
-      if (pieceDialogOpen && selectedBatchForPieces) {
-        window.dispatchEvent(new CustomEvent('pieceStatusChanged'))
-      }
+      window.dispatchEvent(new CustomEvent('pieceStatusChanged'))
     }
   }
 

@@ -140,6 +140,41 @@ export function SaleDetailsDialog({ open, onClose, sale }: SaleDetailsDialogProp
           </div>
         </Card>
 
+        {/* Payment offer (installment) – full offer details in one block */}
+        {sale.payment_offer && (
+          <Card className="p-2 sm:p-3 bg-cyan-50 border-cyan-200">
+            <h3 className="text-xs sm:text-sm font-semibold text-cyan-900 mb-2">📋 عرض التقسيط</h3>
+            <div className="space-y-1.5 text-xs sm:text-sm">
+              <div className="flex justify-between">
+                <span className="text-gray-600">اسم العرض:</span>
+                <span className="font-medium">{sale.payment_offer.name || '—'}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-600">سعر المتر (تقسيط):</span>
+                <span className="font-medium">{sale.payment_offer.price_per_m2_installment?.toLocaleString('en-US') ?? '—'} د/م²</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-600">التسبقة:</span>
+                <span className="font-medium">
+                  {sale.payment_offer.advance_value} {sale.payment_offer.advance_mode === 'percent' ? '%' : 'DT'}
+                </span>
+              </div>
+              {sale.payment_offer.calc_mode === 'monthlyAmount' && sale.payment_offer.monthly_amount != null && (
+                <div className="flex justify-between">
+                  <span className="text-gray-600">المبلغ الشهري:</span>
+                  <span className="font-medium">{formatPrice(sale.payment_offer.monthly_amount)} DT</span>
+                </div>
+              )}
+              {sale.payment_offer.calc_mode === 'months' && sale.payment_offer.months != null && (
+                <div className="flex justify-between">
+                  <span className="text-gray-600">عدد الأشهر:</span>
+                  <span className="font-medium">{sale.payment_offer.months} شهر</span>
+                </div>
+              )}
+            </div>
+          </Card>
+        )}
+
         {/* Sale Details */}
         <Card className="p-2 sm:p-3 bg-purple-50 border-purple-200">
           <h3 className="text-xs sm:text-sm font-semibold text-purple-900 mb-2">تفاصيل البيع</h3>
@@ -171,12 +206,6 @@ export function SaleDetailsDialog({ open, onClose, sale }: SaleDetailsDialogProp
               <div className="flex justify-between">
                 <span className="text-gray-600">موعد:</span>
                 <span className="font-medium">{formatDate(sale.appointment_date)}</span>
-              </div>
-            )}
-            {sale.payment_offer && (
-              <div className="flex justify-between">
-                <span className="text-gray-600">عرض التقسيط:</span>
-                <span className="font-medium">{sale.payment_offer.name || 'بدون اسم'}</span>
               </div>
             )}
             <div className="pt-2 mt-2 border-t border-purple-200">

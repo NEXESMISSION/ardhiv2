@@ -83,6 +83,11 @@ interface Sale {
   }
 }
 
+/** Like Installments: group by client, then by payment offer within client */
+interface ClientGroup {
+  client: Sale['client']
+  offerGroups: Array<{ offer: Sale['payment_offer'] | null; paymentMethod: 'full' | 'installment' | 'promise' | null; sales: Sale[] }>
+}
 
 export function ConfirmationPage() {
   const { isOwner } = useAuth()
@@ -103,6 +108,7 @@ export function ConfirmationPage() {
   const [successMessage, setSuccessMessage] = useState('')
   const [errorMessage, setErrorMessage] = useState('')
   const [groupedSales, setGroupedSales] = useState<Sale[][]>([])
+  const [clientGroups, setClientGroups] = useState<ClientGroup[]>([])
   const [selectedSalesGroup, setSelectedSalesGroup] = useState<Sale[] | null>(null)
   const [confirmGroupDialogOpen, setConfirmGroupDialogOpen] = useState(false)
   const [saleDetailsDialogOpen, setSaleDetailsDialogOpen] = useState(false)
@@ -115,8 +121,12 @@ export function ConfirmationPage() {
   const [allBatches, setAllBatches] = useState<Array<{ id: string; name: string }>>([])
   const [currentPage, setCurrentPage] = useState(1)
   const [totalCount, setTotalCount] = useState(0)
-  const itemsPerPage = 20
+  /** Clients per page (each client box shows all their pieces) */
+  const itemsPerPage = 15
   const prevBatchFilterRef = useRef<string>(batchFilter)
+
+  /** Max pending sales to load so we can group by client (one box per client with all pieces) */
+  const PENDING_SALES_LOAD_LIMIT = 5000
 
   useEffect(() => {
     loadAllBatches()
@@ -145,16 +155,10 @@ export function ConfirmationPage() {
 
   useEffect(() => {
     const handleSaleCreated = () => {
-      setSearchQuery('')
-      setBatchFilter('all')
-      setCurrentPage(1)
-      loadPendingSales(1)
+      loadPendingSales()
     }
     const handleSaleUpdated = () => {
-      setSearchQuery('')
-      setBatchFilter('all')
-      setCurrentPage(1)
-      loadPendingSales(1)
+      loadPendingSales()
     }
     window.addEventListener('saleCreated', handleSaleCreated)
     window.addEventListener('saleUpdated', handleSaleUpdated)
@@ -164,17 +168,11 @@ export function ConfirmationPage() {
     }
   }, [])
 
-  // Real-time updates for sales
+  // Real-time updates for sales (keep search/filter/page, just refresh data)
   useSalesRealtime({
-    onSaleCreated: () => {
-      setCurrentPage(1)
-      loadPendingSales(1)
-    },
+    onSaleCreated: () => loadPendingSales(),
     onSaleUpdated: () => {
-      // Only reload if we're not currently loading to avoid conflicts
-      if (!loading) {
-        loadPendingSales()
-      }
+      if (!loading) loadPendingSales()
     },
   })
 
@@ -192,40 +190,21 @@ export function ConfirmationPage() {
     }
   }
 
-  async function loadPendingSales(overridePage?: number) {
-    const page = overridePage ?? currentPage
+  async function loadPendingSales(_overridePage?: number) {
     if (sales.length === 0 && !loading) setLoading(true)
     setError(null)
     try {
       const batchId = batchFilter === 'all' ? null : allBatches.find(b => b.name === batchFilter)?.id
-      
-      // When searching, load all matching sales for client-side filtering
-      // When not searching, use pagination
-      const isSearching = searchQuery.trim().length > 0
-      const from = isSearching ? 0 : (page - 1) * itemsPerPage
-      const to = isSearching ? 999999 : from + itemsPerPage - 1
 
+      // Load all pending sales (up to limit) so we can group by client: one box per client with all their pieces
       let query = supabase
         .from('sales')
         .select(buildSaleQuery())
         .eq('status', 'pending')
         .order('sale_date', { ascending: false })
         .order('updated_at', { ascending: false })
-        .range(from, to)
-        .limit(isSearching ? 5000 : itemsPerPage) // Load up to 5000 when searching to ensure we get all matches
+        .limit(PENDING_SALES_LOAD_LIMIT)
       if (batchId) query = query.eq('batch_id', batchId)
-      
-      // Try to add database-level search filter if possible (helps performance)
-      // Note: Supabase doesn't support searching nested relations easily, so we do client-side filtering
-      // But we can at least try to filter by client_id if the search looks like an ID number
-      if (isSearching) {
-        const searchLower = searchQuery.trim().toLowerCase()
-        // If search looks like a numeric ID (all digits), try to filter by client id_number
-        // This is a best-effort optimization
-        if (/^\d+$/.test(searchLower)) {
-          // Could potentially join and filter, but client-side is simpler and more reliable
-        }
-      }
 
       const { data, error: err } = await query
 
@@ -291,46 +270,45 @@ export function ConfirmationPage() {
         }
       }
       
-      // Group sales by client + payment_method + payment_offer_id (for installments)
-      const groupedSales = new Map<string, Sale[]>()
-      
+      // Group by client, then by offer (like Installments): client -> offerKey -> sales
+      const clientGroupsMap = new Map<string, Map<string, Sale[]>>()
       formattedSales.forEach((sale) => {
-        const groupKey = sale.payment_method === 'installment' && sale.payment_offer_id
-          ? `${sale.client_id}-${sale.payment_method}-${sale.payment_offer_id}`
-          : `${sale.client_id}-${sale.payment_method}`
-        
-        if (!groupedSales.has(groupKey)) {
-          groupedSales.set(groupKey, [])
-      }
-        groupedSales.get(groupKey)!.push(sale)
+        const clientId = sale.client_id
+        const offerKey = sale.payment_method === 'installment'
+          ? (sale.payment_offer_id || 'no-offer')
+          : (sale.payment_method || 'other')
+        if (!clientGroupsMap.has(clientId)) clientGroupsMap.set(clientId, new Map())
+        const offerMap = clientGroupsMap.get(clientId)!
+        if (!offerMap.has(offerKey)) offerMap.set(offerKey, [])
+        offerMap.get(offerKey)!.push(sale)
       })
-
-      const salesGroups = Array.from(groupedSales.values())
+      const clientGroupsList: ClientGroup[] = []
+      clientGroupsMap.forEach((offerMap, clientId) => {
+        const firstSale = Array.from(offerMap.values())[0]?.[0]
+        const offerGroups: ClientGroup['offerGroups'] = []
+        offerMap.forEach((sales) => {
+          sales.sort((a, b) => new Date(b.sale_date).getTime() - new Date(a.sale_date).getTime())
+          const pm = sales[0]?.payment_method ?? null
+          offerGroups.push({
+            offer: sales[0]?.payment_offer ?? null,
+            paymentMethod: pm,
+            sales,
+          })
+        })
+        clientGroupsList.push({
+          client: firstSale?.client,
+          offerGroups,
+        })
+      })
+      clientGroupsList.sort((a, b) => {
+        const nameA = (a.client?.name ?? '').toLowerCase()
+        const nameB = (b.client?.name ?? '').toLowerCase()
+        return nameA.localeCompare(nameB)
+      })
       setSales(formattedSales)
-      setGroupedSales(salesGroups)
-
-      // Count logic: when searching, count will be set by filteredGroupedSales length
-      // When not searching, use pagination count
-      if (!isSearching) {
-        // Approximate total count from this page
-        const loaded = (data || []).length
-        if (loaded === itemsPerPage) {
-          setTotalCount((page * itemsPerPage) + 1)
-        } else {
-          setTotalCount((page - 1) * itemsPerPage + loaded)
-        }
-        // Exact count in background (same filters)
-        const countQuery = batchId
-          ? supabase.from('sales').select('*', { count: 'exact', head: true }).eq('status', 'pending').eq('batch_id', batchId)
-          : supabase.from('sales').select('*', { count: 'exact', head: true }).eq('status', 'pending')
-        void Promise.resolve(countQuery).then((res: { count: number | null }) => {
-          if (res.count != null) setTotalCount(res.count)
-        }).catch(() => {})
-      } else {
-        // When searching, total count will be set by filteredGroupedSales length after filtering
-        // Set a placeholder for now
-        setTotalCount(formattedSales.length)
-      }
+      setClientGroups(clientGroupsList)
+      setGroupedSales(clientGroupsList.flatMap(cg => cg.offerGroups.map(og => og.sales)))
+      setTotalCount(clientGroupsList.length)
     } catch (e: any) {
       setError(e.message || t('confirmation.loadError'))
     } finally {
@@ -355,141 +333,76 @@ export function ConfirmationPage() {
     window.scrollTo(0, 0)
   }, [currentPage])
 
-  // Filter grouped sales (client-side search - now searches across all loaded sales when searching)
-  const filteredGroupedSales = useMemo(() => {
+  // Filter client groups by search and batch (like Installments)
+  const filteredClientGroups = useMemo(() => {
     if (!searchQuery.trim() && batchFilter === 'all') {
-      return groupedSales
+      return clientGroups
     }
-    
-    return groupedSales.filter(salesGroup => {
-      const firstSale = salesGroup[0]
-      
-      // Search filter
-      if (searchQuery.trim()) {
-        const query = searchQuery.toLowerCase().trim()
-        
-        // Helper to normalize phone numbers for searching (remove spaces, slashes, dashes)
-        const normalizePhone = (phone: string | null | undefined): string => {
-          if (!phone) return ''
-          return phone.replace(/[\s\/\-]/g, '').toLowerCase()
-        }
-        
-        // Search in client name (case-insensitive)
-        const clientName = firstSale.client?.name || ''
-        const matchesClientName = clientName.toLowerCase().includes(query)
-        
-        // Search in client ID number (case-insensitive)
-        const clientId = firstSale.client?.id_number || ''
-        const matchesClientId = clientId.toLowerCase().includes(query)
-        
-        // Search in phone number (normalize phone and query, handle multiple phone numbers separated by /)
-        const clientPhone = firstSale.client?.phone || ''
-        const normalizedPhone = normalizePhone(clientPhone)
-        const normalizedQuery = normalizePhone(query)
-        const matchesPhone = normalizedPhone.includes(normalizedQuery)
-        
-        // Search in piece numbers
-        const matchesPiece = salesGroup.some(s => {
-          const pieceNumber = s.piece?.piece_number || ''
-          return pieceNumber.toLowerCase().includes(query)
-        })
-        
-        // Search in batch name
-        const batchName = firstSale.batch?.name || ''
-        const matchesBatch = batchName.toLowerCase().includes(query)
-        
-        const matches = matchesClientName || matchesClientId || matchesPhone || matchesPiece || matchesBatch
-        
-        // Debug logging (only in development)
-        if (process.env.NODE_ENV === 'development' && query === 'saf') {
-          console.log('Search debug:', {
-            query,
-            clientName,
-            clientId,
-            clientPhone,
-            normalizedPhone,
-            matchesClientName,
-            matchesClientId,
-            matchesPhone,
-            matchesPiece,
-            matchesBatch,
-            matches
-          })
-        }
-        
-        if (!matches) {
-          return false
-        }
-      }
-
-      // Batch filter
-      if (batchFilter !== 'all' && firstSale.batch?.name !== batchFilter) {
-        return false
-      }
-
-      return true
-    })
-  }, [groupedSales, searchQuery, batchFilter])
-  
-  // Paginate filtered groups - when searching, paginate by counting individual sales across groups
-  const paginatedGroupedSales = useMemo(() => {
-    if (!searchQuery.trim() && batchFilter === 'all') {
-      // When not searching and no batch filter, use server-side pagination (already paginated)
-      return filteredGroupedSales
+    const normalizePhone = (phone: string | null | undefined): string => {
+      if (!phone) return ''
+      return phone.replace(/[\s\/\-]/g, '').toLowerCase()
     }
-    
-    // When searching or filtering, paginate client-side by counting individual sales
-    // We need to include groups that contain sales within the current page range
-    const pageStart = (currentPage - 1) * itemsPerPage
-    const pageEnd = currentPage * itemsPerPage
-    let salesCount = 0
-    const groupsToShow: Sale[][] = []
-    
-    for (const group of filteredGroupedSales) {
-      const groupStartCount = salesCount
-      const groupLength = group.length
-      salesCount += groupLength
-      
-      // Include group if it contains any sales within the current page range
-      // A group is included if:
-      // - It starts before the page end (groupStartCount < pageEnd)
-      // - It ends after the page start (salesCount > pageStart)
-      if (salesCount > pageStart && groupStartCount < pageEnd) {
-        groupsToShow.push(group)
-      }
-      
-      // Stop early if we've passed the page end (optimization)
-      if (groupStartCount >= pageEnd) {
-        break
-      }
-    }
-    
-    // Debug logging
-    if (process.env.NODE_ENV === 'development' && searchQuery.trim()) {
-      console.log('Pagination debug:', {
-        searchQuery,
-        currentPage,
-        pageStart,
-        pageEnd,
-        itemsPerPage,
-        totalFilteredGroups: filteredGroupedSales.length,
-        totalFilteredSales: filteredGroupedSales.reduce((sum, g) => sum + g.length, 0),
-        paginatedGroups: groupsToShow.length,
-        paginatedSales: groupsToShow.reduce((sum, g) => sum + g.length, 0)
+    return clientGroups
+      .map((clientGroup) => {
+        const filteredOfferGroups = clientGroup.offerGroups
+          .map((og) => ({
+            ...og,
+            sales: og.sales.filter((sale) => {
+              if (batchFilter !== 'all' && sale.batch?.name !== batchFilter) return false
+              if (!searchQuery.trim()) return true
+              const query = searchQuery.toLowerCase().trim()
+              const clientName = sale.client?.name || ''
+              const clientIdNum = sale.client?.id_number || ''
+              const clientPhone = sale.client?.phone || ''
+              const normalizedPhone = normalizePhone(clientPhone)
+              const normalizedQuery = normalizePhone(query)
+              const matchesPiece = (sale.piece?.piece_number || '').toLowerCase().includes(query)
+              const matchesBatch = (sale.batch?.name || '').toLowerCase().includes(query)
+              return (
+                clientName.toLowerCase().includes(query) ||
+                clientIdNum.toLowerCase().includes(query) ||
+                normalizedPhone.includes(normalizedQuery) ||
+                matchesPiece ||
+                matchesBatch
+              )
+            }),
+          }))
+          .filter((og) => og.sales.length > 0)
+        if (filteredOfferGroups.length === 0) return null
+        return { ...clientGroup, offerGroups: filteredOfferGroups }
       })
-    }
-    
-    return groupsToShow
-  }, [filteredGroupedSales, currentPage, itemsPerPage, searchQuery, batchFilter])
-  
-  // Update total count when searching to reflect filtered results (count individual sales)
+      .filter((g): g is ClientGroup => g !== null)
+  }, [clientGroups, searchQuery, batchFilter])
+
+  // Paginate by client
+  const paginatedClientGroups = useMemo(() => {
+    const start = (currentPage - 1) * itemsPerPage
+    return filteredClientGroups.slice(start, start + itemsPerPage)
+  }, [filteredClientGroups, currentPage, itemsPerPage])
+
   useEffect(() => {
     if (searchQuery.trim() || batchFilter !== 'all') {
-      // Count total sales in filtered groups (not groups, but individual sales)
-      const totalFilteredSales = filteredGroupedSales.reduce((sum, group) => sum + group.length, 0)
-      setTotalCount(totalFilteredSales)
+      setTotalCount(filteredClientGroups.length)
     }
-  }, [filteredGroupedSales, searchQuery, batchFilter])
+  }, [filteredClientGroups, searchQuery, batchFilter])
+
+  /** Remove confirmed/cancelled sales from state so search and scroll stay (no full refresh) */
+  function removeSalesFromState(saleIds: Set<string>) {
+    setSales(prev => prev.filter(s => !saleIds.has(s.id)))
+    setGroupedSales(prev => prev.map(group => group.filter(s => !saleIds.has(s.id))).filter(g => g.length > 0))
+    setClientGroups(prev => {
+      const next = prev
+        .map(cg => ({
+          ...cg,
+          offerGroups: cg.offerGroups
+            .map(og => ({ ...og, sales: og.sales.filter(s => !saleIds.has(s.id)) }))
+            .filter(og => og.sales.length > 0),
+        }))
+        .filter(cg => cg.offerGroups.length > 0)
+      setTotalCount(next.length)
+      return next
+    })
+  }
 
   function getConfirmButtonText(sale: Sale): string {
     if (sale.payment_method === 'promise' && sale.partial_payment_amount) {
@@ -557,8 +470,8 @@ export function ConfirmationPage() {
       setSuccessMessage(t('confirmation.cancelSuccess'))
       setShowSuccessDialog(true)
       setCancelDialogOpen(false)
+      removeSalesFromState(new Set([sale.id]))
       setSaleToCancel(null)
-      loadPendingSales()
       window.dispatchEvent(new CustomEvent('saleUpdated'))
       window.dispatchEvent(new CustomEvent('pieceStatusChanged'))
     } catch (e: any) {
@@ -609,15 +522,15 @@ export function ConfirmationPage() {
           <div className="flex items-center justify-between text-xs text-gray-600 flex-wrap gap-2">
             {searchQuery.trim() ? (
               <span>{replaceVars(t('confirmation.resultsOnPage'), { 
-                count: paginatedGroupedSales.reduce((sum, group) => sum + group.length, 0), 
-                total: filteredGroupedSales.reduce((sum, group) => sum + group.length, 0) 
-              })}</span>
+                count: paginatedClientGroups.length, 
+                total: filteredClientGroups.length 
+              })} {t('confirmation.clients')}</span>
             ) : (
               <span>{replaceVars(t('confirmation.showingRange'), {
-                from: groupedSales.length > 0 ? (currentPage - 1) * itemsPerPage + 1 : 0,
+                from: clientGroups.length > 0 ? (currentPage - 1) * itemsPerPage + 1 : 0,
                 to: Math.min(currentPage * itemsPerPage, totalCount),
                 total: totalCount,
-              })}</span>
+              })} {t('confirmation.clients')}</span>
             )}
             {(searchQuery || batchFilter !== 'all') && (
             <Button
@@ -643,16 +556,19 @@ export function ConfirmationPage() {
             <p className="mt-2 text-xs text-gray-500">{t('confirmation.loading')}</p>
           </div>
         </div>
-      ) : filteredGroupedSales.length === 0 ? (
+      ) : filteredClientGroups.length === 0 ? (
         <Card className="p-6 sm:p-8 text-center">
           <p className="text-sm sm:text-base text-gray-500">
-            {groupedSales.length === 0 ? t('confirmation.noPendingSales') : t('confirmation.noSearchResults')}
+            {clientGroups.length === 0 ? t('confirmation.noPendingSales') : t('confirmation.noSearchResults')}
           </p>
         </Card>
       ) : (
         <div className="space-y-3 sm:space-y-4">
-          {paginatedGroupedSales.flatMap((salesGroup, groupIndex) => {
-            // Calculate overdue status helper
+          {paginatedClientGroups.map((clientGroup, clientIndex) => {
+            const totalPieces = clientGroup.offerGroups.reduce((sum, og) => sum + og.sales.length, 0)
+            const clientTotal = clientGroup.offerGroups.reduce((sum, og) => sum + og.sales.reduce((s, sale) => s + sale.sale_price, 0), 0)
+            const firstSale = clientGroup.offerGroups[0]?.sales[0]
+
             const getDeadlineStatus = (sale: Sale) => {
               if (!sale.deadline_date) return null
               const deadline = new Date(sale.deadline_date)
@@ -661,8 +577,6 @@ export function ConfirmationPage() {
               const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
               return diffMs > 0 ? { overdue: true, days: diffDays } : { overdue: false, days: Math.abs(diffDays) }
             }
-            
-            // Format sale date and time (locale-aware month names)
             const monthKeys = ['monthJan', 'monthFeb', 'monthMar', 'monthApr', 'monthMay', 'monthJun', 'monthJul', 'monthAug', 'monthSep', 'monthOct', 'monthNov', 'monthDec'] as const
             const formatSaleDateTime = (dateStr: string) => {
               const date = new Date(dateStr)
@@ -673,221 +587,148 @@ export function ConfirmationPage() {
               const minutes = date.getMinutes().toString().padStart(2, '0')
               return `${day} ${month} ${year} ${hours}:${minutes}`
             }
-            
-            return salesGroup.map((sale, saleIdx) => {
-              const isFull = sale.payment_method === 'full'
-              const isInstallment = sale.payment_method === 'installment'
-              const isPromise = sale.payment_method === 'promise'
-              
-              // IMPORTANT: This page only shows PENDING sales
-              // Commission (company_fee_amount) is ONLY set during confirmation dialog
-              // Commission is NOT shown or calculated here - it's entered manually during confirmation
-              
-              // Calculate received and remaining
-              const received = isPromise 
-                ? (sale.partial_payment_amount || sale.deposit_amount || 0)
-                : (sale.deposit_amount || 0)
-              const remaining = isPromise
-                ? (sale.remaining_payment_amount || (sale.sale_price - (sale.partial_payment_amount || sale.deposit_amount || 0)))
-                : (sale.sale_price - (sale.deposit_amount || 0))
-              
-              const deadlineStatus = getDeadlineStatus(sale)
-              
-              // Determine card color scheme based on sale type
-              const cardColorScheme = isInstallment 
-                ? 'from-blue-500 to-blue-600' 
-                : isPromise 
-                ? 'from-purple-500 to-purple-600'
-                : 'from-green-500 to-green-600'
-              
-              return (
-                <Card key={`sale-${sale.id}`} className="overflow-hidden hover:shadow-xl transition-all duration-300 border-0 shadow-lg mb-4 bg-gradient-to-br from-white to-gray-50">
-                  {/* Modern Header with Gradient */}
-                  <div className={`bg-gradient-to-r ${cardColorScheme} p-4 text-white relative overflow-hidden`}>
-                    {/* Decorative Pattern */}
-                    <div className="absolute inset-0 opacity-10">
-                      <div className="absolute top-0 right-0 w-32 h-32 bg-white rounded-full -mr-16 -mt-16"></div>
-                      <div className="absolute bottom-0 left-0 w-24 h-24 bg-white rounded-full -ml-12 -mb-12"></div>
-                        </div>
-                    
-                    <div className="relative z-10">
-                      {/* Top Row - Client Info */}
-                      <div className="flex items-start justify-between mb-3">
-                        <div className="flex-1 min-w-0">
-                          <div className="text-sm font-bold mb-1 truncate">
-                            {sale.client?.name || t('confirmation.unknown')}
-                          </div>
-                          <div className="text-xs opacity-90 flex items-center gap-2 flex-wrap">
-                            <span>#{sale.id.substring(0, 8)}</span>
-                            <span className="opacity-60">•</span>
-                            <span>{sale.client?.id_number || ''}</span>
-                </div>
-              </div>
 
-                        {/* Status Badges */}
-                      <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
-                          {deadlineStatus?.overdue && (
-                            <Badge className="bg-red-100 text-red-800 border border-red-200 text-xs px-2.5 py-1 font-semibold">
-                              ⚠️ {replaceVars(t('confirmation.overdueDays'), { days: deadlineStatus.days })}
-                            </Badge>
-                          )}
-                          <div className="flex items-center gap-1 flex-wrap justify-end">
-                          {isPromise && (
-                              <Badge className="bg-purple-100 text-purple-800 border border-purple-200 text-xs px-2 py-0.5 font-medium">
-                              {t('confirmation.promiseSale')}
-                            </Badge>
-                          )}
-                          {isInstallment && (
-                              <Badge className="bg-blue-100 text-blue-800 border border-blue-200 text-xs px-2 py-0.5 font-medium">
-                              {t('confirmation.installment')}
-                            </Badge>
-                          )}
-                          {sale.status === 'pending' && (
-                              <Badge className="bg-amber-100 text-amber-800 border border-amber-200 text-xs px-2 py-0.5 font-medium">
-                              {t('confirmation.reserved')}
-                            </Badge>
-                          )}
-                        </div>
-                        </div>
-                      </div>
-                      
-                      {/* Bottom Row - Sale Info */}
-                      <div className="text-xs opacity-90 border-t border-white/20 pt-2">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span>📅 {formatSaleDateTime(sale.sale_date)}</span>
-                          <span className="opacity-60">•</span>
-                          <span>👤 {replaceVars(t('confirmation.soldBy'), { name: sale.seller?.name || t('confirmation.unknown') })}</span>
-                          {sale.seller?.place && <span className="opacity-75">({sale.seller.place})</span>}
-                        </div>
-                        {sale.confirmedBy?.name && (
-                          <div className="mt-1 text-xs opacity-80">
-                            ✓ {replaceVars(t('confirmation.confirmedBy'), { name: sale.confirmedBy.name })}{sale.confirmedBy.place ? ` (${sale.confirmedBy.place})` : ''}
-                          </div>
-                        )}
-                      </div>
+            return (
+              <Card key={`client-${clientIndex}`} className="overflow-hidden border border-gray-200 shadow-md bg-white">
+                {/* Client header (like Installments) */}
+                <div className="bg-gradient-to-r from-slate-600 to-slate-700 p-4 text-white">
+                  <div className="flex flex-wrap items-center gap-2 mb-1">
+                    <div className="font-bold text-base sm:text-lg truncate">{clientGroup.client?.name || t('confirmation.unknown')}</div>
+                    <Badge className="bg-white/20 text-xs">
+                      {totalPieces} {totalPieces === 1 ? t('confirmation.piece') : t('confirmation.pieces')}
+                    </Badge>
                   </div>
-                </div>
-
-                  {/* Content Section - Modern Design */}
-                  <div className="p-4 bg-white">
-                    {/* Piece Info - Prominent */}
-                    <div className="mb-4 pb-4 border-b border-gray-200">
-                      <div className="flex items-center justify-between mb-2">
-                        <h4 className="text-base sm:text-lg font-bold text-gray-900">
-                          {sale.batch?.name || '-'}
-                      </h4>
-                        <div className="text-sm font-semibold text-gray-600 bg-gray-100 px-3 py-1 rounded-full">
-                          #{sale.piece?.piece_number || '-'}
-                  </div>
-                </div>
-                      <div className="flex items-center gap-2 text-sm text-gray-600">
-                        <span className="font-medium">{t('confirmation.surface')}:</span>
-                        <span className="text-gray-900 font-semibold">{sale.piece?.surface_m2.toLocaleString('en-US')} m²</span>
-                  </div>
-                  </div>
-                      
-                    {/* Financial Info - Modern Cards */}
-                    <div className="grid grid-cols-2 gap-3 mb-4">
-                      {/* Price Card */}
-                      <div className="bg-gradient-to-br from-red-50 to-red-100 rounded-lg p-3 border border-red-200">
-                        <div className="text-xs text-red-700 font-medium mb-1">{t('confirmation.totalPrice')}</div>
-                        <div className="text-lg font-bold text-red-700">{formatPrice(sale.sale_price)} DT</div>
-                    </div>
-                      
-                      {/* Received Card */}
-                      <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-lg p-3 border border-green-200">
-                        <div className="text-xs text-green-700 font-medium mb-1">{t('confirmation.received')}</div>
-                        <div className="text-lg font-bold text-green-700">{formatPrice(received)} DT</div>
-                </div>
-                      
-                      {/* Deposit Card */}
-                      <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg p-3 border border-blue-200">
-                        <div className="text-xs text-blue-700 font-medium mb-1">{t('confirmation.deposit')}</div>
-                        <div className="text-lg font-bold text-blue-700">{formatPrice(sale.deposit_amount || 0)} DT</div>
-                      </div>
-                      
-                      {/* Remaining Card - Highlighted */}
-                      <div className="bg-gradient-to-br from-orange-50 to-orange-100 rounded-lg p-3 border-2 border-orange-300 shadow-sm">
-                        <div className="text-xs text-orange-700 font-medium mb-1">{t('confirmation.remaining')}</div>
-                        <div className="text-lg font-bold text-orange-700">{formatPrice(remaining)} DT</div>
-                  </div>
-                    </div>
-                    {/* Sale note (from sell phase) - visible on card */}
-                    {sale.notes?.trim() && (
-                      <div className="mb-4 rounded-lg p-3 bg-gray-50 border border-gray-200">
-                        <div className="text-xs font-semibold text-gray-600 mb-1">{t('confirmation.saleNotesLabel')}</div>
-                        <p className="text-sm text-gray-800 whitespace-pre-wrap">{sale.notes.trim()}</p>
-                      </div>
+                  <div className="text-xs sm:text-sm opacity-90 flex items-center gap-2 flex-wrap">
+                    <span>{clientGroup.client?.id_number || ''}</span>
+                    {clientGroup.client?.phone && (
+                      <>
+                        <span className="opacity-60">•</span>
+                        <span>{clientGroup.client.phone}</span>
+                      </>
                     )}
-              </div>
+                  </div>
+                  <div className="text-sm font-medium mt-2 opacity-95">
+                    {replaceVars(t('confirmation.piecesAndTotal'), { count: totalPieces, total: formatPrice(clientTotal) + ' DT' })}
+                  </div>
+                </div>
 
-                  {/* Action Buttons - Modern Design */}
-                  <div className="bg-gray-50 p-4 border-t border-gray-200">
-                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-                <Button
-                  size="sm"
-                        className={`${getConfirmButtonColor(sale)} text-white text-xs px-3 py-2.5 font-semibold shadow-md hover:shadow-lg transition-all`}
-                        onClick={() => {
-                          setSelectedSale(sale)
-                          setConfirmDialogOpen(true)
-                        }}
-                      >
-                        ✅ {getConfirmButtonText(sale)}
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                        className="text-xs px-3 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-800 border border-gray-300 font-medium transition-all"
-                        onClick={() => {
-                          setSelectedSale(sale)
-                          setSaleDetailsDialogOpen(true)
-                        }}
-                      >
-                        📋 {t('confirmation.details')}
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                        className="text-xs px-3 py-2.5 bg-red-600 hover:bg-red-700 text-white font-semibold shadow-md hover:shadow-lg transition-all"
-                        onClick={async () => {
-                          setSaleToCancel(sale)
-                          setCancelDialogOpen(true)
-                        }}
-                      >
-                        ❌ {t('confirmation.cancel')}
-                </Button>
-                <Button
-                        variant="secondary"
-                  size="sm"
-                        className="text-xs px-3 py-2.5 bg-white hover:bg-gray-100 border-2 border-gray-300 text-gray-700 font-semibold shadow-sm hover:shadow-md transition-all"
-                  onClick={() => {
-                    setSelectedSale(sale)
-                          const tomorrow = new Date()
-                          tomorrow.setDate(tomorrow.getDate() + 1)
-                          setAppointmentDate(tomorrow.toISOString().split('T')[0])
-                          setAppointmentTime('09:00')
-                          setAppointmentNotes('')
-                          setAppointmentDialogOpen(true)
-                        }}
-                      >
-                        📅 {t('confirmation.appointment')}
-                </Button>
-                <Button
-                        variant="secondary"
-                  size="sm"
-                        className="text-xs px-3 py-2.5 bg-white hover:bg-gray-100 border-2 border-gray-300 text-gray-700 font-semibold shadow-sm hover:shadow-md transition-all"
-                        onClick={() => {
-                          setSelectedSale(sale)
-                          setEditDialogOpen(true)
-                        }}
-                      >
-                        ✏️ {t('confirmation.edit')}
-                </Button>
-                    </div>
-              </div>
-            </Card>
-              )
-            })
+                {/* Offer groups (installment offer / full / promise) then pieces */}
+                <div className="p-3 sm:p-4 space-y-4 bg-gray-50/50">
+                  {clientGroup.offerGroups.map((offerGroup, offerIndex) => (
+                    <Card key={`offer-${clientIndex}-${offerIndex}`} className="overflow-hidden border border-gray-200 shadow-sm bg-white">
+                      {/* Offer / payment method label */}
+                      {offerGroup.offer ? (
+                        <div className="px-3 py-2 bg-blue-50 border-b border-blue-100 flex flex-wrap items-center gap-2">
+                          <Badge variant="secondary" size="sm" className="text-xs font-semibold">
+                            📋 {offerGroup.offer.name || t('confirmation.offerLabel')}
+                          </Badge>
+                          <span className="text-xs text-gray-600">
+                            {offerGroup.sales.length} {offerGroup.sales.length === 1 ? t('confirmation.piece') : t('confirmation.pieces')}
+                          </span>
+                          {offerGroup.offer.monthly_amount != null && (
+                            <span className="text-xs text-gray-600">• {formatPrice(offerGroup.offer.monthly_amount)} DT/{t('confirmation.month')}</span>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="px-3 py-2 bg-gray-100 border-b border-gray-200 flex flex-wrap items-center gap-2">
+                          <Badge variant="secondary" size="sm" className="text-xs">
+                            {offerGroup.paymentMethod === 'full' ? t('confirmation.paymentFull') : offerGroup.paymentMethod === 'promise' ? t('confirmation.promiseSale') : t('confirmation.installment')}
+                          </Badge>
+                          <span className="text-xs text-gray-600">
+                            {offerGroup.sales.length} {offerGroup.sales.length === 1 ? t('confirmation.piece') : t('confirmation.pieces')}
+                          </span>
+                        </div>
+                      )}
+                      <div className="p-3 space-y-3">
+                  {offerGroup.sales.map((sale) => {
+                    const isInstallment = sale.payment_method === 'installment'
+                    const isPromise = sale.payment_method === 'promise'
+                    const received = isPromise
+                      ? (sale.partial_payment_amount || sale.deposit_amount || 0)
+                      : (sale.deposit_amount || 0)
+                    const remaining = isPromise
+                      ? (sale.remaining_payment_amount ?? (sale.sale_price - (sale.partial_payment_amount || sale.deposit_amount || 0)))
+                      : (sale.sale_price - (sale.deposit_amount || 0))
+                    const deadlineStatus = getDeadlineStatus(sale)
+                    const cardColorScheme = isInstallment
+                      ? 'from-blue-500 to-blue-600'
+                      : isPromise
+                        ? 'from-purple-500 to-purple-600'
+                        : 'from-green-500 to-green-600'
+
+                    return (
+                      <Card key={sale.id} className="overflow-hidden border border-gray-200 shadow-sm bg-white">
+                        <div className={`bg-gradient-to-r ${cardColorScheme} p-3 text-white`}>
+                          <div className="flex items-center justify-between flex-wrap gap-2">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-semibold">{sale.batch?.name || '-'}</span>
+                              <span className="opacity-90">#{sale.piece?.piece_number || '-'}</span>
+                              <span className="text-xs opacity-85">{sale.piece?.surface_m2 != null ? `${sale.piece.surface_m2} m²` : ''}</span>
+                            </div>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              {deadlineStatus?.overdue && (
+                                <Badge className="bg-red-100 text-red-800 border border-red-200 text-xs">
+                                  ⚠️ {replaceVars(t('confirmation.overdueDays'), { days: deadlineStatus.days })}
+                                </Badge>
+                              )}
+                              {isPromise && <Badge className="bg-purple-100 text-purple-800 border border-purple-200 text-xs">{t('confirmation.promiseSale')}</Badge>}
+                              {isInstallment && <Badge className="bg-blue-100 text-blue-800 border border-blue-200 text-xs">{t('confirmation.installment')}</Badge>}
+                              {sale.status === 'pending' && <Badge className="bg-amber-100 text-amber-800 border border-amber-200 text-xs">{t('confirmation.reserved')}</Badge>}
+                            </div>
+                          </div>
+                          <div className="text-xs opacity-90 mt-1">
+                            📅 {formatSaleDateTime(sale.sale_date)} • 👤 {sale.seller?.name || t('confirmation.unknown')}
+                          </div>
+                        </div>
+                        <div className="p-3 sm:p-4">
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
+                            <div className="bg-red-50 rounded p-2 border border-red-100">
+                              <div className="text-xs text-red-700">{t('confirmation.totalPrice')}</div>
+                              <div className="font-bold text-red-700">{formatPrice(sale.sale_price)} DT</div>
+                            </div>
+                            <div className="bg-green-50 rounded p-2 border border-green-100">
+                              <div className="text-xs text-green-700">{t('confirmation.received')}</div>
+                              <div className="font-bold text-green-700">{formatPrice(received)} DT</div>
+                            </div>
+                            <div className="bg-blue-50 rounded p-2 border border-blue-100">
+                              <div className="text-xs text-blue-700">{t('confirmation.deposit')}</div>
+                              <div className="font-bold text-blue-700">{formatPrice(sale.deposit_amount || 0)} DT</div>
+                            </div>
+                            <div className="bg-orange-50 rounded p-2 border border-orange-200">
+                              <div className="text-xs text-orange-700">{t('confirmation.remaining')}</div>
+                              <div className="font-bold text-orange-700">{formatPrice(remaining)} DT</div>
+                            </div>
+                          </div>
+                          {sale.notes?.trim() && (
+                            <div className="mb-3 rounded p-2 bg-gray-50 border border-gray-200 text-sm">{sale.notes.trim()}</div>
+                          )}
+                          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                            <Button size="sm" className={`${getConfirmButtonColor(sale)} text-white text-xs`} onClick={() => { setSelectedSale(sale); setConfirmDialogOpen(true) }}>
+                              ✅ {getConfirmButtonText(sale)}
+                            </Button>
+                            <Button variant="secondary" size="sm" className="text-xs" onClick={() => { setSelectedSale(sale); setSaleDetailsDialogOpen(true) }}>
+                              📋 {t('confirmation.details')}
+                            </Button>
+                            <Button variant="secondary" size="sm" className="text-xs bg-red-600 hover:bg-red-700 text-white" onClick={() => { setSaleToCancel(sale); setCancelDialogOpen(true) }}>
+                              ❌ {t('confirmation.cancel')}
+                            </Button>
+                            <Button variant="secondary" size="sm" className="text-xs" onClick={() => { setSelectedSale(sale); const tmr = new Date(); tmr.setDate(tmr.getDate() + 1); setAppointmentDate(tmr.toISOString().split('T')[0]); setAppointmentTime('09:00'); setAppointmentNotes(''); setAppointmentDialogOpen(true) }}>
+                              📅 {t('confirmation.appointment')}
+                            </Button>
+                            <Button variant="secondary" size="sm" className="text-xs" onClick={() => { setSelectedSale(sale); setEditDialogOpen(true) }}>
+                              ✏️ {t('confirmation.edit')}
+                            </Button>
+                          </div>
+                        </div>
+                      </Card>
+                    )
+                  })}
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+              </Card>
+            )
           })}
         </div>
       )}
@@ -980,7 +821,9 @@ export function ConfirmationPage() {
         }}
         sale={selectedSale}
           onConfirm={() => {
-            loadPendingSales()
+            removeSalesFromState(new Set([selectedSale.id]))
+            setConfirmDialogOpen(false)
+            setSelectedSale(null)
             window.dispatchEvent(new CustomEvent('saleUpdated'))
             window.dispatchEvent(new CustomEvent('pieceStatusChanged'))
           }}
@@ -997,7 +840,9 @@ export function ConfirmationPage() {
           }}
           sales={selectedSalesGroup}
           onConfirm={() => {
-            loadPendingSales()
+            removeSalesFromState(new Set(selectedSalesGroup.map(s => s.id)))
+            setConfirmGroupDialogOpen(false)
+            setSelectedSalesGroup(null)
             window.dispatchEvent(new CustomEvent('saleUpdated'))
             window.dispatchEvent(new CustomEvent('pieceStatusChanged'))
           }}
@@ -1013,8 +858,20 @@ export function ConfirmationPage() {
             setSelectedSale(null)
           }}
           sale={selectedSale}
-          onSave={() => {
-            loadPendingSales()
+          onSave={(updatedSale) => {
+            if (updatedSale) {
+              setSales(prev => prev.map(s => s.id === updatedSale.id ? updatedSale : s))
+              setGroupedSales(prev => prev.map(group => group.map(s => s.id === updatedSale.id ? updatedSale : s)))
+              setClientGroups(prev => prev.map(cg => ({
+                ...cg,
+                offerGroups: cg.offerGroups.map(og => ({
+                  ...og,
+                  sales: og.sales.map(s => s.id === updatedSale.id ? updatedSale : s),
+                })),
+              })))
+            } else {
+              loadPendingSales()
+            }
             setSuccessMessage(t('confirmation.updateSaleSuccess'))
             setShowSuccessDialog(true)
             window.dispatchEvent(new CustomEvent('saleUpdated'))

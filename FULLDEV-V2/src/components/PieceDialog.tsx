@@ -53,6 +53,11 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
   const [success, setSuccess] = useState<string | null>(null)
   const [showAddForm, setShowAddForm] = useState(false)
   const [selectedPieces, setSelectedPieces] = useState<Set<string>>(new Set())
+  /** Ref kept in sync with selectedPieces so Sell button always uses latest selection (avoids race when user selects then quickly clicks Sell) */
+  const selectedPiecesRef = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    selectedPiecesRef.current = selectedPieces
+  }, [selectedPieces])
   const [touchStart, setTouchStart] = useState<{ x: number; y: number; time: number; isScrolling?: boolean } | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<LandPiece[]>([])
@@ -63,6 +68,8 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
   const [batchImageUrlKnownNull, setBatchImageUrlKnownNull] = useState(false)
   const [localBatchImageUrl, setLocalBatchImageUrl] = useState<string | null>(null)
   const [localFetchSettled, setLocalFetchSettled] = useState(false)
+  /** For reserved pieces: pieceId -> { clientName, paymentMethod } from pending sale */
+  const [reservedPieceInfo, setReservedPieceInfo] = useState<Record<string, { clientName: string; paymentMethod: string }>>({})
   const lastLoadedImageUrlRef = useRef<string | null>(null)
   const currentBatchImageUrlRef = useRef<string | null>(null)
   /** Ordered piece ids for this batch (natural sort: 1,2,3..10,11 and a,a2,b1,b2) so pagination shows correct order */
@@ -107,8 +114,52 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
       setBatchImageUrlKnownNull(false)
       setLocalBatchImageUrl(null)
       setLocalFetchSettled(false)
+      setReservedPieceInfo({})
     }
   }, [open])
+
+  // Load buyer info for reserved pieces (pending sale: client name + payment method)
+  useEffect(() => {
+    if (!open || !batchId) return
+    const list = searchQuery.trim() ? searchResults : pieces
+    const reservedIds = list
+      .filter((p) => (p.availabilityStatus?.status || p.status) === 'Reserved')
+      .map((p) => p.id)
+    if (reservedIds.length === 0) {
+      setReservedPieceInfo({})
+      return
+    }
+    let cancelled = false
+    supabase
+      .from('sales')
+      .select('land_piece_id, payment_method, clients:client_id(name)')
+      .eq('status', 'pending')
+      .in('land_piece_id', reservedIds)
+      .then(({ data, error }) => {
+        if (cancelled || error) {
+          if (error) console.error('Error loading reserved piece sales:', error)
+          return
+        }
+        const map: Record<string, { clientName: string; paymentMethod: string }> = {}
+        const paymentMethodLabel = (m: string | null) => {
+          if (m === 'full') return 'نقدي'
+          if (m === 'installment') return 'تقسيط'
+          if (m === 'promise') return 'وعد بالبيع'
+          return m || '—'
+        }
+        ;(data || []).forEach((row: any) => {
+          const pieceId = row.land_piece_id
+          const client = row.clients
+          const name = Array.isArray(client) ? client[0]?.name : client?.name
+          map[pieceId] = {
+            clientName: name || '—',
+            paymentMethod: paymentMethodLabel(row.payment_method),
+          }
+        })
+        if (!cancelled) setReservedPieceInfo(map)
+      })
+    return () => { cancelled = true }
+  }, [open, batchId, pieces, searchResults, searchQuery])
 
   // When dialog opens with no URL from parent, fetch image_url ourselves so we don't show "لا توجد صورة" when image exists
   useEffect(() => {
@@ -184,7 +235,7 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
     }
   }, [effectiveBatchImageUrl])
 
-  // Load first page when dialog opens; listen for status changes
+  // Load first page when dialog opens; listen for status changes and sale created so list updates without refresh
   useEffect(() => {
     if (open && batchId) {
       setCurrentPage(1)
@@ -193,17 +244,21 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
       loadPieces(1)
 
       let refreshTimeout: NodeJS.Timeout | null = null
-      const debouncedRefresh = () => {
+      const debouncedRefresh = (delayMs = 200) => {
         if (refreshTimeout) clearTimeout(refreshTimeout)
         refreshTimeout = setTimeout(() => {
           if (open && batchId) {
             loadPieces(currentPageRef.current)
           }
-        }, 500)
+        }, delayMs)
       }
 
       const handlePieceStatusChanged = () => {
-        debouncedRefresh()
+        debouncedRefresh(200)
+      }
+
+      const handleSaleCreated = () => {
+        debouncedRefresh(200)
       }
 
       const handleClearSelections = () => {
@@ -211,6 +266,7 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
       }
 
       window.addEventListener('pieceStatusChanged', handlePieceStatusChanged)
+      window.addEventListener('saleCreated', handleSaleCreated)
       window.addEventListener('clearPieceSelections', handleClearSelections)
 
       const statusRefreshInterval = setInterval(() => {
@@ -221,6 +277,7 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
 
       return () => {
         window.removeEventListener('pieceStatusChanged', handlePieceStatusChanged)
+        window.removeEventListener('saleCreated', handleSaleCreated)
         window.removeEventListener('clearPieceSelections', handleClearSelections)
         clearInterval(statusRefreshInterval)
         if (refreshTimeout) clearTimeout(refreshTimeout)
@@ -964,13 +1021,12 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
                   
                   // It's a click, toggle selection - only prevent default at the end
                   e.preventDefault()
-                  const newSelected = new Set(selectedPieces)
-                  if (isSelected) {
-                    newSelected.delete(piece.id)
-                  } else {
-                    newSelected.add(piece.id)
-                  }
-                  setSelectedPieces(newSelected)
+                  setSelectedPieces((prev) => {
+                    const next = new Set(prev)
+                    if (next.has(piece.id)) next.delete(piece.id)
+                    else next.add(piece.id)
+                    return next
+                  })
                   setTouchStart(null)
                 }
 
@@ -979,13 +1035,12 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
                   if ('ontouchstart' in window) return
                   
                   if (canSelect) {
-                    const newSelected = new Set(selectedPieces)
-                    if (isSelected) {
-                      newSelected.delete(piece.id)
-                    } else {
-                      newSelected.add(piece.id)
-                    }
-                    setSelectedPieces(newSelected)
+                    setSelectedPieces((prev) => {
+                      const next = new Set(prev)
+                      if (next.has(piece.id)) next.delete(piece.id)
+                      else next.add(piece.id)
+                      return next
+                    })
                   }
                 }
 
@@ -1050,13 +1105,13 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
                             type="checkbox"
                             checked={isSelected}
                             onChange={(e) => {
-                              const newSelected = new Set(selectedPieces)
-                              if (e.target.checked) {
-                                newSelected.add(piece.id)
-                              } else {
-                                newSelected.delete(piece.id)
-                              }
-                              setSelectedPieces(newSelected)
+                              const checked = e.target.checked
+                              setSelectedPieces((prev) => {
+                                const next = new Set(prev)
+                                if (checked) next.add(piece.id)
+                                else next.delete(piece.id)
+                                return next
+                              })
                             }}
                             className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500 flex-shrink-0"
                           />
@@ -1064,7 +1119,19 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
                       )}
                     </div>
                     {isReserved && (
-                      <span className="text-xs text-orange-600 font-medium mt-1">محجوزة</span>
+                      <div className="text-xs text-orange-700 mt-1 space-y-0.5">
+                        <span className="font-medium">محجوزة</span>
+                        {reservedPieceInfo[piece.id] && (
+                          <>
+                            <div className="text-gray-600">
+                              المشتري: <span className="font-medium text-gray-900">{reservedPieceInfo[piece.id].clientName}</span>
+                            </div>
+                            <div className="text-gray-600">
+                              الدفع: <span className="font-medium text-gray-900">{reservedPieceInfo[piece.id].paymentMethod}</span>
+                            </div>
+                          </>
+                        )}
+                      </div>
                     )}
                     {!isAvailable && !isReserved && !isSold && piece.availabilityStatus?.reason && (
                       <span className="text-xs text-gray-500 mt-0.5 block">{piece.availabilityStatus.reason}</span>
@@ -1189,10 +1256,33 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
               <Button
                 variant="primary"
                 size="sm"
-                onClick={() => {
-                  const piecesToSell = pieces.filter(p => selectedPieces.has(p.id))
-                  onSellPieces(piecesToSell)
-                    // Don't clear selections - keep them for when user comes back
+                onClick={async () => {
+                  // Use ref so we always have the latest selection (avoids race when user selects then quickly clicks Sell)
+                  const selectedIds = Array.from(selectedPiecesRef.current)
+                  if (selectedIds.length === 0) return
+                  // Fetch full piece data for ALL selected IDs so we include pieces from every page (not just current page)
+                  const { data: fetched, error } = await supabase
+                    .from('land_pieces')
+                    .select('id, batch_id, piece_number, surface_m2, notes, direct_full_payment_price, status, created_at, updated_at')
+                    .in('id', selectedIds)
+                    .eq('batch_id', batchId)
+                  if (error) {
+                    console.error('Failed to load selected pieces for sale', error)
+                    return
+                  }
+                  const withStatus: LandPiece[] = (fetched || []).map((p) => ({
+                    ...p,
+                    availabilityStatus: {
+                      isAvailable: p.status === 'Available',
+                      status: p.status,
+                      hasPendingSale: false,
+                      hasCompletedSale: false,
+                    },
+                  }))
+                  // Preserve selection order
+                  const orderMap = new Map(selectedIds.map((id, i) => [id, i]))
+                  withStatus.sort((a, b) => (orderMap.get(a.id) ?? 0) - (orderMap.get(b.id) ?? 0))
+                  onSellPieces(withStatus)
                 }}
                   className="flex-1 bg-red-600 text-white hover:bg-red-700 text-xs sm:text-sm font-semibold py-2 sm:py-2.5"
               >

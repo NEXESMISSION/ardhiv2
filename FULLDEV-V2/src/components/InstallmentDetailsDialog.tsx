@@ -11,6 +11,23 @@ import { NotificationDialog } from './ui/notification-dialog'
 import { formatPrice, formatDateShort } from '@/utils/priceCalculator'
 import { calculateInstallmentWithDeposit } from '@/utils/installmentCalculator'
 
+/** Add one month to a date (same day of month, clamp to last day if needed) */
+function addMonth(date: Date): Date {
+  const next = new Date(date.getFullYear(), date.getMonth() + 1, date.getDate(), 0, 0, 0, 0)
+  if (next.getDate() !== date.getDate()) {
+    next.setDate(0)
+  }
+  return next
+}
+
+/** Format date as YYYY-MM-DD in local time (avoid UTC shift from toISOString) */
+function toLocalDateString(d: Date): string {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
 interface Sale {
   id: string
   client_id: string
@@ -106,6 +123,13 @@ export function InstallmentDetailsDialog({
   const [successMessage, setSuccessMessage] = useState('')
   const [errorMessage, setErrorMessage] = useState('')
   const [loadedPaymentOffer, setLoadedPaymentOffer] = useState<Sale['payment_offer'] | null>(null)
+  const [showEditFirstDateDialog, setShowEditFirstDateDialog] = useState(false)
+  const [editFirstDateValue, setEditFirstDateValue] = useState('')
+  const [savingEditDate, setSavingEditDate] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [multiPayInstallments, setMultiPayInstallments] = useState<InstallmentPayment[] | null>(null)
+  /** Number of next installments to pay (user types e.g. 6 → pay next 6 in order) */
+  const [payNextCountInput, setPayNextCountInput] = useState('')
 
   useEffect(() => {
     if (open && sale) {
@@ -116,6 +140,11 @@ export function InstallmentDetailsDialog({
       } else {
         setLoadedPaymentOffer(null)
       }
+    }
+    if (!open) {
+      setSelectedIds(new Set())
+      setMultiPayInstallments(null)
+      setShowEditFirstDateDialog(false)
     }
   }, [open, sale])
 
@@ -167,6 +196,50 @@ export function InstallmentDetailsDialog({
       console.error('Error loading installments:', e)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const firstPendingInstallment = useMemo(() => {
+    const pending = installments.filter((i) => i.status !== 'paid').sort((a, b) => a.installment_number - b.installment_number)
+    return pending[0] ?? null
+  }, [installments])
+
+  /** Pending installments in order (for "pay next N" and max count) */
+  const pendingOrdered = useMemo(
+    () => installments.filter((i) => i.status !== 'paid').sort((a, b) => a.installment_number - b.installment_number),
+    [installments]
+  )
+  const pendingCount = pendingOrdered.length
+
+  async function handleEditFirstDateConfirm() {
+    if (!firstPendingInstallment || !editFirstDateValue.trim()) return
+    setSavingEditDate(true)
+    try {
+      const newFirstDate = new Date(editFirstDateValue)
+      const pendingOrdered = installments
+        .filter((i) => i.status !== 'paid')
+        .sort((a, b) => a.installment_number - b.installment_number)
+      const updates: { id: string; due_date: string }[] = []
+      let currentDate = new Date(newFirstDate.getFullYear(), newFirstDate.getMonth(), newFirstDate.getDate(), 0, 0, 0, 0)
+      for (let i = 0; i < pendingOrdered.length; i++) {
+        updates.push({ id: pendingOrdered[i].id, due_date: toLocalDateString(currentDate) })
+        if (i < pendingOrdered.length - 1) currentDate = addMonth(currentDate)
+      }
+      for (const u of updates) {
+        const { error } = await supabase.from('installment_payments').update({ due_date: u.due_date, updated_at: new Date().toISOString() }).eq('id', u.id)
+        if (error) throw error
+      }
+      setShowEditFirstDateDialog(false)
+      setEditFirstDateValue('')
+      setSuccessMessage('تم تحديث تاريخ أول قسط وجميع تواريخ الأقساط التالية (شهرياً).')
+      setShowSuccessDialog(true)
+      await loadInstallments()
+      onPaymentSuccess()
+    } catch (e: any) {
+      setErrorMessage(e.message || 'فشل تعديل التواريخ')
+      setShowErrorDialog(true)
+    } finally {
+      setSavingEditDate(false)
     }
   }
 
@@ -234,14 +307,59 @@ export function InstallmentDetailsDialog({
   }
 
   async function handlePaymentConfirm() {
-    if (!selectedInstallment) return
-
     const amount = parseFloat(paymentAmount)
     if (isNaN(amount) || amount <= 0) {
       setErrorMessage('يرجى إدخال مبلغ صحيح')
       setShowErrorDialog(true)
       return
     }
+
+    if (multiPayInstallments && multiPayInstallments.length > 0) {
+      const totalDue = multiPayInstallments.reduce((sum, i) => sum + (i.amount_due - i.amount_paid), 0)
+      if (amount > totalDue) {
+        setErrorMessage(`المبلغ المدخل يتجاوز إجمالي المتبقي (${formatPrice(totalDue)} DT)`)
+        setShowErrorDialog(true)
+        return
+      }
+      setPaying(true)
+      try {
+        const sorted = [...multiPayInstallments].sort((a, b) => a.installment_number - b.installment_number)
+        let remaining = amount
+        const paidToday = new Date().toISOString().split('T')[0]
+        for (const inst of sorted) {
+          if (remaining <= 0) break
+          const need = inst.amount_due - inst.amount_paid
+          const pay = Math.min(remaining, need)
+          const newAmountPaid = inst.amount_paid + pay
+          remaining -= pay
+          const newStatus = newAmountPaid >= inst.amount_due ? 'paid' : 'pending'
+          const updateData: any = {
+            amount_paid: newAmountPaid,
+            status: newStatus,
+            updated_at: new Date().toISOString(),
+          }
+          if (newStatus === 'paid') updateData.paid_date = paidToday
+          const { error } = await supabase.from('installment_payments').update(updateData).eq('id', inst.id)
+          if (error) throw error
+        }
+        setSuccessMessage(`تم دفع ${formatPrice(amount)} DT بنجاح على ${sorted.length} قسط/أقساط!`)
+        setShowSuccessDialog(true)
+        setMultiPayInstallments(null)
+        setSelectedIds(new Set())
+        setPayNextCountInput('')
+        setPaymentAmount('')
+        await loadInstallments()
+        onPaymentSuccess()
+      } catch (e: any) {
+        setErrorMessage(e.message || 'فشل تسجيل الدفع')
+        setShowErrorDialog(true)
+      } finally {
+        setPaying(false)
+      }
+      return
+    }
+
+    if (!selectedInstallment) return
 
     const remaining = selectedInstallment.amount_due - selectedInstallment.amount_paid
     if (amount > remaining) {
@@ -262,7 +380,6 @@ export function InstallmentDetailsDialog({
       }
 
       if (newStatus === 'paid') {
-        // Use current date/time by default
         updateData.paid_date = new Date().toISOString().split('T')[0]
       }
 
@@ -449,7 +566,82 @@ export function InstallmentDetailsDialog({
 
           {/* Installments - Mobile: Cards, Desktop: Table */}
           <div>
-            <h3 className="font-semibold text-gray-900 mb-1.5 text-xs sm:text-sm">جدول الأقساط</h3>
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+              <h3 className="font-semibold text-gray-900 text-xs sm:text-sm">جدول الأقساط</h3>
+              <div className="flex flex-wrap items-center gap-2">
+                {firstPendingInstallment && (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    className="text-xs"
+                    onClick={() => {
+                      setEditFirstDateValue(firstPendingInstallment.due_date)
+                      setShowEditFirstDateDialog(true)
+                    }}
+                  >
+                    📅 تعديل جدول الاستحقاق (الأول ← والباقي تلقائياً)
+                  </Button>
+                )}
+                {pendingCount > 0 && (
+                  <>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Label className="text-xs whitespace-nowrap">عدد الأقساط لدفعها معاً (التالية بالترتيب):</Label>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={pendingCount}
+                        value={payNextCountInput}
+                        onChange={(e) => {
+                          const v = e.target.value
+                          if (v === '') setPayNextCountInput('')
+                          else {
+                            const n = parseInt(v, 10)
+                            if (!Number.isNaN(n) && n >= 1) setPayNextCountInput(String(Math.min(n, pendingCount)))
+                          }
+                        }}
+                        placeholder="مثلاً 6"
+                        size="sm"
+                        className="w-20 text-xs"
+                      />
+                      <span className="text-xs text-gray-500">من {pendingCount} متبقية</span>
+                      <Button
+                        type="button"
+                        variant="primary"
+                        size="sm"
+                        className="text-xs"
+                        disabled={!payNextCountInput || parseInt(payNextCountInput, 10) < 1}
+                        onClick={() => {
+                          const n = Math.min(Math.max(1, parseInt(payNextCountInput, 10) || 0), pendingCount)
+                          if (n < 1) return
+                          const next = pendingOrdered.slice(0, n)
+                          const total = next.reduce((s, i) => s + (i.amount_due - i.amount_paid), 0)
+                          setMultiPayInstallments(next)
+                          setPaymentAmount(total.toFixed(2))
+                        }}
+                      >
+                        💰 معاينة ودفع الـ {payNextCountInput ? Math.min(parseInt(payNextCountInput, 10) || 0, pendingCount) : 0} أقساط التالية
+                      </Button>
+                    </div>
+                    {selectedIds.size > 0 && (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        className="text-xs"
+                        onClick={() => {
+                          const selected = installments.filter((i) => selectedIds.has(i.id)).sort((a, b) => a.installment_number - b.installment_number)
+                          setMultiPayInstallments(selected)
+                          setPaymentAmount(selected.reduce((s, i) => s + (i.amount_due - i.amount_paid), 0).toFixed(2))
+                        }}
+                      >
+                        دفع المختارة ({selectedIds.size}) من الجدول
+                      </Button>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
             
             {/* Mobile: Card layout */}
             <div className="space-y-2 lg:hidden">
@@ -466,12 +658,31 @@ export function InstallmentDetailsDialog({
                   const remaining = inst.amount_due - inst.amount_paid
                   const timeUntilDue = getTimeUntilDue(inst.due_date)
                   const isOverdue = inst.status === 'overdue' || (inst.status === 'pending' && new Date(inst.due_date) < new Date())
+                  const isSelected = selectedIds.has(inst.id)
+                  const isPending = inst.status !== 'paid'
 
                   return (
                     <Card key={inst.id} className="p-2 sm:p-3">
                       <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <span className="font-semibold text-xs sm:text-sm">قسط #{inst.installment_number}</span>
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            {isPending && (
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => {
+                                  setSelectedIds((prev) => {
+                                    const next = new Set(prev)
+                                    if (next.has(inst.id)) next.delete(inst.id)
+                                    else next.add(inst.id)
+                                    return next
+                                  })
+                                }}
+                                className="rounded border-gray-300"
+                              />
+                            )}
+                            <span className="font-semibold text-xs sm:text-sm truncate">قسط #{inst.installment_number}</span>
+                          </div>
                           {inst.status === 'paid' ? (
                             <Badge variant="success" size="sm" className="text-xs">مدفوع</Badge>
                           ) : isOverdue ? (
@@ -527,6 +738,7 @@ export function InstallmentDetailsDialog({
               <table className="w-full text-sm border-collapse">
                 <thead>
                   <tr className="border-b-2 border-gray-300 bg-gray-50">
+                    <th className="text-right py-2 px-3 font-semibold text-xs w-8">اختيار</th>
                     <th className="text-right py-2 px-3 font-semibold text-xs">#</th>
                     <th className="text-right py-2 px-3 font-semibold text-xs">المبلغ المستحق</th>
                     <th className="text-right py-2 px-3 font-semibold text-xs">المدفوع</th>
@@ -539,13 +751,13 @@ export function InstallmentDetailsDialog({
                 <tbody>
                   {loading ? (
                     <tr>
-                      <td colSpan={7} className="py-4 text-center text-gray-500 text-xs">
+                      <td colSpan={8} className="py-4 text-center text-gray-500 text-xs">
                         جاري التحميل...
                       </td>
                     </tr>
                   ) : installments.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="py-4 text-center text-gray-500 text-xs">
+                      <td colSpan={8} className="py-4 text-center text-gray-500 text-xs">
                         لا توجد أقساط
                       </td>
                     </tr>
@@ -554,9 +766,30 @@ export function InstallmentDetailsDialog({
                       const remaining = inst.amount_due - inst.amount_paid
                       const timeUntilDue = getTimeUntilDue(inst.due_date)
                       const isOverdue = inst.status === 'overdue' || (inst.status === 'pending' && new Date(inst.due_date) < new Date())
+                      const isPending = inst.status !== 'paid'
+                      const isSelected = selectedIds.has(inst.id)
 
                       return (
                         <tr key={inst.id} className="border-b border-gray-200 hover:bg-gray-50">
+                          <td className="py-2 px-3">
+                            {isPending ? (
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => {
+                                  setSelectedIds((prev) => {
+                                    const next = new Set(prev)
+                                    if (next.has(inst.id)) next.delete(inst.id)
+                                    else next.add(inst.id)
+                                    return next
+                                  })
+                                }}
+                                className="rounded border-gray-300"
+                              />
+                            ) : (
+                              <span className="text-gray-300">—</span>
+                            )}
+                          </td>
                           <td className="py-2 px-3 text-xs">#{inst.installment_number}</td>
                           <td className="py-2 px-3 text-xs">{formatPrice(inst.amount_due)} DT</td>
                           <td className="py-2 px-3 text-xs">{formatPrice(inst.amount_paid)} DT</td>
@@ -603,16 +836,29 @@ export function InstallmentDetailsDialog({
         </div>
       </Dialog>
 
-      {/* Payment Dialog - Simplified */}
-      {selectedInstallment && (
+      {/* Payment Dialog - Single or multiple installments */}
+      {(selectedInstallment || (multiPayInstallments && multiPayInstallments.length > 0)) && (
         <Dialog
-          open={!!selectedInstallment}
-          onClose={() => setSelectedInstallment(null)}
-          title={`دفع القسط #${selectedInstallment.installment_number}`}
+          open={!!selectedInstallment || !!(multiPayInstallments && multiPayInstallments.length > 0)}
+          onClose={() => {
+            setSelectedInstallment(null)
+            setMultiPayInstallments(null)
+            setPayNextCountInput('')
+          }}
+          title={multiPayInstallments && multiPayInstallments.length > 0 ? `دفع ${multiPayInstallments.length} أقساط` : selectedInstallment ? `دفع القسط #${selectedInstallment.installment_number}` : ''}
           size="sm"
           footer={
             <div className="flex justify-end gap-2">
-              <Button variant="secondary" onClick={() => setSelectedInstallment(null)} disabled={paying} size="sm">
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setSelectedInstallment(null)
+                  setMultiPayInstallments(null)
+                  setPayNextCountInput('')
+                }}
+                disabled={paying}
+                size="sm"
+              >
                 إلغاء
               </Button>
               <Button onClick={handlePaymentConfirm} disabled={paying} size="sm">
@@ -622,9 +868,27 @@ export function InstallmentDetailsDialog({
           }
         >
           <div className="space-y-3">
+            {multiPayInstallments && multiPayInstallments.length > 0 && (
+              <div className="bg-amber-50 border border-amber-200 rounded p-3">
+                <p className="text-xs font-semibold text-amber-900 mb-2">سيتم دفع الأقساط التالية عند التأكيد:</p>
+                <ul className="text-xs text-gray-700 space-y-1 max-h-32 overflow-y-auto">
+                  {multiPayInstallments.map((inst) => {
+                    const remaining = inst.amount_due - inst.amount_paid
+                    return (
+                      <li key={inst.id}>
+                        قسط #{inst.installment_number} — {formatPrice(remaining)} DT (المتبقي)
+                      </li>
+                    )
+                  })}
+                </ul>
+                <p className="text-xs font-semibold text-amber-900 mt-2 pt-2 border-t border-amber-200">
+                  الإجمالي: {formatPrice(multiPayInstallments.reduce((s, i) => s + (i.amount_due - i.amount_paid), 0))} DT
+                </p>
+              </div>
+            )}
             <div className="bg-blue-50 border border-blue-200 rounded p-3 text-center">
               <p className="text-sm font-medium text-gray-900 mb-1">
-                سيتم استلام المبلغ:
+                {multiPayInstallments && multiPayInstallments.length > 0 ? 'إجمالي المبلغ المطلوب:' : 'سيتم استلام المبلغ:'}
               </p>
               <p className="text-lg font-bold text-blue-600">
                 {formatPrice(parseFloat(paymentAmount) || 0)} DT
@@ -636,9 +900,50 @@ export function InstallmentDetailsDialog({
                 type="number"
                 min="0"
                 step="0.01"
+                max={multiPayInstallments && multiPayInstallments.length > 0 ? multiPayInstallments.reduce((s, i) => s + (i.amount_due - i.amount_paid), 0) : undefined}
                 value={paymentAmount}
                 onChange={(e) => setPaymentAmount(e.target.value)}
                 placeholder="0.00"
+                size="sm"
+              />
+              {multiPayInstallments && multiPayInstallments.length > 0 && (
+                <p className="text-xs text-gray-500">
+                  لا يمكن تجاوز الإجمالي أعلاه ({formatPrice(multiPayInstallments.reduce((s, i) => s + (i.amount_due - i.amount_paid), 0))} DT).
+                </p>
+              )}
+            </div>
+          </div>
+        </Dialog>
+      )}
+
+      {/* Edit first installment date dialog */}
+      {showEditFirstDateDialog && firstPendingInstallment && (
+        <Dialog
+          open={showEditFirstDateDialog}
+          onClose={() => !savingEditDate && setShowEditFirstDateDialog(false)}
+          title="تعديل جدول الاستحقاق: الأول يحدّث الكل"
+          size="sm"
+          footer={
+            <div className="flex justify-end gap-2">
+              <Button variant="secondary" onClick={() => setShowEditFirstDateDialog(false)} disabled={savingEditDate} size="sm">
+                إلغاء
+              </Button>
+              <Button onClick={handleEditFirstDateConfirm} disabled={savingEditDate || !editFirstDateValue.trim()} size="sm">
+                {savingEditDate ? 'جاري الحفظ...' : 'حفظ وتحديث كل التواريخ'}
+              </Button>
+            </div>
+          }
+        >
+          <div className="space-y-3">
+            <p className="text-xs text-gray-600">
+              حدد تاريخ استحقاق <strong>أول قسط غير مدفوع</strong>. سيتم تحديث هذا التاريخ، ثم <strong>كل</strong> تواريخ الأقساط التالية تلقائياً (كل قسط بعد شهر من السابق).
+            </p>
+            <div className="space-y-1.5">
+              <Label className="text-xs sm:text-sm">تاريخ أول قسط غير مدفوع *</Label>
+              <Input
+                type="date"
+                value={editFirstDateValue}
+                onChange={(e) => setEditFirstDateValue(e.target.value)}
                 size="sm"
               />
             </div>

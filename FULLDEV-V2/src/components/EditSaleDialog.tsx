@@ -10,6 +10,7 @@ import { Alert } from '@/components/ui/alert'
 import { formatPrice } from '@/utils/priceCalculator'
 import { calculateInstallmentWithDeposit } from '@/utils/installmentCalculator'
 import { useLanguage } from '@/i18n/context'
+import { buildSaleQuery, formatSalesWithSellers } from '@/utils/salesQueries'
 
 interface PaymentOffer {
   id: string
@@ -60,7 +61,8 @@ interface EditSaleDialogProps {
   open: boolean
   onClose: () => void
   sale: Sale
-  onSave: () => void
+  /** Called after save. If the dialog fetches the updated sale, it passes it so the parent can update state in place without refetching. */
+  onSave: (updatedSale?: Sale) => void
   isOwner?: boolean
 }
 
@@ -476,7 +478,18 @@ export function EditSaleDialog({ open, onClose, sale, onSave, isOwner = true }: 
         throw new Error(t('editSale.permissionError'))
       }
 
-      onSave()
+      // Fetch full updated sale so parent can update list in place (no full refresh)
+      let updatedSale: Sale | undefined
+      const { data: updatedRow } = await supabase
+        .from('sales')
+        .select(buildSaleQuery())
+        .eq('id', saleId)
+        .single()
+      if (updatedRow) {
+        const [formatted] = await formatSalesWithSellers([updatedRow])
+        if (formatted) updatedSale = formatted as Sale
+      }
+      onSave(updatedSale)
       onClose()
     } catch (e: any) {
       console.error('Error updating sale:', e)
