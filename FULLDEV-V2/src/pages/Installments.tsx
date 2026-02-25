@@ -86,8 +86,9 @@ interface InstallmentPayment {
 }
 
 
-const ITEMS_PER_PAGE = 20
-/** When user is searching, load this many installment sales so search can find matches across all data */
+/** When not searching, paginate by client box: this many boxes per page */
+const GROUPS_PER_PAGE = 15
+/** When loading all sales (search or full list), load up to this many */
 const SEARCH_LOAD_LIMIT = 5000
 /** Debounce search so we don't refetch on every keystroke */
 const SEARCH_DEBOUNCE_MS = 400
@@ -198,6 +199,7 @@ export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
     }
   }, [searchQuery])
 
+  // Load data when search query changes (not when page changes: pagination is over client groups in memory)
   useEffect(() => {
     const isSearchMode = debouncedSearchQuery.length > 0
     if (isSearchMode) {
@@ -206,6 +208,7 @@ export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
     } else {
       loadInstallmentSales(false)
       wasSearchModeRef.current = false
+      setCurrentPage(1) // reset to first page of client boxes when clearing search
     }
 
     const handleSaleUpdated = () => {
@@ -217,7 +220,7 @@ export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
     return () => {
       window.removeEventListener('saleUpdated', handleSaleUpdated)
     }
-  }, [currentPage, debouncedSearchQuery])
+  }, [debouncedSearchQuery])
 
   // Real-time updates for sales
   useSalesRealtime({
@@ -234,8 +237,9 @@ export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
     setError(null)
     try {
       const isSearchMode = forSearch === true
-      const from = isSearchMode ? 0 : (currentPage - 1) * ITEMS_PER_PAGE
-      const to = isSearchMode ? SEARCH_LOAD_LIMIT - 1 : from + ITEMS_PER_PAGE - 1
+      // Always load all installment sales so we can group by person and show one box per client with all pieces
+      const from = 0
+      const to = SEARCH_LOAD_LIMIT - 1
 
       const { data, error: err } = await supabase
         .from('sales')
@@ -246,7 +250,7 @@ export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
         .eq('payment_method', 'installment')
         .order('sale_date', { ascending: false })
         .range(from, to)
-        .limit(isSearchMode ? SEARCH_LOAD_LIMIT : ITEMS_PER_PAGE)
+        .limit(SEARCH_LOAD_LIMIT)
 
       if (err) throw err
 
@@ -301,7 +305,7 @@ export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
         })
       })
 
-      // Merge any duplicate client entries (same client.id) into one box with all offer groups
+      // Merge by client.id so one box per client id
       const mergedByClientId = new Map<string, { client: Sale['client']; offerGroups: Array<{ offer: Sale['payment_offer'] | null; sales: Sale[] }> }>()
       clientGroups.forEach((cg) => {
         const id = cg.client?.id ?? `key-${mergedByClientId.size}`
@@ -314,6 +318,35 @@ export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
       })
       clientGroups = Array.from(mergedByClientId.values())
 
+      // Merge again by same person (name + CIN) so one box per person even if duplicate client records exist
+      const personKey = (cg: { client: Sale['client'] }) =>
+        `${(cg.client?.name ?? '').trim().toLowerCase()}|${(cg.client?.id_number ?? '').trim()}`
+      const mergedByPerson = new Map<string, { client: Sale['client']; offerGroups: Array<{ offer: Sale['payment_offer'] | null; sales: Sale[] }> }>()
+      clientGroups.forEach((cg) => {
+        const key = personKey(cg)
+        if (!key || key === '|') {
+          mergedByPerson.set(`anon-${mergedByPerson.size}`, { client: cg.client ?? undefined, offerGroups: [...cg.offerGroups] })
+          return
+        }
+        if (mergedByPerson.has(key)) {
+          const existing = mergedByPerson.get(key)!
+          cg.offerGroups.forEach((incomingOg) => {
+            const offerId = incomingOg.offer?.id ?? 'no-offer'
+            const found = existing.offerGroups.find(
+              (eg) => (eg.offer?.id ?? 'no-offer') === offerId
+            )
+            if (found) {
+              found.sales.push(...incomingOg.sales)
+            } else {
+              existing.offerGroups.push({ ...incomingOg, sales: [...incomingOg.sales] })
+            }
+          })
+        } else {
+          mergedByPerson.set(key, { client: cg.client ?? undefined, offerGroups: cg.offerGroups.map((og) => ({ ...og, sales: [...og.sales] })) })
+        }
+      })
+      clientGroups = Array.from(mergedByPerson.values())
+
       // Flatten for backward compatibility
       const allSalesGroups: Sale[][] = []
       clientGroups.forEach(clientGroup => {
@@ -325,22 +358,11 @@ export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
       setSales(allSalesGroups.flat())
       setGroupedSales(allSalesGroups)
       
-      // Store client groups for rendering
+      // Store full client groups; pagination by group is applied in groupsToRender
       setClientGroups(clientGroups)
 
-      // Approximate total count
-      const loaded = (data || []).length
-      if (loaded === ITEMS_PER_PAGE) {
-        setTotalCount((currentPage * ITEMS_PER_PAGE) + 1)
-      } else {
-        setTotalCount((currentPage - 1) * ITEMS_PER_PAGE + loaded)
-      }
-      // Exact count in background
-      void Promise.resolve(
-        supabase.from('sales').select('*', { count: 'exact', head: true }).eq('status', 'completed').eq('payment_method', 'installment')
-      ).then((res: { count: number | null }) => {
-        if (res.count != null) setTotalCount(res.count)
-      }).catch(() => {})
+      // Total count = number of client boxes (one per person), not number of sales
+      setTotalCount(clientGroups.length)
     } catch (e: any) {
       setError(e.message || t('installments.loadError'))
     } finally {
@@ -471,31 +493,39 @@ export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
       .filter((group): group is ClientGroup => group !== null)
   }, [clientGroups, searchQuery, searchByPieceOnly])
 
+  // When not searching: show one page of client groups (paginate by box). When searching: show all matching groups.
+  const paginatedClientGroups = useMemo(() => {
+    if (searchQuery.trim()) return filteredClientGroups
+    const start = (currentPage - 1) * GROUPS_PER_PAGE
+    return clientGroups.slice(start, start + GROUPS_PER_PAGE)
+  }, [clientGroups, searchQuery, filteredClientGroups, currentPage])
+
   // Sale IDs currently displayed (for batch loading installments); cap in search to avoid slow loads
   const displayedSaleIds = useMemo(() => {
-    const groups = searchQuery.trim() ? filteredClientGroups : clientGroups
     const ids: string[] = []
-    groups.forEach(cg => cg.offerGroups.forEach(og => og.sales.forEach(s => ids.push(s.id))))
+    paginatedClientGroups.forEach(cg => cg.offerGroups.forEach(og => og.sales.forEach(s => ids.push(s.id))))
     if (searchQuery.trim() && ids.length > SEARCH_DISPLAY_CAP) {
       return ids.slice(0, SEARCH_DISPLAY_CAP)
     }
     return ids
-  }, [clientGroups, searchQuery, filteredClientGroups])
+  }, [paginatedClientGroups, searchQuery])
 
-  // When search is capped, only render groups/sales we loaded installments for
+  // When search is capped, only render groups/sales we loaded installments for; otherwise use paginated groups
   const groupsToRender = useMemo(() => {
-    const groups = searchQuery.trim() ? filteredClientGroups : clientGroups
-    if (!searchQuery.trim() || displayedSaleIds.length < SEARCH_DISPLAY_CAP) return groups
-    const idSet = new Set(displayedSaleIds)
-    return groups
-      .map(cg => ({
-        ...cg,
-        offerGroups: cg.offerGroups
-          .map(og => ({ ...og, sales: og.sales.filter(s => idSet.has(s.id)) }))
-          .filter(og => og.sales.length > 0),
-      }))
-      .filter(cg => cg.offerGroups.length > 0)
-  }, [searchQuery, filteredClientGroups, clientGroups, displayedSaleIds])
+    if (!searchQuery.trim()) return paginatedClientGroups
+    if (displayedSaleIds.length >= SEARCH_DISPLAY_CAP) {
+      const idSet = new Set(displayedSaleIds)
+      return paginatedClientGroups
+        .map(cg => ({
+          ...cg,
+          offerGroups: cg.offerGroups
+            .map(og => ({ ...og, sales: og.sales.filter(s => idSet.has(s.id)) }))
+            .filter(og => og.sales.length > 0),
+        }))
+        .filter(cg => cg.offerGroups.length > 0)
+    }
+    return paginatedClientGroups
+  }, [searchQuery, paginatedClientGroups, displayedSaleIds])
 
   // Batch load installment_payments; run multiple chunks in parallel (faster than strictly sequential)
   const BATCH_SIZE = 100
@@ -546,7 +576,9 @@ export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
     return () => { cancelled = true }
   }, [displayedSaleIds])
 
-  const totalPages = Math.max(1, Math.ceil(totalCount / ITEMS_PER_PAGE))
+  const totalPages = searchQuery.trim()
+    ? 1
+    : Math.max(1, Math.ceil(totalCount / GROUPS_PER_PAGE))
   const hasNextPage = currentPage < totalPages
   const hasPrevPage = currentPage > 1
   function goToPage(page: number) {
@@ -572,8 +604,8 @@ export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
         {totalCount > 0 && !searchQuery && (
           <span className="text-xs sm:text-sm text-gray-600">
             {t('installments.showingRange')
-              .replace('{{from}}', String(sales.length > 0 ? (currentPage - 1) * ITEMS_PER_PAGE + 1 : 0))
-              .replace('{{to}}', String(Math.min(currentPage * ITEMS_PER_PAGE, totalCount)))
+              .replace('{{from}}', String(totalCount > 0 ? (currentPage - 1) * GROUPS_PER_PAGE + 1 : 0))
+              .replace('{{to}}', String(Math.min(currentPage * GROUPS_PER_PAGE, totalCount)))
               .replace('{{total}}', String(totalCount))}
           </span>
         )}
