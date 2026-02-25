@@ -7,6 +7,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { Dialog } from '@/components/ui/dialog'
+import { Label } from '@/components/ui/label'
 import { formatPrice } from '@/utils/priceCalculator'
 import { getPaymentTypeLabel } from '@/utils/paymentTerms'
 import { calculateInstallmentWithDeposit } from '@/utils/installmentCalculator'
@@ -86,6 +88,9 @@ export function SalesRecordsPage() {
   const [processing, setProcessing] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
+  const [searchByPieceOnly, setSearchByPieceOnly] = useState(false)
+  const [showPieceSearchDialog, setShowPieceSearchDialog] = useState(false)
+  const [pieceNumberSearchValue, setPieceNumberSearchValue] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [paymentMethodFilter, setPaymentMethodFilter] = useState<string>('all')
   const [batchFilter, setBatchFilter] = useState<string>('all')
@@ -226,8 +231,10 @@ export function SalesRecordsPage() {
   // Calculate total count for pagination
   const totalFilteredCount = useMemo(() => {
     if (searchQuery.trim()) {
-      // When searching, count filtered results
       const query = searchQuery.trim().toLowerCase()
+      if (searchByPieceOnly) {
+        return sales.filter(sale => (sale.piece?.piece_number?.toLowerCase() || '').includes(query)).length
+      }
       return sales.filter(sale => {
         const clientName = sale.client?.name?.toLowerCase() || ''
         const clientCIN = sale.client?.id_number?.toLowerCase() || ''
@@ -237,19 +244,13 @@ export function SalesRecordsPage() {
         const confirmedByName = sale.confirmedBy?.name?.toLowerCase() || ''
         const saleId = sale.id?.toLowerCase() || ''
         const notes = sale.notes?.toLowerCase() || ''
-
-        return clientName.includes(query) || 
-               clientCIN.includes(query) || 
-               pieceNumber.includes(query) ||
-               batchName.includes(query) ||
-               sellerName.includes(query) ||
-               confirmedByName.includes(query) ||
-               saleId.includes(query) ||
-               notes.includes(query)
+        return clientName.includes(query) || clientCIN.includes(query) || pieceNumber.includes(query) ||
+          batchName.includes(query) || sellerName.includes(query) || confirmedByName.includes(query) ||
+          saleId.includes(query) || notes.includes(query)
       }).length
     }
     return totalCount
-  }, [sales, searchQuery, totalCount])
+  }, [sales, searchQuery, searchByPieceOnly, totalCount])
 
   const totalPages = Math.max(1, Math.ceil(totalFilteredCount / itemsPerPage))
   const hasNextPage = currentPage < totalPages
@@ -270,36 +271,34 @@ export function SalesRecordsPage() {
   const filteredSales = useMemo(() => {
     let filtered = sales
 
-    // Search filter - comprehensive search across multiple fields
+    // Search filter - by piece number only, or comprehensive
     if (searchQuery.trim()) {
       const query = searchQuery.trim().toLowerCase()
-      filtered = filtered.filter(sale => {
-        // Client name
-        const clientName = sale.client?.name?.toLowerCase() || ''
-        // CIN (ID number) - case-insensitive
-        const clientCIN = sale.client?.id_number?.toLowerCase() || ''
-        // Piece number
-        const pieceNumber = sale.piece?.piece_number?.toLowerCase() || ''
-        // Batch name
-        const batchName = sale.batch?.name?.toLowerCase() || ''
-        // Seller name
-        const sellerName = sale.seller?.name?.toLowerCase() || ''
-        // ConfirmedBy name
-        const confirmedByName = sale.confirmedBy?.name?.toLowerCase() || ''
-        // Sale ID (partial match)
-        const saleId = sale.id?.toLowerCase() || ''
-        // Notes
-        const notes = sale.notes?.toLowerCase() || ''
-
-        return clientName.includes(query) || 
-               clientCIN.includes(query) || 
-               pieceNumber.includes(query) ||
-               batchName.includes(query) ||
-               sellerName.includes(query) ||
-               confirmedByName.includes(query) ||
-               saleId.includes(query) ||
-               notes.includes(query)
-      })
+      if (searchByPieceOnly) {
+        filtered = filtered.filter(sale => {
+          const pieceNumber = sale.piece?.piece_number?.toLowerCase() || ''
+          return pieceNumber.includes(query)
+        })
+      } else {
+        filtered = filtered.filter(sale => {
+          const clientName = sale.client?.name?.toLowerCase() || ''
+          const clientCIN = sale.client?.id_number?.toLowerCase() || ''
+          const pieceNumber = sale.piece?.piece_number?.toLowerCase() || ''
+          const batchName = sale.batch?.name?.toLowerCase() || ''
+          const sellerName = sale.seller?.name?.toLowerCase() || ''
+          const confirmedByName = sale.confirmedBy?.name?.toLowerCase() || ''
+          const saleId = sale.id?.toLowerCase() || ''
+          const notes = sale.notes?.toLowerCase() || ''
+          return clientName.includes(query) ||
+                 clientCIN.includes(query) ||
+                 pieceNumber.includes(query) ||
+                 batchName.includes(query) ||
+                 sellerName.includes(query) ||
+                 confirmedByName.includes(query) ||
+                 saleId.includes(query) ||
+                 notes.includes(query)
+        })
+      }
     }
 
     // Status filter (already applied server-side, but keep for consistency)
@@ -325,7 +324,7 @@ export function SalesRecordsPage() {
     }
 
     return filtered
-  }, [sales, searchQuery, statusFilter, paymentMethodFilter, batchFilter, currentPage])
+  }, [sales, searchQuery, searchByPieceOnly, statusFilter, paymentMethodFilter, batchFilter, currentPage])
 
   async function getTotalPaidAmount(sale: Sale): Promise<number> {
     let totalPaid = sale.deposit_amount || 0
@@ -647,14 +646,33 @@ export function SalesRecordsPage() {
       {/* Filters - Compact */}
       <div className="bg-white border border-gray-200 rounded-lg p-2 sm:p-3 space-y-2">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
-          <Input
-            type="text"
-            placeholder={`🔍 ${t('salesRecords.searchPlaceholder')}`}
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            size="sm"
-            className="text-xs sm:text-sm"
-          />
+          <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+            <div className="flex-1 relative">
+              <Input
+                type="text"
+                placeholder={searchByPieceOnly ? `🔍 ${t('salesRecords.pieceNumberPlaceholder')}` : `🔍 ${t('salesRecords.searchPlaceholder')}`}
+                value={searchQuery}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value)
+                  setSearchByPieceOnly(false)
+                }}
+                size="sm"
+                className="text-xs sm:text-sm"
+              />
+            </div>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              className="w-full sm:w-auto text-xs whitespace-nowrap"
+              onClick={() => {
+                setPieceNumberSearchValue(searchQuery.trim())
+                setShowPieceSearchDialog(true)
+              }}
+            >
+              🔍 {t('salesRecords.searchByPieceNumber')}
+            </Button>
+          </div>
           <Select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
@@ -696,12 +714,13 @@ export function SalesRecordsPage() {
           ) : (
             <span>{replaceVars(t('salesRecords.showingRange'), { from: sales.length > 0 ? (currentPage - 1) * itemsPerPage + 1 : 0, to: Math.min(currentPage * itemsPerPage, totalCount), total: totalCount })}</span>
           )}
-          {(searchQuery || statusFilter !== 'all' || paymentMethodFilter !== 'all' || batchFilter !== 'all') && (
+          {(searchQuery || statusFilter !== 'all' || paymentMethodFilter !== 'all' || batchFilter !== 'all' || searchByPieceOnly) && (
             <Button
               variant="secondary"
               size="sm"
               onClick={() => {
                 setSearchQuery('')
+                setSearchByPieceOnly(false)
                 setStatusFilter('all')
                 setPaymentMethodFilter('all')
                 setBatchFilter('all')
@@ -713,6 +732,54 @@ export function SalesRecordsPage() {
           )}
         </div>
       </div>
+
+      {/* Search by piece number dialog */}
+      <Dialog
+        open={showPieceSearchDialog}
+        onClose={() => setShowPieceSearchDialog(false)}
+        title={t('salesRecords.searchByPieceNumber')}
+        size="sm"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setShowPieceSearchDialog(false)} size="sm">
+              {t('common.cancel')}
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => {
+                const q = pieceNumberSearchValue.trim()
+                setSearchQuery(q)
+                setSearchByPieceOnly(true)
+                setShowPieceSearchDialog(false)
+                setPieceNumberSearchValue('')
+              }}
+            >
+              {t('installments.search')}
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-2">
+          <Label className="text-xs sm:text-sm">{t('installments.pieceNumber')}</Label>
+          <Input
+            type="text"
+            value={pieceNumberSearchValue}
+            onChange={(e) => setPieceNumberSearchValue(e.target.value)}
+            placeholder={t('salesRecords.pieceNumberPlaceholder')}
+            size="sm"
+            className="text-xs sm:text-sm"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                const q = pieceNumberSearchValue.trim()
+                setSearchQuery(q)
+                setSearchByPieceOnly(true)
+                setShowPieceSearchDialog(false)
+                setPieceNumberSearchValue('')
+              }
+            }}
+          />
+        </div>
+      </Dialog>
 
       {loading ? (
         <div className="flex items-center justify-center py-8 min-h-[120px]">

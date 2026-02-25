@@ -20,6 +20,17 @@ function addMonth(date: Date): Date {
   return next
 }
 
+/** Add n months to a date (n can be negative to go back). Same day of month, clamp to last day if needed. */
+function addMonths(date: Date, n: number): Date {
+  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0)
+  if (n === 0) return d
+  d.setMonth(d.getMonth() + n)
+  if (d.getDate() !== date.getDate()) {
+    d.setDate(new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate())
+  }
+  return d
+}
+
 /** Format date as YYYY-MM-DD in local time (avoid UTC shift from toISOString) */
 function toLocalDateString(d: Date): string {
   const y = d.getFullYear()
@@ -204,6 +215,12 @@ export function InstallmentDetailsDialog({
     return pending[0] ?? null
   }, [installments])
 
+  /** First installment in the table (row #1) — used as anchor for "edit first date" */
+  const firstInstallment = useMemo(() => {
+    const all = [...installments].sort((a, b) => a.installment_number - b.installment_number)
+    return all[0] ?? null
+  }, [installments])
+
   /** Pending installments in order (for "pay next N" and max count) */
   const pendingOrdered = useMemo(
     () => installments.filter((i) => i.status !== 'paid').sort((a, b) => a.installment_number - b.installment_number),
@@ -212,26 +229,31 @@ export function InstallmentDetailsDialog({
   const pendingCount = pendingOrdered.length
 
   async function handleEditFirstDateConfirm() {
-    if (!firstPendingInstallment || !editFirstDateValue.trim()) return
+    if (!firstInstallment || !editFirstDateValue.trim()) return
     setSavingEditDate(true)
     try {
       const newFirstDate = new Date(editFirstDateValue)
-      const pendingOrdered = installments
-        .filter((i) => i.status !== 'paid')
-        .sort((a, b) => a.installment_number - b.installment_number)
+      const y = newFirstDate.getFullYear()
+      const m = newFirstDate.getMonth()
+      const day = newFirstDate.getDate()
+      const baseDate = new Date(y, m, day, 0, 0, 0, 0)
+      // First date = due_date of row #1 (first installment). Then #2 = +1 month, #3 = +2 months, etc. Paid rows keep paid, we only update due_date.
+      const allOrdered = [...installments].sort((a, b) => a.installment_number - b.installment_number)
       const updates: { id: string; due_date: string }[] = []
-      let currentDate = new Date(newFirstDate.getFullYear(), newFirstDate.getMonth(), newFirstDate.getDate(), 0, 0, 0, 0)
-      for (let i = 0; i < pendingOrdered.length; i++) {
-        updates.push({ id: pendingOrdered[i].id, due_date: toLocalDateString(currentDate) })
-        if (i < pendingOrdered.length - 1) currentDate = addMonth(currentDate)
+      for (let i = 0; i < allOrdered.length; i++) {
+        const newDue = addMonths(baseDate, i)
+        updates.push({ id: allOrdered[i].id, due_date: toLocalDateString(newDue) })
       }
       for (const u of updates) {
-        const { error } = await supabase.from('installment_payments').update({ due_date: u.due_date, updated_at: new Date().toISOString() }).eq('id', u.id)
+        const { error } = await supabase
+          .from('installment_payments')
+          .update({ due_date: u.due_date, updated_at: new Date().toISOString() })
+          .eq('id', u.id)
         if (error) throw error
       }
       setShowEditFirstDateDialog(false)
       setEditFirstDateValue('')
-      setSuccessMessage('تم تحديث تاريخ أول قسط وجميع تواريخ الأقساط التالية (شهرياً).')
+      setSuccessMessage('تم تحديث تواريخ جميع الأقساط (المدفوعة والمعلقة) ليتوافق الجدول مع التاريخ الجديد.')
       setShowSuccessDialog(true)
       await loadInstallments()
       onPaymentSuccess()
@@ -569,14 +591,14 @@ export function InstallmentDetailsDialog({
             <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
               <h3 className="font-semibold text-gray-900 text-xs sm:text-sm">جدول الأقساط</h3>
               <div className="flex flex-wrap items-center gap-2">
-                {firstPendingInstallment && (
+                {firstInstallment && (
                   <Button
                     type="button"
                     variant="secondary"
                     size="sm"
                     className="text-xs"
                     onClick={() => {
-                      setEditFirstDateValue(firstPendingInstallment.due_date)
+                      setEditFirstDateValue(firstInstallment.due_date)
                       setShowEditFirstDateDialog(true)
                     }}
                   >
@@ -917,7 +939,7 @@ export function InstallmentDetailsDialog({
       )}
 
       {/* Edit first installment date dialog */}
-      {showEditFirstDateDialog && firstPendingInstallment && (
+      {showEditFirstDateDialog && firstInstallment && (
         <Dialog
           open={showEditFirstDateDialog}
           onClose={() => !savingEditDate && setShowEditFirstDateDialog(false)}
@@ -936,10 +958,10 @@ export function InstallmentDetailsDialog({
         >
           <div className="space-y-3">
             <p className="text-xs text-gray-600">
-              حدد تاريخ استحقاق <strong>أول قسط غير مدفوع</strong>. سيتم تحديث هذا التاريخ، ثم <strong>كل</strong> تواريخ الأقساط التالية تلقائياً (كل قسط بعد شهر من السابق).
+              حدد تاريخ استحقاق <strong>أول قسط في الجدول (رقم 1)</strong>. سيتم تحديث هذا التاريخ، ثم <strong>كل</strong> تواريخ الأقساط التالية تلقائياً (كل قسط بعد شهر من السابق). المدفوع يبقى مدفوعاً، والجدول يتوافق مع التاريخ الجديد.
             </p>
             <div className="space-y-1.5">
-              <Label className="text-xs sm:text-sm">تاريخ أول قسط غير مدفوع *</Label>
+              <Label className="text-xs sm:text-sm">تاريخ أول قسط في الجدول *</Label>
               <Input
                 type="date"
                 value={editFirstDateValue}
