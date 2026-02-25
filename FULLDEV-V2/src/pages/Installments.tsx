@@ -749,9 +749,9 @@ export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
                               </Badge>
                             </div>
                             <div className="text-xs sm:text-sm text-gray-600 space-y-0.5">
-                              <div>💰 المبلغ الشهري: {offerGroup.offer.monthly_amount?.toLocaleString() || '-'} DT</div>
+                              <div>💰 {t('installments.monthlyAmountLabel')}: {offerGroup.offer.monthly_amount?.toLocaleString() || '-'} DT</div>
                               {offerGroup.offer.months && (
-                                <div>📅 عدد الأشهر: {offerGroup.offer.months}</div>
+                                <div>📅 {t('installments.monthsCountLabel')}: {offerGroup.offer.months}</div>
                               )}
                             </div>
                           </div>
@@ -771,20 +771,21 @@ export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
                           ))}
                         </div>
 
-                        {/* Desktop table */}
-                        <div className="hidden lg:block overflow-x-auto">
-                          <table className="w-full text-sm border-collapse">
+                        {/* Desktop table: 10 columns aligned with headers */}
+                        <div className="hidden lg:block overflow-x-auto -mx-1">
+                          <table className="w-full min-w-[900px] text-sm border-collapse table-fixed">
                             <thead>
-                              <tr className="border-b-2 border-gray-300 bg-gray-50">
-                                <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.dealColumn')}</th>
-                                <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.piecesColumn')}</th>
-                                <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.installmentsColumn')}</th>
-                                <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.paidColumn')}</th>
-                                <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.remainingColumn')}</th>
-                                <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.overdueColumn')}</th>
-                                <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.dueDateColumn')}</th>
-                                <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.statusColumn')}</th>
-                                <th className="text-right py-2 px-3 font-semibold text-xs">{t('installments.actionColumn')}</th>
+                              <tr className="border-b-2 border-gray-300 bg-gray-100">
+                                <th className="text-right py-2.5 px-3 font-semibold text-xs w-[140px]">{t('installments.dealColumn')}</th>
+                                <th className="text-right py-2.5 px-3 font-semibold text-xs w-[90px]">{t('installments.saleDateColumn')}</th>
+                                <th className="text-right py-2.5 px-3 font-semibold text-xs w-[70px]">{t('installments.piecesColumn')}</th>
+                                <th className="text-right py-2.5 px-3 font-semibold text-xs w-[75px]">{t('installments.installmentsColumn')}</th>
+                                <th className="text-right py-2.5 px-3 font-semibold text-xs w-[95px]">{t('installments.paidColumn')}</th>
+                                <th className="text-right py-2.5 px-3 font-semibold text-xs w-[95px]">{t('installments.remainingColumn')}</th>
+                                <th className="text-right py-2.5 px-3 font-semibold text-xs w-[85px]">{t('installments.overdueColumn')}</th>
+                                <th className="text-right py-2.5 px-3 font-semibold text-xs w-[110px]">{t('installments.dueDateColumn')}</th>
+                                <th className="text-right py-2.5 px-3 font-semibold text-xs w-[100px]">{t('installments.statusColumn')}</th>
+                                <th className="text-right py-2.5 px-3 font-semibold text-xs w-[100px]">{t('installments.actionColumn')}</th>
                               </tr>
                             </thead>
                             <tbody>
@@ -865,7 +866,7 @@ function SaleRow({ sale, onClick, installments = [], loadingInstallments = false
   if (loadingInstallments || !stats) {
     return (
       <tr>
-        <td colSpan={10} className="py-2 sm:py-3 lg:py-4 text-center text-xs sm:text-sm text-gray-500">
+        <td colSpan={10} className="py-3 px-3 text-center text-xs text-gray-500">
           {t('installments.loading')}
         </td>
       </tr>
@@ -965,71 +966,69 @@ function SaleRow({ sale, onClick, installments = [], loadingInstallments = false
     onClick()
   }
 
-            return (
-    <tr 
-      className="border-b border-gray-200 hover:bg-gray-50 cursor-pointer" 
+  return (
+    <tr
+      className="border-b border-gray-200 hover:bg-gray-50 cursor-pointer align-top"
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
       onClick={handleClick}
-                  >
-      <td className="py-2 px-3">
-                    <div>
-          <div className="font-medium text-xs">{sale.client?.name || '-'}</div>
-          <div className="text-xs text-gray-500">{sale.client?.id_number || ''}</div>
-                      </div>
+    >
+      <td className="py-2.5 px-3 text-right text-xs">
+        <div className="font-medium">{sale.client?.name || '-'}</div>
+        <div className="text-gray-500">{sale.client?.id_number || ''}</div>
       </td>
-      <td className="py-2 px-3 text-xs">
+      <td className="py-2.5 px-3 text-right text-xs whitespace-nowrap">
         {formatDateShort(sale.sale_date)}
       </td>
-      <td className="py-2 px-3 text-xs">
+      <td className="py-2.5 px-3 text-right text-xs">
         {sale.piece?.piece_number || '-'}
       </td>
-      <td className="py-2 px-3 text-xs">
+      <td className="py-2.5 px-3 text-right text-xs">
         {stats.paidCount}/{stats.totalCount}
       </td>
-      <td className="py-2 px-3 font-semibold text-xs">
+      <td className="py-2.5 px-3 text-right font-semibold text-xs whitespace-nowrap">
         {formatPrice(stats.totalPaid)} DT
       </td>
-      <td className="py-2 px-3 font-semibold text-gray-700 text-xs">
+      <td className="py-2.5 px-3 text-right font-semibold text-gray-700 text-xs whitespace-nowrap">
         {formatPrice(stats.remaining)} DT
       </td>
-      <td className="py-2 px-3 text-xs">
+      <td className="py-2.5 px-3 text-right text-xs whitespace-nowrap">
         {stats.overdueAmount > 0 ? (
           <span className="text-red-600 font-semibold">{formatPrice(stats.overdueAmount)} DT</span>
         ) : (
           '-'
         )}
       </td>
-      <td className="py-2 px-3 text-xs">
+      <td className="py-2.5 px-3 text-right text-xs">
         {stats.nextDueDate ? (
-                          <div>
+          <div>
             <div>{formatDateShort(stats.nextDueDate)}</div>
-            <div className="text-xs text-gray-500">{formatNextDueDate()}</div>
-                          </div>
+            <div className="text-gray-500">{formatNextDueDate()}</div>
+          </div>
         ) : (
           '-'
-                        )}
+        )}
       </td>
-      <td className="py-2 px-3">
+      <td className="py-2.5 px-3 text-right">
         {getStatusBadge()}
       </td>
-      <td className="py-2 px-3">
-                      <Button
-          size="sm" 
-          variant="secondary" 
-                        onClick={(e) => {
+      <td className="py-2.5 px-3 text-right">
+        <Button
+          size="sm"
+          variant="secondary"
+          onClick={(e) => {
             e.preventDefault()
-                          e.stopPropagation()
+            e.stopPropagation()
             onClick()
-                        }}
+          }}
           className="text-xs py-1 px-2"
-                      >
+        >
           {t('installments.viewDetails')}
-                      </Button>
+        </Button>
       </td>
     </tr>
-            )
+  )
 }
 
 // Mobile-optimized card component; stats from batched installments (no per-card fetch)

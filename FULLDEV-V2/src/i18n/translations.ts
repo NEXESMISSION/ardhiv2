@@ -516,6 +516,7 @@ const ar: Record<string, unknown> = {
     showingRange: 'عرض {{from}} - {{to}} من {{total}}',
     pageTitle: 'الأقساط',
     dealColumn: 'الصفقة',
+    saleDateColumn: 'تاريخ البيع',
     installmentsColumn: 'الأقساط',
     paidColumn: 'المدفوع',
     remainingColumn: 'المتبقي',
@@ -547,6 +548,8 @@ const ar: Record<string, unknown> = {
     showingFirstResults: 'عرض أول {{cap}} نتيجة',
     noSearchResults: 'لا توجد نتائج للبحث',
     reservedPiecesHint: 'القطع المحجوزة (غير المؤكدة) لا تظهر هنا؛ اعرضها من صفحة الأرض لمعرفة المشتري وطريقة الدفع.',
+    monthlyAmountLabel: 'المبلغ الشهري',
+    monthsCountLabel: 'عدد الأشهر',
   },
   finance: {
     loadingData: 'جاري تحميل البيانات المالية...',
@@ -1433,6 +1436,7 @@ const fr: Record<string, unknown> = {
     showingRange: '{{from}} - {{to}} sur {{total}}',
     pageTitle: 'Versements',
     dealColumn: 'Vente',
+    saleDateColumn: 'Date de vente',
     installmentsColumn: 'Versements',
     paidColumn: 'Payé',
     remainingColumn: 'Restant',
@@ -1464,6 +1468,8 @@ const fr: Record<string, unknown> = {
     showingFirstResults: 'Affichage des {{cap}} premiers résultats',
     noSearchResults: 'Aucun résultat pour la recherche',
     reservedPiecesHint: 'Les parcelles réservées (non confirmées) n\'apparaissent pas ici ; consultez la page Terrains pour voir l\'acheteur et le mode de paiement.',
+    monthlyAmountLabel: 'Montant mensuel',
+    monthsCountLabel: 'Nombre de mois',
   },
   finance: {
     loadingData: 'Chargement des données financières...',

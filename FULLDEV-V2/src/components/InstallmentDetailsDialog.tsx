@@ -8,6 +8,7 @@ import { Badge } from './ui/badge'
 import { Card } from './ui/card'
 import { Alert } from './ui/alert'
 import { NotificationDialog } from './ui/notification-dialog'
+import { ConfirmDialog } from './ui/confirm-dialog'
 import { formatPrice, formatDateShort } from '@/utils/priceCalculator'
 import { calculateInstallmentWithDeposit } from '@/utils/installmentCalculator'
 
@@ -141,6 +142,10 @@ export function InstallmentDetailsDialog({
   const [multiPayInstallments, setMultiPayInstallments] = useState<InstallmentPayment[] | null>(null)
   /** Number of next installments to pay (user types e.g. 6 → pay next 6 in order) */
   const [payNextCountInput, setPayNextCountInput] = useState('')
+  const [resetTableConfirmOpen, setResetTableConfirmOpen] = useState(false)
+  const [resettingTable, setResettingTable] = useState(false)
+  const [cancelPaymentInst, setCancelPaymentInst] = useState<InstallmentPayment | null>(null)
+  const [cancellingPayment, setCancellingPayment] = useState(false)
 
   useEffect(() => {
     if (open && sale) {
@@ -307,6 +312,61 @@ export function InstallmentDetailsDialog({
     }
   }, [sale, installments, loadedPaymentOffer])
 
+  /** Reset all payments for this sale: set every row to unpaid (amount_paid=0, paid_date=null, status=pending) */
+  async function handleResetAllPayments() {
+    setResettingTable(true)
+    try {
+      for (const inst of installments) {
+        const { error } = await supabase
+          .from('installment_payments')
+          .update({
+            amount_paid: 0,
+            paid_date: null,
+            status: 'pending',
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', inst.id)
+        if (error) throw error
+      }
+      setResetTableConfirmOpen(false)
+      setSuccessMessage('تم إعادة تعيين جدول الأقساط. جميع الأقساط أصبحت غير مدفوعة.')
+      setShowSuccessDialog(true)
+      await loadInstallments()
+      onPaymentSuccess()
+    } catch (e: any) {
+      setErrorMessage(e.message || 'فشل إعادة تعيين الجدول')
+      setShowErrorDialog(true)
+    } finally {
+      setResettingTable(false)
+    }
+  }
+
+  /** Cancel a single payment: set this row to unpaid */
+  async function handleCancelPayment(inst: InstallmentPayment) {
+    setCancellingPayment(true)
+    try {
+      const { error } = await supabase
+        .from('installment_payments')
+        .update({
+          amount_paid: 0,
+          paid_date: null,
+          status: 'pending',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', inst.id)
+      if (error) throw error
+      setCancelPaymentInst(null)
+      setSuccessMessage(`تم إلغاء دفع القسط #${inst.installment_number}.`)
+      setShowSuccessDialog(true)
+      await loadInstallments()
+      onPaymentSuccess()
+    } catch (e: any) {
+      setErrorMessage(e.message || 'فشل إلغاء الدفع')
+      setShowErrorDialog(true)
+    } finally {
+      setCancellingPayment(false)
+    }
+  }
 
   function getTimeUntilDue(dueDate: string) {
     const due = new Date(dueDate)
@@ -605,6 +665,17 @@ export function InstallmentDetailsDialog({
                     📅 تعديل جدول الاستحقاق (الأول ← والباقي تلقائياً)
                   </Button>
                 )}
+                {installments.length > 0 && (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    className="text-xs text-amber-700 border-amber-300 hover:bg-amber-50"
+                    onClick={() => setResetTableConfirmOpen(true)}
+                  >
+                    🧹 تنظيف جدول الأقساط (إعادة تعيين كل المدفوعات)
+                  </Button>
+                )}
                 {pendingCount > 0 && (
                   <>
                     <div className="flex flex-wrap items-center gap-2">
@@ -738,7 +809,16 @@ export function InstallmentDetailsDialog({
                           </div>
                         </div>
 
-                        {inst.status !== 'paid' && (
+                        {inst.status === 'paid' ? (
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => setCancelPaymentInst(inst)}
+                            className="w-full text-xs text-amber-700 border-amber-300 hover:bg-amber-50"
+                          >
+                            إلغاء الدفع
+                          </Button>
+                        ) : (
                           <Button
                             size="sm"
                             variant="primary"
@@ -835,7 +915,14 @@ export function InstallmentDetailsDialog({
                           </td>
                           <td className="py-2 px-3">
                             {inst.status === 'paid' ? (
-                              <span className="text-gray-400 text-xs">-</span>
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                onClick={() => setCancelPaymentInst(inst)}
+                                className="text-xs text-amber-700 border-amber-300 hover:bg-amber-50"
+                              >
+                                إلغاء الدفع
+                              </Button>
                             ) : (
                               <Button
                                 size="sm"
@@ -972,6 +1059,32 @@ export function InstallmentDetailsDialog({
           </div>
         </Dialog>
       )}
+
+      {/* Reset table: clear all payments for this sale */}
+      <ConfirmDialog
+        open={resetTableConfirmOpen}
+        onClose={() => !resettingTable && setResetTableConfirmOpen(false)}
+        onConfirm={handleResetAllPayments}
+        title="تنظيف جدول الأقساط"
+        description="سيتم اعتبار جميع الأقساط غير مدفوعة (المبلغ المدفوع = 0). لا يمكن التراجع. هل تتابع؟"
+        confirmText="نعم، إعادة تعيين الكل"
+        cancelText="إلغاء"
+        variant="danger"
+        loading={resettingTable}
+      />
+
+      {/* Cancel single payment */}
+      <ConfirmDialog
+        open={!!cancelPaymentInst}
+        onClose={() => !cancellingPayment && setCancelPaymentInst(null)}
+        onConfirm={() => cancelPaymentInst && handleCancelPayment(cancelPaymentInst)}
+        title="إلغاء دفع القسط"
+        description={cancelPaymentInst ? `سيتم إلغاء دفع القسط #${cancelPaymentInst.installment_number} (اعتباره غير مدفوع). هل تتابع؟` : ''}
+        confirmText="نعم، إلغاء الدفع"
+        cancelText="تراجع"
+        variant="danger"
+        loading={cancellingPayment}
+      />
 
       {/* Success Dialog */}
       <NotificationDialog
