@@ -345,10 +345,7 @@ export function ConfirmSaleDialog({ open, onClose, sale, onConfirm }: ConfirmSal
         setError(t('confirmation.dialogErrorAmountRequired'))
         return
       }
-      if (amount > calculations.confirmationAmount) {
-        setError(`المبلغ المدخل يتجاوز المتبقي (${formatPrice(calculations.confirmationAmount)} DT)`)
-        return
-      }
+      // Overpayment allowed: do not reject when amount > confirmationAmount
     }
 
     // Reset company fee when opening final confirm dialog to ensure it starts fresh

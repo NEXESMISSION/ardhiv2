@@ -341,7 +341,7 @@ export function InstallmentDetailsDialog({
     }
   }
 
-  /** Cancel a single payment: set this row to unpaid */
+  /** Cancel a single payment: set this row to unpaid. If the next installment is partially paid (overpayment from this one), zero it too. */
   async function handleCancelPayment(inst: InstallmentPayment) {
     setCancellingPayment(true)
     try {
@@ -355,8 +355,30 @@ export function InstallmentDetailsDialog({
         })
         .eq('id', inst.id)
       if (error) throw error
+
+      // If the next installment (by number) is partially paid, zero it too so overpayment from this row is reverted
+      const nextInst = installments.find(
+        (i) => i.installment_number === inst.installment_number + 1 && i.amount_paid > 0 && i.amount_paid < i.amount_due
+      )
+      if (nextInst) {
+        const { error: err2 } = await supabase
+          .from('installment_payments')
+          .update({
+            amount_paid: 0,
+            paid_date: null,
+            status: 'pending',
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', nextInst.id)
+        if (err2) throw err2
+      }
+
       setCancelPaymentInst(null)
-      setSuccessMessage(`تم إلغاء دفع القسط #${inst.installment_number}.`)
+      setSuccessMessage(
+        nextInst
+          ? `تم إلغاء دفع القسط #${inst.installment_number} والقسم المدفوع جزئياً من القسط #${nextInst.installment_number}.`
+          : `تم إلغاء دفع القسط #${inst.installment_number}.`
+      )
       setShowSuccessDialog(true)
       await loadInstallments()
       onPaymentSuccess()
@@ -396,24 +418,24 @@ export function InstallmentDetailsDialog({
       return
     }
 
+    const allOrdered = [...installments].sort((a, b) => a.installment_number - b.installment_number)
+    const paidToday = new Date().toISOString().split('T')[0]
+
     if (multiPayInstallments && multiPayInstallments.length > 0) {
-      const totalDue = multiPayInstallments.reduce((sum, i) => sum + (i.amount_due - i.amount_paid), 0)
-      if (amount > totalDue) {
-        setErrorMessage(`المبلغ المدخل يتجاوز إجمالي المتبقي (${formatPrice(totalDue)} DT)`)
-        setShowErrorDialog(true)
-        return
-      }
       setPaying(true)
       try {
         const sorted = [...multiPayInstallments].sort((a, b) => a.installment_number - b.installment_number)
-        let remaining = amount
-        const paidToday = new Date().toISOString().split('T')[0]
-        for (const inst of sorted) {
-          if (remaining <= 0) break
+        const totalDueSelected = sorted.reduce((s, i) => s + (i.amount_due - i.amount_paid), 0)
+        const startIdx = allOrdered.findIndex((i) => i.id === sorted[0].id)
+        if (startIdx < 0) throw new Error('Installment not found')
+        let toApply = amount
+        let totalApplied = 0
+        for (let i = startIdx; i < allOrdered.length && toApply > 0; i++) {
+          const inst = allOrdered[i]
           const need = inst.amount_due - inst.amount_paid
-          const pay = Math.min(remaining, need)
+          if (need <= 0) continue
+          const pay = Math.min(toApply, need)
           const newAmountPaid = inst.amount_paid + pay
-          remaining -= pay
           const newStatus = newAmountPaid >= inst.amount_due ? 'paid' : 'pending'
           const updateData: any = {
             amount_paid: newAmountPaid,
@@ -423,8 +445,16 @@ export function InstallmentDetailsDialog({
           if (newStatus === 'paid') updateData.paid_date = paidToday
           const { error } = await supabase.from('installment_payments').update(updateData).eq('id', inst.id)
           if (error) throw error
+          toApply -= pay
+          totalApplied += pay
         }
-        setSuccessMessage(`تم دفع ${formatPrice(amount)} DT بنجاح على ${sorted.length} قسط/أقساط!`)
+        const overApplied = amount - totalApplied
+        const hadExcessApplied = amount > totalDueSelected && overApplied <= 0
+        const msg =
+          overApplied > 0
+            ? `تم استلام ${formatPrice(amount)} DT وتطبيق ${formatPrice(totalApplied)} DT على الأقساط. المبلغ الزائد ${formatPrice(overApplied)} DT لم يُطبَّق (لا أقساط مستقبلية).`
+            : `تم دفع ${formatPrice(amount)} DT بنجاح.${hadExcessApplied ? ' تم تطبيق الزائد على الأقساط التالية.' : ''}`
+        setSuccessMessage(msg)
         setShowSuccessDialog(true)
         setMultiPayInstallments(null)
         setSelectedIds(new Set())
@@ -433,7 +463,8 @@ export function InstallmentDetailsDialog({
         await loadInstallments()
         onPaymentSuccess()
       } catch (e: any) {
-        setErrorMessage(e.message || 'فشل تسجيل الدفع')
+        const msg = e?.message ?? 'فشل تسجيل الدفع'
+        setErrorMessage(msg.includes('يتجاوز المتبقي') ? 'فشل تسجيل الدفع. تأكد من الاتصال ثم أعد المحاولة.' : msg)
         setShowErrorDialog(true)
       } finally {
         setPaying(false)
@@ -443,43 +474,49 @@ export function InstallmentDetailsDialog({
 
     if (!selectedInstallment) return
 
-    const remaining = selectedInstallment.amount_due - selectedInstallment.amount_paid
-    if (amount > remaining) {
-      setErrorMessage(`المبلغ المدخل يتجاوز المتبقي (${formatPrice(remaining)} DT)`)
-      setShowErrorDialog(true)
-      return
-    }
+    // Allow any amount > 0; excess is applied to next installments (overpayment supported)
+    const remainingThis = selectedInstallment.amount_due - selectedInstallment.amount_paid
+    const startIdx = allOrdered.findIndex((i) => i.id === selectedInstallment.id)
+    if (startIdx < 0) return
 
     setPaying(true)
     try {
-      const newAmountPaid = selectedInstallment.amount_paid + amount
-      const newStatus = newAmountPaid >= selectedInstallment.amount_due ? 'paid' : 'pending'
-
-      const updateData: any = {
-        amount_paid: newAmountPaid,
-        status: newStatus,
-        updated_at: new Date().toISOString(),
+      let toApply = amount
+      let totalApplied = 0
+      for (let i = startIdx; i < allOrdered.length && toApply > 0; i++) {
+        const inst = allOrdered[i]
+        const need = inst.amount_due - inst.amount_paid
+        if (need <= 0) continue
+        const pay = Math.min(toApply, need)
+        const newAmountPaid = inst.amount_paid + pay
+        const newStatus = newAmountPaid >= inst.amount_due ? 'paid' : 'pending'
+        const updateData: any = {
+          amount_paid: newAmountPaid,
+          status: newStatus,
+          updated_at: new Date().toISOString(),
+        }
+        if (newStatus === 'paid') updateData.paid_date = paidToday
+        const { error } = await supabase.from('installment_payments').update(updateData).eq('id', inst.id)
+        if (error) throw error
+        toApply -= pay
+        totalApplied += pay
       }
-
-      if (newStatus === 'paid') {
-        updateData.paid_date = new Date().toISOString().split('T')[0]
-      }
-
-      const { error } = await supabase
-        .from('installment_payments')
-        .update(updateData)
-        .eq('id', selectedInstallment.id)
-
-      if (error) throw error
-
-      setSuccessMessage(`تم دفع ${formatPrice(amount)} DT بنجاح!`)
+      const overApplied = amount - totalApplied
+      const successMsg =
+        overApplied > 0
+          ? `تم استلام ${formatPrice(amount)} DT. تم تطبيق ${formatPrice(totalApplied)} DT على القسط/الأقساط. المبلغ الزائد ${formatPrice(overApplied)} DT لم يُطبَّق (لا أقساط مستقبلية).`
+          : totalApplied > remainingThis
+            ? `تم دفع ${formatPrice(amount)} DT بنجاح. تم تطبيق الزائد على الأقساط التالية.`
+            : `تم دفع ${formatPrice(amount)} DT بنجاح!`
+      setSuccessMessage(successMsg)
       setShowSuccessDialog(true)
       setSelectedInstallment(null)
       setPaymentAmount('')
       await loadInstallments()
       onPaymentSuccess()
     } catch (e: any) {
-      setErrorMessage(e.message || 'فشل تسجيل الدفع')
+      const msg = e?.message ?? 'فشل تسجيل الدفع'
+      setErrorMessage(msg.includes('يتجاوز المتبقي') ? 'فشل تسجيل الدفع. تأكد من الاتصال ثم أعد المحاولة.' : msg)
       setShowErrorDialog(true)
     } finally {
       setPaying(false)
@@ -1009,17 +1046,16 @@ export function InstallmentDetailsDialog({
                 type="number"
                 min="0"
                 step="0.01"
-                max={multiPayInstallments && multiPayInstallments.length > 0 ? multiPayInstallments.reduce((s, i) => s + (i.amount_due - i.amount_paid), 0) : undefined}
                 value={paymentAmount}
                 onChange={(e) => setPaymentAmount(e.target.value)}
                 placeholder="0.00"
                 size="sm"
               />
-              {multiPayInstallments && multiPayInstallments.length > 0 && (
-                <p className="text-xs text-gray-500">
-                  لا يمكن تجاوز الإجمالي أعلاه ({formatPrice(multiPayInstallments.reduce((s, i) => s + (i.amount_due - i.amount_paid), 0))} DT).
-                </p>
-              )}
+              <p className="text-xs text-gray-500">
+                {multiPayInstallments && multiPayInstallments.length > 0
+                  ? `الإجمالي المطلوب لهذه الأقساط: ${formatPrice(multiPayInstallments.reduce((s, i) => s + (i.amount_due - i.amount_paid), 0))} DT. يمكنك إدخال مبلغاً أكبر وسيُطبَّق الزائد على الأقساط التالية.`
+                  : 'يمكنك إدخال مبلغاً أكبر من المتبقي وسيُطبَّق الزائد على الأقساط التالية.'}
+              </p>
             </div>
           </div>
         </Dialog>

@@ -283,10 +283,7 @@ export function ConfirmGroupSaleDialog({
         setError(t('confirmation.dialogErrorAmountRequired'))
         return
       }
-      if (amount > (calculations?.confirmationAmount || 0)) {
-        setError(`المبلغ المدخل يتجاوز المتبقي (${formatPrice(calculations?.confirmationAmount || 0)} DT)`)
-        return
-      }
+      // Overpayment allowed: do not reject when amount > confirmationAmount
     }
 
     setShowFinalConfirmDialog(true)
