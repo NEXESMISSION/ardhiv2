@@ -171,6 +171,7 @@ export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false)
   const [currentPage, setCurrentPage] = useState(1)
   const [totalCount, setTotalCount] = useState(0)
+  const [goToPageInput, setGoToPageInput] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
   /** Debounced search: triggers load after user stops typing so search isn't slow on every keystroke */
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('')
@@ -584,6 +585,13 @@ export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
   function goToPage(page: number) {
     if (page >= 1 && page <= totalPages) setCurrentPage(page)
   }
+  function handleGoToPageInput() {
+    const n = parseInt(goToPageInput, 10)
+    if (!Number.isNaN(n) && n >= 1 && n <= totalPages) {
+      goToPage(n)
+      setGoToPageInput('')
+    }
+  }
 
   // Scroll to top when page changes for better UX
   useEffect(() => {
@@ -739,6 +747,57 @@ export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
         </Card>
       ) : (
         <>
+        {/* Pagination - top */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-center gap-1.5 sm:gap-2 flex-wrap mb-4">
+            <Button variant="secondary" size="sm" onClick={() => goToPage(currentPage - 1)} disabled={!hasPrevPage} className="text-xs sm:text-sm py-1.5 px-2">
+              {t('installments.prev')}
+            </Button>
+            {totalPages <= 7 ? (
+              Array.from({ length: totalPages }, (_, i) => {
+                const pageNum = i + 1
+                return (
+                  <Button key={pageNum} variant={currentPage === pageNum ? 'primary' : 'secondary'} size="sm" onClick={() => goToPage(pageNum)} className="text-xs sm:text-sm py-1.5 px-2 min-w-[32px] sm:min-w-[36px]">
+                    {pageNum}
+                  </Button>
+                )
+              })
+            ) : (
+              <>
+                <Button variant={currentPage === 1 ? 'primary' : 'secondary'} size="sm" onClick={() => goToPage(1)} className="text-xs sm:text-sm py-1.5 px-2 min-w-[32px] sm:min-w-[36px]">1</Button>
+                {currentPage > 3 && <span className="px-1 sm:px-2 text-xs sm:text-sm text-gray-500">...</span>}
+                {currentPage > 1 && currentPage < totalPages && (
+                  <>
+                    {currentPage > 2 && <Button variant="secondary" size="sm" onClick={() => goToPage(currentPage - 1)} className="text-xs sm:text-sm py-1.5 px-2 min-w-[32px] sm:min-w-[36px]">{currentPage - 1}</Button>}
+                    <Button variant="primary" size="sm" className="text-xs sm:text-sm py-1.5 px-2 min-w-[32px] sm:min-w-[36px]">{currentPage}</Button>
+                    {currentPage < totalPages - 1 && <Button variant="secondary" size="sm" onClick={() => goToPage(currentPage + 1)} className="text-xs sm:text-sm py-1.5 px-2 min-w-[32px] sm:min-w-[36px]">{currentPage + 1}</Button>}
+                  </>
+                )}
+                {currentPage < totalPages - 2 && <span className="px-1 sm:px-2 text-xs sm:text-sm text-gray-500">...</span>}
+                <Button variant={currentPage === totalPages ? 'primary' : 'secondary'} size="sm" onClick={() => goToPage(totalPages)} className="text-xs sm:text-sm py-1.5 px-2 min-w-[32px] sm:min-w-[36px]">{totalPages}</Button>
+              </>
+            )}
+            <Button variant="secondary" size="sm" onClick={() => goToPage(currentPage + 1)} disabled={!hasNextPage} className="text-xs sm:text-sm py-1.5 px-2">
+              {t('installments.next')}
+            </Button>
+            <span className="inline-flex items-center gap-1 ml-1 sm:ml-2">
+              <Input
+                type="number"
+                min={1}
+                max={totalPages}
+                value={goToPageInput}
+                onChange={(e) => setGoToPageInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleGoToPageInput()}
+                placeholder={t('installments.pagePlaceholder')}
+                className="w-11 sm:w-12 h-8 text-center text-xs py-0 px-1"
+                size="sm"
+              />
+              <Button variant="secondary" size="sm" onClick={handleGoToPageInput} className="text-xs py-1.5 px-2">
+                {t('installments.goToPage')}
+              </Button>
+            </span>
+          </div>
+        )}
         <div className="space-y-4 sm:space-y-5">
           {groupsToRender.map((clientGroup, clientIndex) => {
             const totalPieces = clientGroup.offerGroups.reduce((sum, og) => sum + og.sales.length, 0)
@@ -869,6 +928,22 @@ export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
             <Button variant="secondary" size="sm" onClick={() => goToPage(currentPage + 1)} disabled={!hasNextPage} className="text-xs sm:text-sm py-1.5 px-2">
               {t('installments.next')}
             </Button>
+            <span className="inline-flex items-center gap-1 ml-1 sm:ml-2">
+              <Input
+                type="number"
+                min={1}
+                max={totalPages}
+                value={goToPageInput}
+                onChange={(e) => setGoToPageInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleGoToPageInput()}
+                placeholder={t('installments.pagePlaceholder')}
+                className="w-11 sm:w-12 h-8 text-center text-xs py-0 px-1"
+                size="sm"
+              />
+              <Button variant="secondary" size="sm" onClick={handleGoToPageInput} className="text-xs py-1.5 px-2">
+                {t('installments.goToPage')}
+              </Button>
+            </span>
           </div>
         )}
         </>
