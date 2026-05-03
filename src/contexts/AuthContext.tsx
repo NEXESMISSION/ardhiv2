@@ -3,6 +3,9 @@ import { supabase } from '@/lib/supabase'
 import type { User } from '@supabase/supabase-js'
 import { clearContractWritersCache } from '@/utils/contractWritersCache'
 import { clearAllPieceLocks } from '@/utils/dataIntegrity'
+import { logger } from '@/utils/logger'
+
+const log = logger('Auth')
 
 interface SystemUser {
   id: string
@@ -35,8 +38,8 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
-/** Set to true to log auth/system-user flow to console (default: quiet) */
-const DEBUG_AUTH = false
+/** Toggle internal verbose flow logs. Stripped from prod build by esbuild. */
+const DEBUG_AUTH = true
 
 // Constants for retry logic
 const MAX_RETRIES = 1 // Reduced to 1 for faster failure
@@ -780,13 +783,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       // Normalize email: trim, lowercase, and ensure proper format
       let normalizedEmail = email.trim().toLowerCase()
-      
+
       // If email doesn't contain @, append @gmail.com
       if (!normalizedEmail.includes('@')) {
         normalizedEmail = normalizedEmail + '@gmail.com'
       }
 
-      if (DEBUG_AUTH) console.log('Attempting to sign in with email:', normalizedEmail)
+      log.info('signIn attempt', { email: normalizedEmail })
 
       const { data, error } = await supabase.auth.signInWithPassword({
         email: normalizedEmail,
@@ -794,9 +797,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       })
 
       if (error) {
+        log.warn('signIn failed', { code: error.status, message: error.message })
         setLoading(false)
         return { error }
       }
+      log.info('signIn success', { userId: data.user?.id })
 
       if (data.user) {
         // Load system user data
@@ -859,18 +864,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function signOut() {
     try {
+      log.info('signOut start')
       setLoading(true)
-      
+
       // Check if there's an active session before attempting to sign out
       const { data: { session } } = await supabase.auth.getSession()
-      
+
       if (session) {
         // Only attempt sign out if there's an active session
         // Use local scope to avoid 403 errors with global scope
         const { error } = await supabase.auth.signOut({ scope: 'local' })
         if (error) {
           // Log error but don't throw - we'll clear state anyway
-          if (DEBUG_AUTH) console.warn('Error signing out (non-critical):', error.message)
+          log.warn('signOut non-critical error', error.message)
         }
       }
       

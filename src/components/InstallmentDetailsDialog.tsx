@@ -235,11 +235,6 @@ export function InstallmentDetailsDialog({
     }
   }
 
-  const _firstPendingInstallment = useMemo(() => {
-    const pending = installments.filter((i) => i.status !== 'paid').sort((a, b) => a.installment_number - b.installment_number)
-    return pending[0] ?? null
-  }, [installments])
-
   /** First installment in the table (row #1) — used as anchor for "edit first date" */
   const firstInstallment = useMemo(() => {
     const all = [...installments].sort((a, b) => a.installment_number - b.installment_number)

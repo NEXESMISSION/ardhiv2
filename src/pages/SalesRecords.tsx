@@ -12,7 +12,6 @@ import { Dialog } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { formatPrice } from '@/utils/priceCalculator'
 import { getPaymentTypeLabel } from '@/utils/paymentTerms'
-import { calculateInstallmentWithDeposit } from '@/utils/installmentCalculator'
 import { buildSaleQuery, formatSalesWithSellers } from '@/utils/salesQueries'
 import { useLanguage } from '@/i18n/context'
 import { useSalesRealtime } from '@/hooks/useSalesRealtime'
@@ -329,54 +328,6 @@ export function SalesRecordsPage() {
 
     return filtered
   }, [sales, searchQuery, searchByPieceOnly, statusFilter, paymentMethodFilter, batchFilter, currentPage])
-
-  async function _getTotalPaidAmount(sale: Sale): Promise<number> {
-    let totalPaid = sale.deposit_amount || 0
-
-    // If sale is completed, calculate what was paid
-    if (sale.status === 'completed') {
-      // For installment sales, calculate advance payment
-      if (sale.payment_method === 'installment' && sale.payment_offer && sale.piece) {
-        const calc = calculateInstallmentWithDeposit(
-          sale.piece.surface_m2,
-          {
-            price_per_m2_installment: sale.payment_offer.price_per_m2_installment,
-            advance_mode: sale.payment_offer.advance_mode,
-            advance_value: sale.payment_offer.advance_value,
-            calc_mode: sale.payment_offer.calc_mode,
-            monthly_amount: sale.payment_offer.monthly_amount,
-            months: sale.payment_offer.months,
-          },
-          sale.deposit_amount || 0
-        )
-        const advanceAfterDeposit = calc.advanceAfterDeposit
-        totalPaid += advanceAfterDeposit
-
-        // Get installment payments
-        const { data: installments } = await supabase
-          .from('installment_payments')
-          .select('amount_paid')
-          .eq('sale_id', sale.id)
-          .eq('status', 'paid')
-
-        if (installments) {
-          totalPaid += installments.reduce((sum, inst) => sum + (inst.amount_paid || 0), 0)
-        }
-      }
-
-      // For promise sales
-      if (sale.payment_method === 'promise' && sale.partial_payment_amount) {
-        totalPaid += sale.partial_payment_amount - (sale.deposit_amount || 0)
-      }
-
-      // For full payment
-      if (sale.payment_method === 'full') {
-        totalPaid = sale.sale_price
-      }
-    }
-
-    return totalPaid
-  }
 
   function getActionDescription(sale: Sale, action: 'revert' | 'cancel' | 'revertFromInstallments' | 'remove'): string {
     if (action === 'remove') return t('salesRecords.descRemoveSingle')

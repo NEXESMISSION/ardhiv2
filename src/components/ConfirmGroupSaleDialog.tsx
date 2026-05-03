@@ -390,7 +390,6 @@ export function ConfirmGroupSaleDialog({
 
         if (newRemaining > 0.01) {
           // Partial payment - update each sale
-          const _saleIds = sales.map(s => s.id)
           const updatePromises = sales.map(async (sale) => {
             const saleRemaining = sale.remaining_payment_amount || (sale.sale_price - (sale.partial_payment_amount || sale.deposit_amount))
             const salePayment = (paymentAmount / totalRemaining) * saleRemaining

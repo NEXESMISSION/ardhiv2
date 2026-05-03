@@ -237,11 +237,10 @@ export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
     },
   })
 
-  async function loadInstallmentSales(forSearch?: boolean) {
+  async function loadInstallmentSales(_forSearch?: boolean) {
     if (sales.length === 0 && !loading) setLoading(true)
     setError(null)
     try {
-      const _isSearchMode = forSearch === true
       // Always load all installment sales so we can group by person and show one box per client with all pieces
       const from = 0
       const to = SEARCH_LOAD_LIMIT - 1
@@ -382,76 +381,6 @@ export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
       setError(e.message || t('installments.loadError'))
     } finally {
       setLoading(false)
-    }
-  }
-
-  async function _getSaleStats(sale: Sale) {
-    // Calculate total paid
-    let totalPaid = sale.deposit_amount || 0
-
-    if (sale.payment_offer && sale.piece) {
-      const calc = calculateInstallmentWithDeposit(
-        sale.piece.surface_m2,
-        {
-        price_per_m2_installment: sale.payment_offer.price_per_m2_installment,
-        advance_mode: sale.payment_offer.advance_mode,
-        advance_value: sale.payment_offer.advance_value,
-        calc_mode: sale.payment_offer.calc_mode,
-        monthly_amount: sale.payment_offer.monthly_amount,
-        months: sale.payment_offer.months,
-        },
-        sale.deposit_amount || 0
-      )
-
-      totalPaid += calc.advanceAfterDeposit
-
-      // Get paid installments
-      const { data: installments } = await supabase
-        .from('installment_payments')
-        .select('amount_paid')
-        .eq('sale_id', sale.id)
-        .eq('status', 'paid')
-
-      if (installments) {
-        totalPaid += installments.reduce((sum, inst) => sum + (inst.amount_paid || 0), 0)
-      }
-    }
-
-    const remaining = sale.sale_price - totalPaid
-
-    // Get installment payments for stats
-    const { data: allInstallments } = await supabase
-        .from('installment_payments')
-      .select('*')
-      .eq('sale_id', sale.id)
-      .order('installment_number', { ascending: true })
-
-    const paidCount = allInstallments?.filter((i: InstallmentPayment) => i.status === 'paid').length || 0
-    const totalCount = allInstallments?.length || 0
-
-    // Find next due date
-    const now = new Date()
-    const nextDue = allInstallments?.find((i: InstallmentPayment) => {
-      const dueDate = new Date(i.due_date)
-      return i.status === 'pending' && dueDate >= now
-    })
-
-    // Find overdue
-    const overdue = allInstallments?.filter((i: InstallmentPayment) => {
-      const dueDate = new Date(i.due_date)
-      return i.status === 'pending' && dueDate < now
-    }) || []
-
-    const overdueAmount = overdue.reduce((sum, i) => sum + (i.amount_due - i.amount_paid), 0)
-
-      return {
-      totalPaid,
-      remaining,
-      paidCount,
-      totalCount,
-      nextDueDate: nextDue?.due_date || null,
-      overdueAmount,
-      overdueCount: overdue.length,
     }
   }
 

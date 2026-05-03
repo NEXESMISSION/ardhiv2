@@ -4,6 +4,7 @@
 // ============================================================================
 
 import { formatPrice } from '@/utils/priceCalculator'
+import { useLanguage } from '@/i18n/context'
 
 interface PiecePriceDetailsProps {
   batchName: string
@@ -26,6 +27,10 @@ export function PiecePriceDetails({
   advanceAmount: _advanceAmount,
   remainingAmount,
 }: PiecePriceDetailsProps) {
+  const { t } = useLanguage()
+  const meterLabel = paymentType === 'installment'
+    ? t('piecePriceDetails.installmentPricePerMeter')
+    : t('piecePriceDetails.pricePerMeter')
   return (
     <div className="border-t border-gray-300 pt-4">
       <div className="flex items-start justify-between">
@@ -33,14 +38,10 @@ export function PiecePriceDetails({
           <p className="font-medium">
             {batchName} - {pieceNumber}
           </p>
-          <p className="text-sm text-gray-600 mt-1">{surfaceM2.toLocaleString()} م²</p>
+          <p className="text-sm text-gray-600 mt-1">{surfaceM2.toLocaleString()} {t('piecePriceDetails.surfaceUnit')}</p>
           {pricePerM2 && (
             <p className="text-xs text-gray-500 mt-1">
-              {paymentType === 'full' || paymentType === 'promise' ? (
-                <>سعر المتر: {pricePerM2.toLocaleString()} دت/م² · السعر: {formatPrice(totalPrice)} DT</>
-              ) : (
-                <>سعر التقسيط: {pricePerM2.toLocaleString()} دت/م² · السعر: {formatPrice(totalPrice)} DT</>
-              )}
+              {meterLabel}: {pricePerM2.toLocaleString()} {t('piecePriceDetails.pricePerMeterUnit')} · {t('piecePriceDetails.price')}: {formatPrice(totalPrice)} DT
             </p>
           )}
         </div>
@@ -48,16 +49,16 @@ export function PiecePriceDetails({
           <p className="font-semibold">{formatPrice(totalPrice)} DT</p>
           {paymentType === 'full' ? (
             <p className="text-sm text-gray-600 mt-1">
-              المبلغ الكامل: {formatPrice(totalPrice)} DT
+              {t('piecePriceDetails.fullAmount')}: {formatPrice(totalPrice)} DT
             </p>
           ) : paymentType === 'promise' ? (
             <p className="text-sm text-yellow-600 mt-1">
-              وعد بالبيع: {formatPrice(totalPrice)} DT
+              {t('piecePriceDetails.promise')}: {formatPrice(totalPrice)} DT
             </p>
           ) : (
             remainingAmount !== undefined && (
               <p className="text-sm text-gray-600 mt-1">
-                المتبقي: {formatPrice(remainingAmount)} DT
+                {t('piecePriceDetails.remaining')}: {formatPrice(remainingAmount)} DT
               </p>
             )
           )}

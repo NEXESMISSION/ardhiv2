@@ -5,6 +5,8 @@
 
 import { formatPrice } from '@/utils/priceCalculator'
 import { PaymentTerms } from '@/utils/paymentTerms'
+import { useLanguage } from '@/i18n/context'
+import { replaceVars } from '@/utils/replaceVars'
 
 interface PaymentBreakdownProps {
   totalPrice: number
@@ -35,31 +37,29 @@ export function PaymentBreakdown({
   advanceValue,
   depositAmount = 0,
 }: PaymentBreakdownProps) {
-  const _basePrice = (paymentType === 'full' || paymentType === 'promise') && surfaceM2 && pricePerM2
-    ? surfaceM2 * pricePerM2
-    : totalPrice
+  const { t } = useLanguage()
 
   if (paymentType === 'promise') {
     return (
       <div className="space-y-3">
         <div className="bg-yellow-50 border-2 border-yellow-300 rounded-lg p-4">
-          <p className="text-xs text-yellow-700 mb-2 font-medium">⚠️ وعد بالبيع</p>
+          <p className="text-xs text-yellow-700 mb-2 font-medium">⚠️ {t('paymentBreakdown.promiseTitle')}</p>
           <p className="text-sm text-yellow-800">
-            سيتم الدفع على جزئين: عند التأكيد الأول يتم إدخال المبلغ المحصل، والباقي سيتم إدخاله في تأكيد ثاني لاحقاً
+            {t('paymentBreakdown.promiseDesc')}
           </p>
         </div>
         {/* Summary Cards */}
         <div className="grid grid-cols-3 gap-3">
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-            <p className="text-xs text-blue-700 mb-1">عدد القطع</p>
+            <p className="text-xs text-blue-700 mb-1">{t('paymentBreakdown.pieceCount')}</p>
             <p className="text-2xl font-bold text-blue-900">1</p>
           </div>
           <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
-            <p className="text-xs text-gray-600 mb-1">السعر الإجمالي</p>
+            <p className="text-xs text-gray-600 mb-1">{t('paymentBreakdown.totalPrice')}</p>
             <p className="text-xl font-bold text-gray-900">{formatPrice(totalPrice)} DT</p>
           </div>
           <div className="bg-green-50 border-2 border-green-400 rounded-lg p-3">
-            <p className="text-xs text-green-700 mb-1 font-medium">المتبقي بعد العربون</p>
+            <p className="text-xs text-green-700 mb-1 font-medium">{t('paymentBreakdown.remainingAfterDeposit')}</p>
             <p className="text-2xl font-bold text-green-600">{formatPrice(remainingAmount > 0 ? remainingAmount : totalPrice)} DT</p>
           </div>
         </div>
@@ -69,25 +69,25 @@ export function PaymentBreakdown({
           <div className="bg-white border-2 border-blue-300 rounded-xl p-4 shadow-sm">
             <h4 className="text-sm font-bold text-gray-800 mb-3 flex items-center gap-2">
               <span className="w-1 h-5 bg-blue-500 rounded"></span>
-              تفاصيل الحساب
+              {t('paymentBreakdown.calcDetails')}
             </h4>
             <div className="space-y-2 text-sm">
               <div className="flex justify-between items-center py-1">
-                <span className="text-gray-600">المساحة</span>
-                <span className="font-semibold text-gray-900">{surfaceM2.toLocaleString()} م²</span>
+                <span className="text-gray-600">{t('paymentBreakdown.surface')}</span>
+                <span className="font-semibold text-gray-900">{surfaceM2.toLocaleString()} {t('paymentBreakdown.surfaceUnit')}</span>
               </div>
               <div className="flex justify-between items-center py-1 border-t border-gray-100">
-                <span className="text-gray-600">سعر المتر المربع</span>
-                <span className="font-semibold text-gray-900">{pricePerM2.toLocaleString()} دت/م²</span>
+                <span className="text-gray-600">{t('paymentBreakdown.pricePerM2')}</span>
+                <span className="font-semibold text-gray-900">{pricePerM2.toLocaleString()} {t('paymentBreakdown.pricePerM2Unit')}</span>
               </div>
               {depositAmount > 0 && (
                 <div className="flex justify-between items-center py-1 border-t border-gray-100">
-                  <span className="text-gray-600">العربون (المحصل الآن):</span>
+                  <span className="text-gray-600">{t('paymentBreakdown.deposit')}:</span>
                   <span className="font-semibold text-blue-600">- {formatPrice(depositAmount)} DT</span>
                 </div>
               )}
               <div className="flex justify-between items-center py-2 border-t-2 border-yellow-200 mt-2">
-                <span className="font-bold text-gray-800">المبلغ المتبقي (سيتم دفعه على جزئين)</span>
+                <span className="font-bold text-gray-800">{t('paymentBreakdown.remainingTwoParts')}</span>
                 <span className="text-xl font-bold text-yellow-600">{formatPrice(remainingAmount > 0 ? remainingAmount : totalPrice)} DT</span>
               </div>
               <div className="text-xs text-gray-500 bg-gray-50 px-3 py-2 rounded mt-2 font-mono">
@@ -113,15 +113,15 @@ export function PaymentBreakdown({
         {/* Summary Cards */}
         <div className="grid grid-cols-3 gap-3">
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-            <p className="text-xs text-blue-700 mb-1">عدد القطع</p>
+            <p className="text-xs text-blue-700 mb-1">{t('paymentBreakdown.pieceCount')}</p>
             <p className="text-2xl font-bold text-blue-900">1</p>
           </div>
           <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
-            <p className="text-xs text-gray-600 mb-1">السعر الإجمالي</p>
+            <p className="text-xs text-gray-600 mb-1">{t('paymentBreakdown.totalPrice')}</p>
             <p className="text-xl font-bold text-gray-900">{formatPrice(totalPrice)} DT</p>
           </div>
           <div className="bg-green-50 border-2 border-green-400 rounded-lg p-3">
-            <p className="text-xs text-green-700 mb-1 font-medium">المبلغ المستحق</p>
+            <p className="text-xs text-green-700 mb-1 font-medium">{t('paymentBreakdown.amountDue')}</p>
             <p className="text-2xl font-bold text-green-600">{formatPrice(remainingAmount > 0 ? remainingAmount : totalPrice)} DT</p>
           </div>
         </div>
@@ -131,25 +131,25 @@ export function PaymentBreakdown({
           <div className="bg-white border-2 border-blue-300 rounded-xl p-4 shadow-sm">
             <h4 className="text-sm font-bold text-gray-800 mb-3 flex items-center gap-2">
               <span className="w-1 h-5 bg-blue-500 rounded"></span>
-              تفاصيل الحساب
+              {t('paymentBreakdown.calcDetails')}
             </h4>
             <div className="space-y-2 text-sm">
               <div className="flex justify-between items-center py-1">
-                <span className="text-gray-600">المساحة</span>
-                <span className="font-semibold text-gray-900">{surfaceM2.toLocaleString()} م²</span>
+                <span className="text-gray-600">{t('paymentBreakdown.surface')}</span>
+                <span className="font-semibold text-gray-900">{surfaceM2.toLocaleString()} {t('paymentBreakdown.surfaceUnit')}</span>
               </div>
               <div className="flex justify-between items-center py-1 border-t border-gray-100">
-                <span className="text-gray-600">سعر المتر المربع</span>
-                <span className="font-semibold text-gray-900">{pricePerM2.toLocaleString()} دت/م²</span>
+                <span className="text-gray-600">{t('paymentBreakdown.pricePerM2')}</span>
+                <span className="font-semibold text-gray-900">{pricePerM2.toLocaleString()} {t('paymentBreakdown.pricePerM2Unit')}</span>
               </div>
               {depositAmount > 0 && (
                 <div className="flex justify-between items-center py-1 border-t border-gray-100">
-                  <span className="text-gray-600">العربون (المحصل الآن):</span>
+                  <span className="text-gray-600">{t('paymentBreakdown.deposit')}:</span>
                   <span className="font-semibold text-blue-600">- {formatPrice(depositAmount)} DT</span>
                 </div>
               )}
               <div className="flex justify-between items-center py-2 border-t-2 border-blue-200 mt-2">
-                <span className="font-bold text-gray-800">المبلغ المستحق (سيتم تحصيله عند التأكيد)</span>
+                <span className="font-bold text-gray-800">{t('paymentBreakdown.dueOnConfirm')}</span>
                 <span className="text-xl font-bold text-green-600">{formatPrice(remainingAmount > 0 ? remainingAmount : totalPrice)} DT</span>
               </div>
               <div className="text-xs text-gray-500 bg-gray-50 px-3 py-2 rounded mt-2 font-mono">
@@ -175,15 +175,15 @@ export function PaymentBreakdown({
       {/* Summary Cards */}
       <div className="grid grid-cols-3 gap-3">
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-          <p className="text-xs text-blue-700 mb-1">عدد القطع</p>
+          <p className="text-xs text-blue-700 mb-1">{t('paymentBreakdown.pieceCount')}</p>
           <p className="text-2xl font-bold text-blue-900">1</p>
         </div>
         <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
-          <p className="text-xs text-gray-600 mb-1">السعر الإجمالي</p>
+          <p className="text-xs text-gray-600 mb-1">{t('paymentBreakdown.totalPrice')}</p>
           <p className="text-xl font-bold text-gray-900">{formatPrice(totalPrice)} DT</p>
         </div>
         <div className="bg-purple-50 border border-purple-200 rounded-lg p-3">
-          <p className="text-xs text-purple-700 mb-1">المبلغ المتبقي</p>
+          <p className="text-xs text-purple-700 mb-1">{t('paymentBreakdown.remainingAmount')}</p>
           <p className="text-xl font-bold text-purple-600">{formatPrice(remainingAmount)} DT</p>
         </div>
       </div>
@@ -192,25 +192,25 @@ export function PaymentBreakdown({
       <div className="bg-white border-2 border-blue-300 rounded-xl p-4 shadow-sm">
         <h4 className="text-sm font-bold text-gray-800 mb-3 flex items-center gap-2">
           <span className="w-1 h-5 bg-blue-500 rounded"></span>
-          تفاصيل الحساب
+          {t('paymentBreakdown.calcDetails')}
         </h4>
-        
+
         <div className="space-y-3 text-sm">
           {/* Base Price */}
           {surfaceM2 && installmentPricePerM2 && (
             <div className="bg-gray-50 rounded-lg p-3">
               <div className="flex justify-between items-center mb-2">
-                <span className="text-gray-700 font-medium">السعر الأساسي</span>
+                <span className="text-gray-700 font-medium">{t('paymentBreakdown.basePrice')}</span>
                 <span className="font-bold text-gray-900">{formatPrice(totalPrice)} DT</span>
               </div>
               <div className="text-xs text-gray-600 space-y-1">
                 <div className="flex justify-between">
-                  <span>المساحة:</span>
-                  <span className="font-medium">{surfaceM2.toLocaleString()} م²</span>
+                  <span>{t('paymentBreakdown.surface')}:</span>
+                  <span className="font-medium">{surfaceM2.toLocaleString()} {t('paymentBreakdown.surfaceUnit')}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span>سعر المتر (تقسيط):</span>
-                  <span className="font-medium">{installmentPricePerM2.toLocaleString()} دت/م²</span>
+                  <span>{t('paymentBreakdown.pricePerM2Installment')}:</span>
+                  <span className="font-medium">{installmentPricePerM2.toLocaleString()} {t('paymentBreakdown.pricePerM2Unit')}</span>
                 </div>
                 <div className="text-gray-500 mt-2 pt-2 border-t border-gray-200 font-mono">
                   {surfaceM2.toLocaleString()} × {installmentPricePerM2.toLocaleString()} = {formatPrice(totalPrice)} DT
@@ -228,11 +228,9 @@ export function PaymentBreakdown({
                 <span className="font-bold text-blue-600">- {formatPrice(advanceAmount)} DT</span>
               </div>
               <div className="text-xs text-blue-700">
-                {advanceMode === 'fixed' ? (
-                  <>مبلغ ثابت: {formatPrice(advanceValue)} DT</>
-                ) : (
-                  <>{advanceValue}% من {formatPrice(totalPrice)} DT</>
-                )}
+                {advanceMode === 'fixed'
+                  ? replaceVars(t('paymentBreakdown.advanceFixedAmount'), { amount: formatPrice(advanceValue) })
+                  : replaceVars(t('paymentBreakdown.advancePercentOf'), { percent: String(advanceValue), total: formatPrice(totalPrice) })}
               </div>
             </div>
           )}
@@ -240,7 +238,7 @@ export function PaymentBreakdown({
           {/* Remaining Amount - Highlighted */}
           <div className="bg-green-50 border-2 border-green-400 rounded-lg p-4">
             <div className="flex justify-between items-center mb-2">
-              <span className="text-green-800 font-bold text-base">المبلغ المتبقي</span>
+              <span className="text-green-800 font-bold text-base">{t('paymentBreakdown.remainingAmount')}</span>
               <span className="text-2xl font-bold text-green-600">{formatPrice(remainingAmount)} DT</span>
             </div>
             <div className="text-xs text-green-700 font-mono bg-white px-2 py-1 rounded">
@@ -262,11 +260,11 @@ export function PaymentBreakdown({
           {numberOfMonths > 0 && monthlyPayment > 0 && (
             <div className="bg-purple-50 border-2 border-purple-400 rounded-lg p-4">
               <div className="flex justify-between items-center mb-2">
-                <span className="text-purple-800 font-bold text-base">القسط الشهري ({numberOfMonths} شهر)</span>
+                <span className="text-purple-800 font-bold text-base">{replaceVars(t('paymentBreakdown.monthlyPaymentLabel'), { count: String(numberOfMonths) })}</span>
                 <span className="text-2xl font-bold text-purple-600">{formatPrice(monthlyPayment)} DT</span>
               </div>
               <div className="text-xs text-purple-700 font-mono bg-white px-2 py-1 rounded">
-                {formatPrice(remainingAmount)} ÷ {numberOfMonths} = {formatPrice(monthlyPayment)} DT/شهر
+                {formatPrice(remainingAmount)} ÷ {numberOfMonths} = {formatPrice(monthlyPayment)} {t('paymentBreakdown.monthlyPerMonth')}
               </div>
             </div>
           )}
@@ -275,4 +273,3 @@ export function PaymentBreakdown({
     </div>
   )
 }
-

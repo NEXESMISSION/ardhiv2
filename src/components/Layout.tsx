@@ -7,6 +7,9 @@ import { useAuth } from '@/contexts/AuthContext'
 import { useLanguage } from '@/i18n/context'
 import { supabase } from '@/lib/supabase'
 import { getNotifications, getUnreadCount, markAsRead, markAllAsRead, deleteNotification, formatTimeAgo, type Notification, type NotificationDateFilter } from '@/utils/notifications'
+import { logger } from '@/utils/logger'
+
+const log = logger('Notif')
 
 interface LayoutProps {
   children: ReactNode
@@ -34,6 +37,16 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
   const [notificationSpecificDate, setNotificationSpecificDate] = useState('') // YYYY-MM-DD for "specific day"
   const subscriptionRef = useRef<any>(null)
   const notificationIdsRef = useRef<Set<string>>(new Set())
+  // After a mark-as-read / mark-all-as-read click, the user expects the badge
+  // to drop and stay dropped. But the periodic refresh and modal-open refetch
+  // both call getUnreadCount() and overwrite the badge — and a count query
+  // that started *before* the mark UPDATE landed can return the stale higher
+  // number, making the badge snap back to red. Track recent mark operations
+  // so background refetches can suppress count regressions during the race
+  // window. This is a UX guard, not a correctness guard — DB remains source
+  // of truth, the guard just avoids visibly bouncing while writes settle.
+  const lastMarkAtRef = useRef<number>(0)
+  const MARK_GUARD_MS = 4000
   const INITIAL_LIMIT = 20
   const LOAD_MORE_LIMIT = 10
 
@@ -92,7 +105,7 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
         if (mounted) {
           // Track existing notification IDs
           notificationIdsRef.current = new Set(notifs.map((n) => n.id))
-          
+
           if (reset) {
             // Reset: replace all notifications
             setNotifications(notifs)
@@ -108,8 +121,13 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
             setDisplayedCount(prev => prev + notifs.length)
             setHasMore(notifs.length === LOAD_MORE_LIMIT) // If we got full limit, there might be more
           }
-          
-          setUnreadCount(count)
+
+          // Suppress count regressions during the brief window after a mark
+          // operation — see lastMarkAtRef. We still trust DB if it returns a
+          // *higher* count (a real new notification arrived), just not a
+          // regression to the pre-mark value.
+          const withinMarkGuard = Date.now() - lastMarkAtRef.current < MARK_GUARD_MS
+          setUnreadCount((prev) => (withinMarkGuard && count > prev ? prev : count))
         }
       } catch (error) {
         console.error('Error loading notifications:', error)
@@ -146,22 +164,35 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
             if (!mounted) return
 
           const newNotification = payload.new as Notification
-            // Prevent duplicates
+            // Prevent duplicates — guard against both id-set and array, since the
+            // modal-open refetch can repopulate the array without touching the ref.
             if (notificationIdsRef.current.has(newNotification.id)) {
               return
             }
 
-            notificationIdsRef.current.add(newNotification.id)
-            
+            let actuallyAdded = false
             setNotifications((prev) => {
-              const exists = prev.some((n) => n.id === newNotification.id)
-              if (exists) return prev
+              if (prev.some((n) => n.id === newNotification.id)) return prev
+              actuallyAdded = true
               return [newNotification, ...prev]
             })
-            // New notifications are automatically added to the top of the list
-            // displayedNotifications will show them if displayedCount allows
-            setUnreadCount((prev) => prev + 1)
-            
+
+            if (!actuallyAdded) {
+              // Already present (likely from a refetch); just sync the ref so we
+              // stop seeing this id as "new" and never double-count it.
+              notificationIdsRef.current.add(newNotification.id)
+              return
+            }
+
+            notificationIdsRef.current.add(newNotification.id)
+
+            // Only count it as unread if the row actually is unread. A row that
+            // arrives already-read (e.g. backfill, server-side mark) must not
+            // bump the badge.
+            if (!newNotification.read) {
+              setUnreadCount((prev) => prev + 1)
+            }
+
             // Show visual feedback
             setNewNotificationReceived(true)
             setTimeout(() => {
@@ -289,6 +320,9 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
     const notification = notifications.find((n) => n.id === notificationId)
     if (notification && !notification.read) {
       didOptimistic = true
+      // Stamp BEFORE optimistic update so any in-flight refresh that lands
+      // during the write window sees the guard is active.
+      lastMarkAtRef.current = Date.now()
       setNotifications((prev) =>
         prev.map((n) => (n.id === notificationId ? { ...n, read: true } : n))
       )
@@ -297,8 +331,14 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
 
     // Always perform the DB update — local state may be stale.
     const success = await markAsRead(notificationId, systemUser.id)
+    if (success && didOptimistic) {
+      // Re-stamp on success so the guard window covers the post-write race
+      // window where a refetch may still see the old count.
+      lastMarkAtRef.current = Date.now()
+    }
     if (!success && didOptimistic && notification) {
       // Revert on failure (and only if we did the optimistic flip).
+      lastMarkAtRef.current = 0
       setNotifications((prev) =>
         prev.map((n) => (n.id === notificationId ? notification : n))
       )
@@ -313,23 +353,33 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
     const previousNotifications = notifications
     const previousUnreadCount = unreadCount
 
+    // Stamp BEFORE optimistic update — see handleMarkAsRead for rationale.
+    lastMarkAtRef.current = Date.now()
     // Optimistic update — flip every notification to read=true and zero the badge.
     setNotifications((prev) => prev.map((n) => (n.read ? n : { ...n, read: true })))
     setUnreadCount(0)
 
     // Perform actual update
     const success = await markAllAsRead(systemUser.id)
-    if (!success) {
+    if (success) {
+      // Re-stamp on success to cover the post-write race window.
+      lastMarkAtRef.current = Date.now()
+    } else {
       // Revert on failure — restore prior local state instead of fetching
       // (avoids overwriting any newer realtime updates that may have arrived).
+      lastMarkAtRef.current = 0
       setNotifications(previousNotifications)
       setUnreadCount(previousUnreadCount)
     }
   }
 
   const handleDeleteNotification = async (notificationId: string) => {
-    if (!systemUser?.id) return
+    if (!systemUser?.id) {
+      log.warn('handleDeleteNotification skipped — no systemUser')
+      return
+    }
 
+    log.info('delete notification', { id: notificationId })
     // Optimistic update
       const notification = notifications.find((n) => n.id === notificationId)
       setNotifications((prev) => prev.filter((n) => n.id !== notificationId))
@@ -343,7 +393,10 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
 
     // Perform actual delete
     const success = await deleteNotification(notificationId, systemUser.id)
-    if (!success) {
+    if (success) {
+      log.info('delete notification ok', { id: notificationId })
+    } else {
+      log.error('delete notification failed', { id: notificationId })
       // Revert on failure
       if (notification) {
         const restored = [...notifications, notification].sort((a, b) => 
@@ -409,12 +462,20 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
     getNotifications(systemUser.id, INITIAL_LIMIT, 0, effectiveDateFilter)
       .then((notifs) => {
         if (!mounted) return
+        // Keep the dedupe ref in sync — without this, an INSERT realtime event
+        // for an item we already loaded via this fetch would slip past the
+        // dedupe and double-count.
+        notificationIdsRef.current = new Set(notifs.map((n) => n.id))
         setNotifications(notifs)
         setDisplayedCount(INITIAL_LIMIT)
         setHasMore(notifs.length >= INITIAL_LIMIT)
         return getUnreadCount(systemUser.id)
       })
-      .then((count) => mounted && count !== undefined && setUnreadCount(count))
+      .then((count) => {
+        if (!mounted || count === undefined) return
+        const withinMarkGuard = Date.now() - lastMarkAtRef.current < MARK_GUARD_MS
+        setUnreadCount((prev) => (withinMarkGuard && count > prev ? prev : count))
+      })
       .catch((err) => mounted && console.error('Error loading notifications by filter:', err))
       .finally(() => mounted && setLoadingNotifications(false))
     return () => { mounted = false }
@@ -478,7 +539,7 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
             <h3 className="text-[15px] sm:text-base font-bold text-gray-900 leading-tight truncate">{t('header.notifications')}</h3>
             {unreadCount > 0 && (
               <span className="text-[11px] text-blue-600 font-semibold">
-                {unreadCount} {language === 'ar' ? 'جديد' : unreadCount === 1 ? 'nouvelle' : 'nouvelles'}
+                {unreadCount} {t(unreadCount === 1 ? 'header.unreadCountOne' : 'header.unreadCountMany')}
               </span>
             )}
           </div>
@@ -754,7 +815,7 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
                       ? 'bg-gradient-to-b from-blue-500 to-blue-600 text-white shadow-sm shadow-blue-500/30'
                       : 'text-gray-600 hover:text-gray-900'
                   }`}
-                  aria-label="Français"
+                  aria-label={t('header.frenchLabel')}
                   aria-pressed={language === 'fr'}
                 >
                   FR
@@ -767,7 +828,7 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
                       ? 'bg-gradient-to-b from-blue-500 to-blue-600 text-white shadow-sm shadow-blue-500/30'
                       : 'text-gray-600 hover:text-gray-900'
                   }`}
-                  aria-label="العربية"
+                  aria-label={t('header.arabicLabel')}
                   aria-pressed={language === 'ar'}
                 >
                   ع

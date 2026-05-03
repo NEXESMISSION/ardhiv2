@@ -1,6 +1,9 @@
 import { useState, useEffect } from 'react'
+import { useLanguage } from '@/i18n/context'
+import { replaceVars } from '@/utils/replaceVars'
 
 export function DeadlineCountdown({ deadlineDate }: { deadlineDate: string | null }) {
+  const { t } = useLanguage()
   const [timeLeft, setTimeLeft] = useState<{
     days: number
     hours: number
@@ -44,10 +47,9 @@ export function DeadlineCountdown({ deadlineDate }: { deadlineDate: string | nul
     <div className={`inline-flex items-center gap-1 text-xs sm:text-sm font-medium ${timeLeft.isOverdue ? 'text-red-600' : 'text-orange-600'}`}>
       <span>{timeLeft.isOverdue ? '⚠️' : '⏰'}</span>
       <span>
-        {timeLeft.isOverdue ? (
-          `تجاوز الموعد بـ ${timeLeft.days} يوم و ${timeLeft.hours} ساعة و ${timeLeft.minutes} دقيقة`
-        ) : (
-          `متبقي: ${timeLeft.days} يوم و ${timeLeft.hours} ساعة و ${timeLeft.minutes} دقيقة`
+        {replaceVars(
+          t(timeLeft.isOverdue ? 'deadline.overdue' : 'deadline.remaining'),
+          { days: timeLeft.days, hours: timeLeft.hours, minutes: timeLeft.minutes }
         )}
       </span>
     </div>
