@@ -1,32 +1,40 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
 # Environment variables
 .env
 .env.local
 .env.production
 
-# Dependencies
-node_modules/
-
-# Build outputs
-dist/
-build/
-.next/
-
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-
-# OS
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
 .DS_Store
-Thumbs.db
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
 
-# Logs
-*.log
-npm-debug.log*
+# Claude Code local config
+.claude/
 
-# Test coverage
-coverage/
+# Supabase CLI cache
+supabase/.temp/
 
-# SQL files (security - contains database structure)
-*.sql
+# Local-only artifacts (data backups, design refs, scratch notes)
+Backup*/
+new desing/
+txt
