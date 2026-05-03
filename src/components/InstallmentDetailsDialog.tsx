@@ -10,6 +10,9 @@ import { NotificationDialog } from './ui/notification-dialog'
 import { ConfirmDialog } from './ui/confirm-dialog'
 import { formatPrice, formatDateShort } from '@/utils/priceCalculator'
 import { calculateInstallmentWithDeposit } from '@/utils/installmentCalculator'
+import { logger } from '@/utils/logger'
+
+const log = logger('Installments')
 
 // `addMonth` helper removed — superseded by `addMonths` below.
 
@@ -140,6 +143,15 @@ export function InstallmentDetailsDialog({
   const [resettingTable, setResettingTable] = useState(false)
   const [cancelPaymentInst, setCancelPaymentInst] = useState<InstallmentPayment | null>(null)
   const [cancellingPayment, setCancellingPayment] = useState(false)
+  // Schedule windowing: the previous version paginated by fixed 12-row pages.
+  // Problem: when the next-pending row was at the start of a page (e.g. row
+  // #19 of 80, which lands at position 0 of page 1), the user saw 11 future
+  // rows below it but no recently-paid rows for context. Now we use a sliding
+  // window — `scheduleStart` is an arbitrary offset (not page-aligned) so we
+  // can position the next-pending row at the visual center of the window.
+  // Prev/Next buttons still move by SCHEDULE_PAGE_SIZE for predictable jumps.
+  const SCHEDULE_PAGE_SIZE = 12
+  const [scheduleStart, setScheduleStart] = useState(0)
 
   // Tracks which sale's data the dialog should currently be showing. Used to
   // discard stale fetch responses if the user switches to a different sale
@@ -247,6 +259,54 @@ export function InstallmentDetailsDialog({
     [installments]
   )
   const pendingCount = pendingOrdered.length
+
+  /** Schedule rendered in stable installment-number order (paid first, then pending). */
+  const orderedInstallments = useMemo(
+    () => [...installments].sort((a, b) => a.installment_number - b.installment_number),
+    [installments]
+  )
+  const maxScheduleStart = Math.max(0, orderedInstallments.length - SCHEDULE_PAGE_SIZE)
+  const displayedInstallments = useMemo(() => {
+    return orderedInstallments.slice(scheduleStart, scheduleStart + SCHEDULE_PAGE_SIZE)
+  }, [orderedInstallments, scheduleStart])
+
+  // We still want to know if there's "more than one window" so we can hide
+  // the controls entirely when the whole schedule fits in one screen.
+  const hasMultipleWindows = orderedInstallments.length > SCHEDULE_PAGE_SIZE
+  // First/last visible row numbers (1-based, used in the "X–Y of Z" label).
+  // We deliberately drop the "page X/Y" indicator: with a sliding window the
+  // start offset isn't page-aligned (after centering on the next-pending row
+  // it's typically offset by half a page), so a fixed page index would
+  // mislabel the same view as different pages depending on history.
+  const firstVisibleRow = orderedInstallments.length === 0 ? 0 : scheduleStart + 1
+  const lastVisibleRow = Math.min(scheduleStart + SCHEDULE_PAGE_SIZE, orderedInstallments.length)
+
+  // When the dialog opens (or installments reload), CENTER the next pending
+  // row in the window. Putting it in the middle gives the user context: a few
+  // recently-paid rows above and a few upcoming rows below, with the row they
+  // actually need to act on at eye level instead of at the top or bottom.
+  useEffect(() => {
+    if (orderedInstallments.length === 0) return
+    const firstPendingIdx = orderedInstallments.findIndex((i) => i.status !== 'paid')
+    if (firstPendingIdx < 0) {
+      // Everything paid — show the last window so the user sees the most
+      // recent rows instead of row #1.
+      setScheduleStart(Math.max(0, orderedInstallments.length - SCHEDULE_PAGE_SIZE))
+      return
+    }
+    const half = Math.floor(SCHEDULE_PAGE_SIZE / 2)
+    // Clamp so we never start below 0 or scroll past the last row
+    const desired = Math.max(0, Math.min(maxScheduleStart, firstPendingIdx - half))
+    setScheduleStart(desired)
+    // Deps are intentionally narrow — we only re-center on (a) initial load
+    // when length transitions from 0 → N and (b) when the user opens a
+    // different sale. We DON'T want to re-center after each payment: the
+    // user is already looking at the schedule, and yanking the window out
+    // from under them on every paid installment would be jarring. The
+    // explicit "⟶ القسط القادم" button is the recovery if they paginated
+    // away and want to snap back.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orderedInstallments.length, sale.id])
 
   async function handleEditFirstDateConfirm() {
     if (!firstInstallment || !editFirstDateValue.trim()) return
@@ -443,8 +503,16 @@ export function InstallmentDetailsDialog({
         const totalDueSelected = sorted.reduce((s, i) => s + (i.amount_due - i.amount_paid), 0)
         const startIdx = allOrdered.findIndex((i) => i.id === sorted[0].id)
         if (startIdx < 0) throw new Error('Installment not found')
+        log.info('multiPay: starting batch', {
+          saleId: sale.id,
+          amount,
+          totalDueSelected,
+          firstInstNumber: sorted[0].installment_number,
+          selectedCount: sorted.length,
+        })
         let toApply = amount
         let totalApplied = 0
+        let updatedCount = 0
         for (let i = startIdx; i < allOrdered.length && toApply > 0; i++) {
           const inst = allOrdered[i]
           const need = inst.amount_due - inst.amount_paid
@@ -459,10 +527,23 @@ export function InstallmentDetailsDialog({
           }
           if (newStatus === 'paid') updateData.paid_date = paidToday
           const { error } = await supabase.from('installment_payments').update(updateData).eq('id', inst.id)
-          if (error) throw error
+          if (error) {
+            // Log how far we got before bailing — multi-payment is not transactional,
+            // so the exact split between updated and not-updated matters for recovery.
+            log.error(`multiPay: row #${inst.installment_number} failed after ${updatedCount} successful update(s)`, {
+              instId: inst.id,
+              pay,
+              newAmountPaid,
+              error,
+            })
+            throw error
+          }
+          updatedCount += 1
+          log.debug(`multiPay: row #${inst.installment_number} ok`, { pay, newStatus, remainingToApply: toApply - pay })
           toApply -= pay
           totalApplied += pay
         }
+        log.info('multiPay: batch complete', { saleId: sale.id, totalApplied, updatedCount, remainingUnapplied: toApply })
         const overApplied = amount - totalApplied
         const hadExcessApplied = amount > totalDueSelected && overApplied <= 0
         const msg =
@@ -478,6 +559,7 @@ export function InstallmentDetailsDialog({
         await loadInstallments()
         onPaymentSuccess()
       } catch (e: any) {
+        log.error('multiPay: aborted with error', e)
         const msg = e?.message ?? 'فشل تسجيل الدفع'
         setErrorMessage(msg.includes('يتجاوز المتبقي') ? 'فشل تسجيل الدفع. تأكد من الاتصال ثم أعد المحاولة.' : msg)
         setShowErrorDialog(true)
@@ -495,9 +577,16 @@ export function InstallmentDetailsDialog({
     if (startIdx < 0) return
 
     setPaying(true)
+    log.info('singlePay: starting', {
+      saleId: sale.id,
+      amount,
+      startInstNumber: selectedInstallment.installment_number,
+      remainingThis,
+    })
     try {
       let toApply = amount
       let totalApplied = 0
+      let updatedCount = 0
       for (let i = startIdx; i < allOrdered.length && toApply > 0; i++) {
         const inst = allOrdered[i]
         const need = inst.amount_due - inst.amount_paid
@@ -512,10 +601,20 @@ export function InstallmentDetailsDialog({
         }
         if (newStatus === 'paid') updateData.paid_date = paidToday
         const { error } = await supabase.from('installment_payments').update(updateData).eq('id', inst.id)
-        if (error) throw error
+        if (error) {
+          // Log how far we got — single-pay can spill over to multiple rows
+          // (overpayment), so partial failure leaves DB inconsistent.
+          log.error(`singlePay: row #${inst.installment_number} failed after ${updatedCount} successful update(s)`, {
+            instId: inst.id, pay, newAmountPaid, error,
+          })
+          throw error
+        }
+        updatedCount += 1
+        log.debug(`singlePay: row #${inst.installment_number} ok`, { pay, newStatus, remainingToApply: toApply - pay })
         toApply -= pay
         totalApplied += pay
       }
+      log.info('singlePay: complete', { saleId: sale.id, totalApplied, updatedCount, remainingUnapplied: toApply })
       const overApplied = amount - totalApplied
       const successMsg =
         overApplied > 0
@@ -530,6 +629,7 @@ export function InstallmentDetailsDialog({
       await loadInstallments()
       onPaymentSuccess()
     } catch (e: any) {
+      log.error('singlePay: aborted with error', e)
       const msg = e?.message ?? 'فشل تسجيل الدفع'
       setErrorMessage(msg.includes('يتجاوز المتبقي') ? 'فشل تسجيل الدفع. تأكد من الاتصال ثم أعد المحاولة.' : msg)
       setShowErrorDialog(true)
@@ -800,7 +900,7 @@ export function InstallmentDetailsDialog({
                   <p className="text-xs text-gray-500">لا توجد أقساط</p>
                 </Card>
               ) : (
-                installments.map((inst) => {
+                displayedInstallments.map((inst) => {
                   const remaining = inst.amount_due - inst.amount_paid
                   const timeUntilDue = getTimeUntilDue(inst.due_date)
                   const isOverdue = inst.status === 'overdue' || (inst.status === 'pending' && new Date(inst.due_date) < new Date())
@@ -917,7 +1017,7 @@ export function InstallmentDetailsDialog({
                       </td>
                     </tr>
                   ) : (
-                    installments.map((inst) => {
+                    displayedInstallments.map((inst) => {
                       const remaining = inst.amount_due - inst.amount_paid
                       const timeUntilDue = getTimeUntilDue(inst.due_date)
                       const isOverdue = inst.status === 'overdue' || (inst.status === 'pending' && new Date(inst.due_date) < new Date())
@@ -994,6 +1094,51 @@ export function InstallmentDetailsDialog({
                 </tbody>
               </table>
             </div>
+
+            {/* Schedule pagination — only when there's more than one window.
+                Prev/Next move the window by one full page; the center-on-pending
+                button re-positions so the next due installment sits in the middle. */}
+            {hasMultipleWindows && (
+              <div dir="ltr" className="mt-3 flex items-center justify-center gap-1 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => setScheduleStart((s) => Math.max(0, s - SCHEDULE_PAGE_SIZE))}
+                  disabled={scheduleStart === 0}
+                  className="h-8 w-8 rounded-lg bg-white border border-gray-200 text-gray-700 flex items-center justify-center hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                  aria-label="السابق"
+                >
+                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
+                </button>
+                <span className="px-2 text-[12px] font-bold text-gray-700 tabular-nums">
+                  {firstVisibleRow}–{lastVisibleRow} <span className="opacity-60 font-semibold">من</span> {orderedInstallments.length}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setScheduleStart((s) => Math.min(maxScheduleStart, s + SCHEDULE_PAGE_SIZE))}
+                  disabled={scheduleStart >= maxScheduleStart}
+                  className="h-8 w-8 rounded-lg bg-white border border-gray-200 text-gray-700 flex items-center justify-center hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                  aria-label="التالي"
+                >
+                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>
+                </button>
+                {/* Quick-jump: re-center the window on the next pending row.
+                    Useful after the user navigated away with prev/next. */}
+                {pendingOrdered.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const idx = orderedInstallments.findIndex((i) => i.id === pendingOrdered[0].id)
+                      if (idx < 0) return
+                      const half = Math.floor(SCHEDULE_PAGE_SIZE / 2)
+                      setScheduleStart(Math.max(0, Math.min(maxScheduleStart, idx - half)))
+                    }}
+                    className="ms-2 h-8 px-2 rounded-lg bg-blue-50 border border-blue-100 text-blue-700 text-[11px] font-bold hover:bg-blue-100"
+                  >
+                    ⟶ القسط القادم
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </Dialog>

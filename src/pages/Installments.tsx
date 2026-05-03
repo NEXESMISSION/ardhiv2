@@ -1,8 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
-import { Card } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 import { Alert } from '@/components/ui/alert'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -87,14 +85,19 @@ interface InstallmentPayment {
 }
 
 
-/** When not searching, paginate by client box: this many boxes per page */
-const GROUPS_PER_PAGE = 15
+/** When not searching, paginate by client box: this many boxes per page.
+ *  Lowered from 15 → 10 with the redesign — each box is now compact, but the
+ *  expectation is the user only scans the first page (priority-sorted), so a
+ *  shorter page means less scrolling for the common case. */
+const GROUPS_PER_PAGE = 10
 /** When loading all sales (search or full list), load up to this many */
 const SEARCH_LOAD_LIMIT = 5000
 /** Debounce search so we don't refetch on every keystroke */
 const SEARCH_DEBOUNCE_MS = 400
 /** Max sales to load installments for in search mode (keeps batch requests low) */
 const SEARCH_DISPLAY_CAP = 200
+/** A sale is "due soon" when its next-due date is within this many days */
+const DUE_SOON_DAYS = 7
 
 function replaceVars(str: string, vars: Record<string, string | number>): string {
   return Object.entries(vars).reduce((s, [k, v]) => s.replace(new RegExp(`\\{\\{${k}\\}\\}`, 'g'), String(v)), str)
@@ -471,6 +474,87 @@ export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
     return paginatedClientGroups
   }, [searchQuery, paginatedClientGroups, displayedSaleIds])
 
+  // Priority sort: once installments for the current page have loaded, lift the
+  // overdue / due-soon clients to the top so the user lands on what needs to
+  // be paid without scrolling. We also sort sales within each offer group by
+  // the same priority. Falls back to identity order while installments load.
+  // Does NOT touch the underlying clientGroups state — purely a render-time
+  // re-order over the visible page (preserving DB / calc-memo invariants).
+  type SalePriority = 0 | 1 | 2 | 3 // 0=overdue, 1=due-soon, 2=on-track, 3=fully-paid
+  const salePriority = (sale: Sale): { priority: SalePriority; nextDueMs: number } => {
+    const insts = installmentsBySaleId[sale.id]
+    if (!insts || insts.length === 0) return { priority: 3, nextDueMs: Number.MAX_SAFE_INTEGER }
+    const stats = computeStatsFromInstallments(sale, insts)
+    if (stats.overdueCount > 0) {
+      // Tie-break: bigger overdue first → larger amounts surface to the top.
+      return { priority: 0, nextDueMs: -stats.overdueAmount }
+    }
+    if (!stats.nextDueDate) {
+      // No pending installments → fully paid (or no schedule yet).
+      return { priority: 3, nextDueMs: Number.MAX_SAFE_INTEGER }
+    }
+    const dueMs = new Date(stats.nextDueDate).getTime()
+    const daysUntil = (dueMs - Date.now()) / (1000 * 60 * 60 * 24)
+    if (daysUntil <= DUE_SOON_DAYS) return { priority: 1, nextDueMs: dueMs }
+    return { priority: 2, nextDueMs: dueMs }
+  }
+
+  const prioritizedGroupsToRender = useMemo(() => {
+    if (loadingInstallments) return groupsToRender
+    // Reorder sales inside each offer group by priority (overdue → due-soon → on-track),
+    // then reorder offer groups so the most urgent offer block leads, then sort
+    // clients by their best (lowest) priority across all sales.
+    const reordered = groupsToRender.map((cg) => {
+      const offerGroups = cg.offerGroups.map((og) => {
+        const sales = [...og.sales].sort((a, b) => {
+          const pa = salePriority(a), pb = salePriority(b)
+          if (pa.priority !== pb.priority) return pa.priority - pb.priority
+          return pa.nextDueMs - pb.nextDueMs
+        })
+        const top = sales[0] ? salePriority(sales[0]).priority : 3
+        return { ...og, sales, _topPriority: top as SalePriority }
+      })
+      offerGroups.sort((a, b) => a._topPriority - b._topPriority)
+      const groupTop = offerGroups[0]?._topPriority ?? 3
+      return { client: cg.client, offerGroups, _groupPriority: groupTop }
+    })
+    reordered.sort((a, b) => a._groupPriority - b._groupPriority)
+    // Strip the helper fields before returning so consumers see the original shape.
+    return reordered.map((cg) => ({
+      client: cg.client,
+      offerGroups: cg.offerGroups.map(({ _topPriority: _drop, ...og }) => { void _drop; return og }),
+    }))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groupsToRender, installmentsBySaleId, loadingInstallments])
+
+  // Page-level summary (overdue / due-soon / on-track) computed across the
+  // VISIBLE page only — so the chip count and the visible cards stay in sync
+  // even before we can afford to score every loaded sale.
+  const pageSummary = useMemo(() => {
+    let overdue = 0, dueSoon = 0, onTrack = 0, totalOverdueAmount = 0
+    if (loadingInstallments) return { overdue, dueSoon, onTrack, totalOverdueAmount }
+    prioritizedGroupsToRender.forEach((cg) =>
+      cg.offerGroups.forEach((og) =>
+        og.sales.forEach((s) => {
+          const insts = installmentsBySaleId[s.id]
+          if (!insts) return
+          const stats = computeStatsFromInstallments(s, insts)
+          if (stats.overdueCount > 0) {
+            overdue += 1
+            totalOverdueAmount += stats.overdueAmount
+            return
+          }
+          if (stats.nextDueDate) {
+            const days = (new Date(stats.nextDueDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
+            if (days <= DUE_SOON_DAYS) dueSoon += 1
+            else onTrack += 1
+          }
+        })
+      )
+    )
+    return { overdue, dueSoon, onTrack, totalOverdueAmount }
+  }, [prioritizedGroupsToRender, installmentsBySaleId, loadingInstallments])
+
   // Batch load installment_payments; run multiple chunks in parallel (faster than strictly sequential)
   const BATCH_SIZE = 100
   const PARALLEL_CHUNKS = 5
@@ -541,79 +625,228 @@ export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
     window.scrollTo(0, 0)
   }, [currentPage])
 
-  return (
-    <div className="px-2 sm:px-4 lg:px-6 py-2 sm:py-3 lg:py-4 space-y-2 sm:space-y-3 lg:space-y-4">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <h1 className="text-base sm:text-lg lg:text-xl font-bold text-gray-900">{t('installments.pageTitle')}</h1>
-          {onNavigate && (
-            <Button type="button" variant="secondary" size="sm" onClick={() => onNavigate('confirmation')}>
-              {t('installments.goToConfirmation')}
-            </Button>
-          )}
-        </div>
-        {totalCount > 0 && !searchQuery && (
-          <span className="text-xs sm:text-sm text-gray-600">
-            {t('installments.showingRange')
-              .replace('{{from}}', String(totalCount > 0 ? (currentPage - 1) * GROUPS_PER_PAGE + 1 : 0))
-              .replace('{{to}}', String(Math.min(currentPage * GROUPS_PER_PAGE, totalCount)))
-              .replace('{{total}}', String(totalCount))}
-          </span>
+  // Pagination renderer (Confirmation-style numbered buttons). Defined inline
+  // so it closes over currentPage/goToPage/etc. without prop-drilling and
+  // returns null when there's only one page.
+  const renderPagination = () => {
+    if (totalPages <= 1) return null
+    // Build a windowed list of page numbers + ellipses, like Confirmation.
+    const window: Array<number | '...'> = []
+    if (totalPages <= 7) {
+      for (let i = 1; i <= totalPages; i++) window.push(i)
+    } else {
+      window.push(1)
+      if (currentPage > 3) window.push('...')
+      const start = Math.max(2, currentPage - 1)
+      const end = Math.min(totalPages - 1, currentPage + 1)
+      for (let i = start; i <= end; i++) window.push(i)
+      if (currentPage < totalPages - 2) window.push('...')
+      window.push(totalPages)
+    }
+    return (
+      <div dir="ltr" className="flex items-center justify-center gap-1 flex-wrap">
+        <button
+          type="button"
+          onClick={() => goToPage(currentPage - 1)}
+          disabled={!hasPrevPage}
+          className="h-9 w-9 rounded-xl bg-white border border-gray-200 text-gray-700 shadow-[0_1px_2px_rgba(15,23,42,0.04)] flex items-center justify-center hover:bg-gray-50 hover:border-gray-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          title={t('installments.prev')}
+          aria-label={t('installments.prev')}
+        >
+          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
+        </button>
+        {window.map((p, i) =>
+          p === '...' ? (
+            <span key={`gap-${i}`} className="w-7 text-center text-gray-400 font-bold tabular-nums">…</span>
+          ) : (
+            <button
+              key={p}
+              type="button"
+              onClick={() => goToPage(p)}
+              aria-current={currentPage === p ? 'page' : undefined}
+              className={`h-9 min-w-[36px] px-2 rounded-xl text-[13px] font-extrabold tabular-nums transition-colors ${
+                currentPage === p
+                  ? 'bg-gradient-to-b from-blue-500 to-blue-600 text-white shadow-sm shadow-blue-500/30'
+                  : 'bg-white border border-gray-200 text-gray-700 shadow-[0_1px_2px_rgba(15,23,42,0.04)] hover:bg-gray-50 hover:border-gray-300'
+              }`}
+            >
+              {p}
+            </button>
+          )
         )}
-        {searchQuery && (
-          <span className="text-xs sm:text-sm text-gray-600">
-            {(() => {
-              const totalFiltered = filteredClientGroups.reduce((sum, cg) => sum + cg.offerGroups.reduce((s, og) => s + og.sales.length, 0), 0)
-              if (totalFiltered > SEARCH_DISPLAY_CAP) {
-                return replaceVars(t('installments.showingFirstResults'), { cap: SEARCH_DISPLAY_CAP })
-              }
-              return replaceVars(t('installments.showingResults'), { count: totalFiltered })
-            })()}
-          </span>
+        <button
+          type="button"
+          onClick={() => goToPage(currentPage + 1)}
+          disabled={!hasNextPage}
+          className="h-9 w-9 rounded-xl bg-white border border-gray-200 text-gray-700 shadow-[0_1px_2px_rgba(15,23,42,0.04)] flex items-center justify-center hover:bg-gray-50 hover:border-gray-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          title={t('installments.next')}
+          aria-label={t('installments.next')}
+        >
+          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>
+        </button>
+        <span className="inline-flex items-center gap-1 ms-2">
+          <Input
+            type="number"
+            min={1}
+            max={totalPages}
+            value={goToPageInput}
+            onChange={(e) => setGoToPageInput(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleGoToPageInput()}
+            placeholder={t('installments.pagePlaceholder')}
+            className="w-12 h-9 text-center text-[12px] py-0 px-1 rounded-xl"
+            size="sm"
+          />
+          <button
+            type="button"
+            onClick={handleGoToPageInput}
+            className="h-9 px-2.5 rounded-xl bg-white border border-gray-200 text-gray-700 text-[12px] font-bold shadow-[0_1px_2px_rgba(15,23,42,0.04)] hover:bg-gray-50 hover:border-gray-300 transition-colors"
+          >
+            {t('installments.goToPage')}
+          </button>
+        </span>
+      </div>
+    )
+  }
+
+  return (
+    <div className="container mx-auto px-2 sm:px-4 lg:px-6 py-2 sm:py-4 lg:py-6 max-w-7xl space-y-2 sm:space-y-4">
+      {/* HEADER — icon + title + subtitle, mirroring the Confirmation page so
+          installments feels like part of the same surface, not a different app.
+          Mobile sizes pulled down a tier per user feedback ("feels too zoomed"). */}
+      <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
+        <div className="w-8 h-8 sm:w-11 sm:h-11 rounded-xl sm:rounded-2xl bg-blue-50 text-blue-600 ring-1 ring-blue-100 flex items-center justify-center flex-shrink-0">
+          <svg className="w-4 h-4 sm:w-[22px] sm:h-[22px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.85" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="4" width="18" height="18" rx="2" />
+            <path d="M16 2v4" /><path d="M8 2v4" /><path d="M3 10h18" />
+            <path d="M8 14h.01" /><path d="M12 14h.01" /><path d="M16 14h.01" />
+          </svg>
+        </div>
+        <div className="min-w-0 flex-1">
+          <h1 className="text-[15px] sm:text-2xl font-bold text-gray-900 tracking-tight truncate leading-tight">{t('installments.pageTitle')}</h1>
+          <p className="text-[10.5px] sm:text-xs text-gray-500 font-medium truncate">{t('installments.subtitle')}</p>
+        </div>
+        {onNavigate && (
+          <button
+            type="button"
+            onClick={() => onNavigate('confirmation')}
+            className="flex-shrink-0 h-9 px-3 rounded-xl bg-white border border-gray-200 text-gray-700 text-[12px] font-bold shadow-[0_1px_2px_rgba(15,23,42,0.04)] hover:bg-gray-50 hover:border-gray-300 transition-colors whitespace-nowrap"
+          >
+            {t('installments.goToConfirmation')}
+          </button>
         )}
       </div>
 
-      {/* Search Bar */}
-      <div className="bg-white border border-gray-200 rounded-lg p-2 sm:p-3 shadow-sm space-y-2">
-        <div className="relative">
-          <Input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => {
-              setSearchQuery(e.target.value)
-              setSearchByPieceOnly(false)
+      {/* PRIORITY SUMMARY — at-a-glance count of overdue / due-soon / on-track
+          for the visible page. The point is that the user lands here and sees
+          "X متأخر" without having to scan the cards one by one. */}
+      {!loading && (pageSummary.overdue + pageSummary.dueSoon + pageSummary.onTrack) > 0 && (
+        <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+          {pageSummary.overdue > 0 && (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-50 text-red-700 border border-red-100 text-[11.5px] font-bold tabular-nums">
+              <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+              {pageSummary.overdue} {t('installments.summaryOverdue')}
+              {pageSummary.totalOverdueAmount > 0 && (
+                <span className="text-[10.5px] font-bold opacity-80">· {formatPrice(pageSummary.totalOverdueAmount)} DT</span>
+              )}
+            </span>
+          )}
+          {pageSummary.dueSoon > 0 && (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-100 text-[11.5px] font-bold tabular-nums">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+              {pageSummary.dueSoon} {t('installments.summaryDueSoon')}
+            </span>
+          )}
+          {pageSummary.onTrack > 0 && (
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100 text-[11.5px] font-bold tabular-nums">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+              {pageSummary.onTrack} {t('installments.summaryOnTrack')}
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* SEARCH ROW — single line on desktop, stacked on mobile, with the same
+          inline icon pattern as Confirmation. */}
+      <div className="space-y-2">
+        <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2">
+          <div className="relative">
+            <div className="absolute inset-y-0 start-3 flex items-center pointer-events-none text-gray-400">
+              <svg className="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.85" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="11" cy="11" r="7" />
+                <path d="m20 20-3.5-3.5" />
+              </svg>
+            </div>
+            <Input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => {
+                setSearchQuery(e.target.value)
+                setSearchByPieceOnly(false)
+              }}
+              placeholder={searchByPieceOnly ? t('installments.pieceNumberPlaceholder') : t('installments.searchPlaceholder')}
+              className="ps-10 pe-10"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchQuery('')
+                  setSearchByPieceOnly(false)
+                }}
+                className="absolute inset-y-0 end-2 my-auto w-7 h-7 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 flex items-center justify-center transition-colors"
+                aria-label={t('installments.clearSearch')}
+                title={t('installments.clearSearch')}
+              >
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M18 6 6 18" /><path d="m6 6 12 12" />
+                </svg>
+              </button>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setPieceNumberSearchValue(searchQuery.trim())
+              setShowPieceSearchDialog(true)
             }}
-            placeholder={searchByPieceOnly ? t('installments.pieceNumberPlaceholder') : t('installments.searchPlaceholder')}
-            size="sm"
-            className="text-xs sm:text-sm pr-10"
-          />
+            className="h-10 px-3 rounded-xl bg-white border border-gray-200 text-gray-700 text-[12px] font-bold shadow-[0_1px_2px_rgba(15,23,42,0.04)] hover:bg-gray-50 hover:border-gray-300 transition-colors whitespace-nowrap inline-flex items-center justify-center gap-1.5"
+          >
+            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.85" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" />
+            </svg>
+            {t('installments.searchByPieceNumber')}
+          </button>
+        </div>
+        <div className="flex items-center justify-between gap-3 px-1">
+          <span className="text-[11.5px] text-gray-500 font-semibold tabular-nums">
+            {searchQuery
+              ? (() => {
+                  const totalFiltered = filteredClientGroups.reduce((sum, cg) => sum + cg.offerGroups.reduce((s, og) => s + og.sales.length, 0), 0)
+                  if (totalFiltered > SEARCH_DISPLAY_CAP) {
+                    return replaceVars(t('installments.showingFirstResults'), { cap: SEARCH_DISPLAY_CAP })
+                  }
+                  return replaceVars(t('installments.showingResults'), { count: totalFiltered })
+                })()
+              : (totalCount > 0
+                  ? t('installments.showingRange')
+                      .replace('{{from}}', String((currentPage - 1) * GROUPS_PER_PAGE + 1))
+                      .replace('{{to}}', String(Math.min(currentPage * GROUPS_PER_PAGE, totalCount)))
+                      .replace('{{total}}', String(totalCount))
+                  : '')}
+          </span>
           {searchQuery && (
             <button
+              type="button"
               onClick={() => {
                 setSearchQuery('')
                 setSearchByPieceOnly(false)
               }}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
-              title={t('installments.clearSearch')}
+              className="h-7 px-2.5 rounded-full bg-blue-50 border border-blue-100 text-blue-700 text-[10.5px] font-bold hover:bg-blue-100 transition-colors"
             >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
+              {t('installments.clearSearch')}
             </button>
           )}
         </div>
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          className="w-full sm:w-auto text-xs"
-          onClick={() => {
-            setPieceNumberSearchValue(searchQuery.trim())
-            setShowPieceSearchDialog(true)
-          }}
-        >
-          🔍 {t('installments.searchByPieceNumber')}
-        </Button>
       </div>
 
       {/* Search by piece number dialog */}
@@ -672,224 +905,111 @@ export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
       )}
 
       {loading ? (
-        <div className="flex items-center justify-center py-8 min-h-[120px]">
-          <div className="text-center">
-            <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600" />
-            <p className="mt-2 text-xs text-gray-500">{t('installments.loading')}</p>
-          </div>
+        <div className="flex flex-col items-center justify-center py-16">
+          <div className="inline-block animate-spin rounded-full h-10 w-10 border-2 border-gray-200 border-t-blue-600 mb-3" />
+          <p className="text-[13px] text-gray-500 font-semibold">{t('installments.loading')}</p>
         </div>
-      ) : groupsToRender.length === 0 ? (
-        <Card className="p-3 sm:p-4 lg:p-6 text-center">
-          <p className="text-xs sm:text-sm text-gray-500">
+      ) : prioritizedGroupsToRender.length === 0 ? (
+        <div className="rounded-2xl border-2 border-dashed border-gray-200 bg-white/60 p-8 text-center">
+          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-blue-50 text-blue-600 mb-3 ring-1 ring-blue-100">
+            <svg className="w-7 h-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="4" width="18" height="18" rx="2" />
+              <path d="M16 2v4" /><path d="M8 2v4" /><path d="M3 10h18" />
+            </svg>
+          </div>
+          <p className="text-[13px] text-gray-700 font-semibold">
             {searchQuery ? t('installments.noSearchResults') : t('installments.noInstallmentSales')}
           </p>
           {searchQuery && (
-            <p className="text-xs text-gray-400 mt-2 max-w-md mx-auto">
+            <p className="text-[11.5px] text-gray-500 mt-2 max-w-md mx-auto leading-relaxed">
               {t('installments.reservedPiecesHint')}
             </p>
           )}
-        </Card>
+        </div>
       ) : (
         <>
-        {/* Pagination - top */}
-        {totalPages > 1 && (
-          <div className="flex items-center justify-center gap-1.5 sm:gap-2 flex-wrap mb-4">
-            <Button variant="secondary" size="sm" onClick={() => goToPage(currentPage - 1)} disabled={!hasPrevPage} className="text-xs sm:text-sm py-1.5 px-2">
-              {t('installments.prev')}
-            </Button>
-            {totalPages <= 7 ? (
-              Array.from({ length: totalPages }, (_, i) => {
-                const pageNum = i + 1
-                return (
-                  <Button key={pageNum} variant={currentPage === pageNum ? 'primary' : 'secondary'} size="sm" onClick={() => goToPage(pageNum)} className="text-xs sm:text-sm py-1.5 px-2 min-w-[32px] sm:min-w-[36px]">
-                    {pageNum}
-                  </Button>
-                )
-              })
-            ) : (
-              <>
-                <Button variant={currentPage === 1 ? 'primary' : 'secondary'} size="sm" onClick={() => goToPage(1)} className="text-xs sm:text-sm py-1.5 px-2 min-w-[32px] sm:min-w-[36px]">1</Button>
-                {currentPage > 3 && <span className="px-1 sm:px-2 text-xs sm:text-sm text-gray-500">...</span>}
-                {currentPage > 1 && currentPage < totalPages && (
-                  <>
-                    {currentPage > 2 && <Button variant="secondary" size="sm" onClick={() => goToPage(currentPage - 1)} className="text-xs sm:text-sm py-1.5 px-2 min-w-[32px] sm:min-w-[36px]">{currentPage - 1}</Button>}
-                    <Button variant="primary" size="sm" className="text-xs sm:text-sm py-1.5 px-2 min-w-[32px] sm:min-w-[36px]">{currentPage}</Button>
-                    {currentPage < totalPages - 1 && <Button variant="secondary" size="sm" onClick={() => goToPage(currentPage + 1)} className="text-xs sm:text-sm py-1.5 px-2 min-w-[32px] sm:min-w-[36px]">{currentPage + 1}</Button>}
-                  </>
-                )}
-                {currentPage < totalPages - 2 && <span className="px-1 sm:px-2 text-xs sm:text-sm text-gray-500">...</span>}
-                <Button variant={currentPage === totalPages ? 'primary' : 'secondary'} size="sm" onClick={() => goToPage(totalPages)} className="text-xs sm:text-sm py-1.5 px-2 min-w-[32px] sm:min-w-[36px]">{totalPages}</Button>
-              </>
-            )}
-            <Button variant="secondary" size="sm" onClick={() => goToPage(currentPage + 1)} disabled={!hasNextPage} className="text-xs sm:text-sm py-1.5 px-2">
-              {t('installments.next')}
-            </Button>
-            <span className="inline-flex items-center gap-1 ml-1 sm:ml-2">
-              <Input
-                type="number"
-                min={1}
-                max={totalPages}
-                value={goToPageInput}
-                onChange={(e) => setGoToPageInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleGoToPageInput()}
-                placeholder={t('installments.pagePlaceholder')}
-                className="w-11 sm:w-12 h-8 text-center text-xs py-0 px-1"
-                size="sm"
-              />
-              <Button variant="secondary" size="sm" onClick={handleGoToPageInput} className="text-xs py-1.5 px-2">
-                {t('installments.goToPage')}
-              </Button>
-            </span>
-          </div>
-        )}
-        <div className="space-y-4 sm:space-y-5">
-          {groupsToRender.map((clientGroup, clientIndex) => {
+        {renderPagination()}
+
+        <div className="space-y-3">
+          {prioritizedGroupsToRender.map((clientGroup, clientIndex) => {
             const totalPieces = clientGroup.offerGroups.reduce((sum, og) => sum + og.sales.length, 0)
-            
+            // Aggregate remaining across all sales for this client (visible page).
+            // Falls back to 0 while installments load — header still renders.
+            const clientRemaining = clientGroup.offerGroups.reduce((sum, og) =>
+              sum + og.sales.reduce((s, sale) => {
+                const insts = installmentsBySaleId[sale.id]
+                if (!insts) return s + sale.sale_price
+                const stats = computeStatsFromInstallments(sale, insts)
+                return s + Math.max(0, stats.remaining)
+              }, 0), 0)
             return (
-              <Card key={clientGroup.client?.id ?? `client-${clientIndex}`} className="p-4 sm:p-5 lg:p-6 hover:shadow-xl transition-shadow border-2 border-blue-200 rounded-lg bg-gradient-to-br from-blue-50 to-white">
-                {/* Client Header */}
-                <div className="mb-4 pb-4 border-b-2 border-blue-200">
-                  <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-2">
-                    <h2 className="text-xl sm:text-2xl font-bold text-gray-900 truncate">
-                      👤 {clientGroup.client?.name || t('shared.unknown')}
+              <div key={clientGroup.client?.id ?? `client-${clientIndex}`} className="rounded-xl sm:rounded-2xl border border-gray-200/80 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)] overflow-hidden">
+                {/* Compact client header — name + CIN on the left, totals on the right */}
+                <div className="flex items-center justify-between gap-2 px-2.5 sm:px-4 py-2 sm:py-2.5 border-b border-gray-200/80 bg-gradient-to-l from-blue-50/40 via-indigo-50/30 to-white">
+                  <div className="min-w-0">
+                    <h2 className="text-[12.5px] sm:text-[15px] font-extrabold text-gray-900 tracking-tight truncate leading-tight">
+                      {clientGroup.client?.name || t('shared.unknown')}
                     </h2>
-                    <Badge variant="info" size="lg" className="text-sm font-semibold">
-                      {totalPieces} {totalPieces === 1 ? t('installments.piece') : t('installments.pieces')}
-                    </Badge>
+                    <div className="flex items-center gap-1.5 text-[10px] sm:text-[11px] text-gray-500 font-semibold tabular-nums truncate">
+                      <span className="truncate">CIN: {clientGroup.client?.id_number || '—'}</span>
+                      {clientGroup.client?.phone && (<><span className="opacity-60">·</span><span className="truncate">{clientGroup.client.phone}</span></>)}
+                    </div>
                   </div>
-                  <p className="text-sm sm:text-base text-gray-600 font-medium">
-                    CIN: {clientGroup.client?.id_number || ''}
-                  </p>
+                  <div className="text-end flex-shrink-0">
+                    <p className="num text-[12.5px] sm:text-[15px] font-extrabold text-gray-900 tracking-tight leading-tight">
+                      {formatPrice(clientRemaining)} <span className="text-[9px] sm:text-[10px] font-bold text-gray-400">DT</span>
+                    </p>
+                    <p className="text-[9.5px] sm:text-[10.5px] text-gray-500 font-bold">
+                      {totalPieces} {totalPieces === 1 ? t('installments.piece') : t('installments.pieces')} · {t('installments.remainingLabel')}
+                    </p>
+                  </div>
                 </div>
 
-                {/* One box per client: inside it, sections by offer (no extra boxes) */}
-                <div className="space-y-5">
+                {/* Offer groups — single inline pill header, then a 2/3-col grid of compact piece cards */}
+                <div className="p-2.5 sm:p-3 space-y-3">
                   {clientGroup.offerGroups.map((offerGroup, offerIndex) => {
                     const offerSales = offerGroup.sales
                     return (
-                      <div
-                        key={`offer-${clientIndex}-${offerIndex}`}
-                        className="rounded-lg border border-gray-200 bg-gray-50/50 p-3 sm:p-4"
-                      >
-                        {/* Offer section header (not a card, just a label) */}
-                        {offerGroup.offer && (
-                          <div className="mb-3 pb-2 border-b border-gray-200">
-                            <div className="flex flex-wrap items-center gap-2 mb-1">
-                              <Badge variant="secondary" size="md" className="text-xs sm:text-sm font-semibold">
-                                📋 {offerGroup.offer.name || t('installments.offerLabel')}
-                              </Badge>
-                              <Badge variant="info" size="sm" className="text-xs">
-                                {offerSales.length} {offerSales.length === 1 ? t('installments.piece') : t('installments.pieces')}
-                              </Badge>
-                            </div>
-                            <div className="text-xs sm:text-sm text-gray-600 space-y-0.5">
-                              <div>💰 {t('installments.monthlyAmountLabel')}: {offerGroup.offer.monthly_amount?.toLocaleString() || '-'} DT</div>
-                              {offerGroup.offer.months && (
-                                <div>📅 {t('installments.monthsCountLabel')}: {offerGroup.offer.months}</div>
-                              )}
-                            </div>
-                          </div>
-                        )}
-                        {!offerGroup.offer && offerSales.length > 1 && (
-                          <div className="mb-3 pb-2 border-b border-gray-200">
-                            <Badge variant="secondary" size="sm" className="text-xs">
-                              {offerSales.length} {offerSales.length === 1 ? t('installments.piece') : t('installments.pieces')} بدون عرض
-                            </Badge>
-                          </div>
-                        )}
-
-                        {/* Mobile: grid of piece cards */}
-                        <div className="grid grid-cols-2 gap-2 sm:gap-3 lg:hidden">
-                          {offerSales.map((sale) => (
-                            <SaleCard key={sale.id} sale={sale} onClick={() => handleSaleClick(sale)} installments={installmentsBySaleId[sale.id] ?? []} loadingInstallments={loadingInstallments} />
-                          ))}
+                      <div key={`offer-${clientIndex}-${offerIndex}`}>
+                        {/* Offer label — single inline pill, all metadata on one row */}
+                        <div className="flex items-center gap-1.5 mb-2 ps-1 flex-wrap">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10.5px] font-bold border bg-blue-50 text-blue-700 border-blue-100">
+                            📋 {offerGroup.offer?.name || t('installments.offerLabel')}
+                          </span>
+                          <span className="text-[10.5px] text-gray-500 font-semibold">
+                            {offerSales.length} {offerSales.length === 1 ? t('installments.piece') : t('installments.pieces')}
+                          </span>
+                          {offerGroup.offer?.monthly_amount != null && (
+                            <span className="text-[10.5px] text-gray-500 font-semibold">· {formatPrice(offerGroup.offer.monthly_amount)} DT/{t('installments.monthShort')}</span>
+                          )}
+                          {offerGroup.offer?.months != null && (
+                            <span className="text-[10.5px] text-gray-500 font-semibold">· {offerGroup.offer.months} {t('installments.monthShort')}</span>
+                          )}
                         </div>
 
-                        {/* Desktop table: 10 columns aligned with headers */}
-                        <div className="hidden lg:block overflow-x-auto -mx-1">
-                          <table className="w-full min-w-[900px] text-sm border-collapse table-fixed">
-                            <thead>
-                              <tr className="border-b-2 border-gray-300 bg-gray-100">
-                                <th className="text-right py-2.5 px-3 font-semibold text-xs w-[140px]">{t('installments.dealColumn')}</th>
-                                <th className="text-right py-2.5 px-3 font-semibold text-xs w-[90px]">{t('installments.saleDateColumn')}</th>
-                                <th className="text-right py-2.5 px-3 font-semibold text-xs w-[70px]">{t('installments.piecesColumn')}</th>
-                                <th className="text-right py-2.5 px-3 font-semibold text-xs w-[75px]">{t('installments.installmentsColumn')}</th>
-                                <th className="text-right py-2.5 px-3 font-semibold text-xs w-[95px]">{t('installments.paidColumn')}</th>
-                                <th className="text-right py-2.5 px-3 font-semibold text-xs w-[95px]">{t('installments.remainingColumn')}</th>
-                                <th className="text-right py-2.5 px-3 font-semibold text-xs w-[85px]">{t('installments.overdueColumn')}</th>
-                                <th className="text-right py-2.5 px-3 font-semibold text-xs w-[110px]">{t('installments.dueDateColumn')}</th>
-                                <th className="text-right py-2.5 px-3 font-semibold text-xs w-[100px]">{t('installments.statusColumn')}</th>
-                                <th className="text-right py-2.5 px-3 font-semibold text-xs w-[100px]">{t('installments.actionColumn')}</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {offerSales.map((sale) => (
-                                <SaleRow key={sale.id} sale={sale} onClick={() => handleSaleClick(sale)} installments={installmentsBySaleId[sale.id] ?? []} loadingInstallments={loadingInstallments} />
-                              ))}
-                            </tbody>
-                          </table>
+                        {/* Pieces grid — 2 cols on mobile, 3 on desktop. No more separate desktop table —
+                            cards scale and the table was eating horizontal space. */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                          {offerSales.map((sale) => (
+                            <SaleCard
+                              key={sale.id}
+                              sale={sale}
+                              onClick={() => handleSaleClick(sale)}
+                              installments={installmentsBySaleId[sale.id] ?? []}
+                              loadingInstallments={loadingInstallments}
+                            />
+                          ))}
                         </div>
                       </div>
                     )
                   })}
                 </div>
-              </Card>
+              </div>
             )
           })}
         </div>
 
-        {/* Pagination - same style as إدارة العملاء */}
-        {totalPages > 1 && (
-          <div className="flex items-center justify-center gap-1.5 sm:gap-2 flex-wrap mt-4">
-            <Button variant="secondary" size="sm" onClick={() => goToPage(currentPage - 1)} disabled={!hasPrevPage} className="text-xs sm:text-sm py-1.5 px-2">
-              {t('installments.prev')}
-            </Button>
-            {totalPages <= 7 ? (
-              Array.from({ length: totalPages }, (_, i) => {
-                const pageNum = i + 1
-                return (
-                  <Button key={pageNum} variant={currentPage === pageNum ? 'primary' : 'secondary'} size="sm" onClick={() => goToPage(pageNum)} className="text-xs sm:text-sm py-1.5 px-2 min-w-[32px] sm:min-w-[36px]">
-                    {pageNum}
-                  </Button>
-                )
-              })
-            ) : (
-              <>
-                <Button variant={currentPage === 1 ? 'primary' : 'secondary'} size="sm" onClick={() => goToPage(1)} className="text-xs sm:text-sm py-1.5 px-2 min-w-[32px] sm:min-w-[36px]">1</Button>
-                {currentPage > 3 && <span className="px-1 sm:px-2 text-xs sm:text-sm text-gray-500">...</span>}
-                {currentPage > 1 && currentPage < totalPages && (
-                  <>
-                    {currentPage > 2 && <Button variant="secondary" size="sm" onClick={() => goToPage(currentPage - 1)} className="text-xs sm:text-sm py-1.5 px-2 min-w-[32px] sm:min-w-[36px]">{currentPage - 1}</Button>}
-                    <Button variant="primary" size="sm" className="text-xs sm:text-sm py-1.5 px-2 min-w-[32px] sm:min-w-[36px]">{currentPage}</Button>
-                    {currentPage < totalPages - 1 && <Button variant="secondary" size="sm" onClick={() => goToPage(currentPage + 1)} className="text-xs sm:text-sm py-1.5 px-2 min-w-[32px] sm:min-w-[36px]">{currentPage + 1}</Button>}
-                  </>
-                )}
-                {currentPage < totalPages - 2 && <span className="px-1 sm:px-2 text-xs sm:text-sm text-gray-500">...</span>}
-                <Button variant={currentPage === totalPages ? 'primary' : 'secondary'} size="sm" onClick={() => goToPage(totalPages)} className="text-xs sm:text-sm py-1.5 px-2 min-w-[32px] sm:min-w-[36px]">{totalPages}</Button>
-              </>
-            )}
-            <Button variant="secondary" size="sm" onClick={() => goToPage(currentPage + 1)} disabled={!hasNextPage} className="text-xs sm:text-sm py-1.5 px-2">
-              {t('installments.next')}
-            </Button>
-            <span className="inline-flex items-center gap-1 ml-1 sm:ml-2">
-              <Input
-                type="number"
-                min={1}
-                max={totalPages}
-                value={goToPageInput}
-                onChange={(e) => setGoToPageInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleGoToPageInput()}
-                placeholder={t('installments.pagePlaceholder')}
-                className="w-11 sm:w-12 h-8 text-center text-xs py-0 px-1"
-                size="sm"
-              />
-              <Button variant="secondary" size="sm" onClick={handleGoToPageInput} className="text-xs py-1.5 px-2">
-                {t('installments.goToPage')}
-              </Button>
-            </span>
-          </div>
-        )}
+        {renderPagination()}
         </>
       )}
 
@@ -908,373 +1028,152 @@ export function InstallmentsPage({ onNavigate }: InstallmentsPageProps) {
   )
 }
 
-// Separate component for sale row; stats from batched installments (no per-row fetch)
-function SaleRow({ sale, onClick, installments = [], loadingInstallments = false }: { sale: Sale; onClick: () => void; installments?: InstallmentPayment[]; loadingInstallments?: boolean }) {
-  const { t } = useLanguage()
-  const [touchStart, setTouchStart] = useState<{ x: number; y: number; time: number; isScrolling?: boolean } | null>(null)
-  const stats = useMemo(() => (loadingInstallments ? null : computeStatsFromInstallments(sale, installments)), [sale, installments, loadingInstallments])
-
-  if (loadingInstallments || !stats) {
-    return (
-      <tr>
-        <td colSpan={10} className="py-3 px-3 text-center text-xs text-gray-500">
-          {t('installments.loading')}
-        </td>
-      </tr>
-    )
-  }
-
-  const getStatusBadge = () => {
-    if (stats.overdueCount > 0) {
-      return <Badge variant="danger" size="sm" className="text-xs">⚠️ {t('installments.badgeOverdue')}</Badge>
-    }
-    if (stats.nextDueDate) {
-      const daysUntilDue = Math.ceil(
-        (new Date(stats.nextDueDate).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)
-      )
-      if (daysUntilDue <= 7) {
-        return <Badge variant="warning" size="sm" className="text-xs">⏰ {t('installments.badgeDueSoon')}</Badge>
-      }
-    }
-    return <Badge variant="success" size="sm" className="text-xs">🟢 {t('installments.badgeOnTrack')}</Badge>
-  }
-
-  const formatNextDueDate = () => {
-    if (!stats.nextDueDate) return '-'
-    const date = new Date(stats.nextDueDate)
-    const now = new Date()
-    const daysDiff = Math.ceil((date.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
-
-    if (daysDiff < 0) return `(${Math.abs(daysDiff)} ${t('installments.dayWord')})`
-    if (daysDiff === 0) return `(${t('installments.today')})`
-    return `(${daysDiff} ${t('installments.dayWord')})`
-  }
-
-  const handleTouchStart = (e: React.TouchEvent) => {
-    const touch = e.touches[0]
-    setTouchStart({
-      x: touch.clientX,
-      y: touch.clientY,
-      time: Date.now(),
-      isScrolling: false,
-    })
-  }
-
-  const handleTouchMove = (e: React.TouchEvent) => {
-    if (!touchStart) return
-    const touch = e.touches[0]
-    const deltaX = Math.abs(touch.clientX - touchStart.x)
-    const deltaY = Math.abs(touch.clientY - touchStart.y)
-    
-    // If moved more than 5px, it's definitely a scroll
-    if (deltaX > 5 || deltaY > 5) {
-      setTouchStart({ ...touchStart, isScrolling: true })
-    }
-  }
-
-  const handleTouchEnd = (e: React.TouchEvent) => {
-    if (!touchStart) return
-    
-    // Don't handle touch if clicking on a button or interactive element
-    const target = e.target as HTMLElement
-    if (target.closest('button') || target.closest('a') || target.closest('[role="button"]')) {
-      setTouchStart(null)
-      return
-    }
-    
-    // If we detected scrolling, don't treat as click
-    if (touchStart.isScrolling) {
-      setTouchStart(null)
-      return
-    }
-    
-    const touch = e.changedTouches[0]
-    const deltaX = Math.abs(touch.clientX - touchStart.x)
-    const deltaY = Math.abs(touch.clientY - touchStart.y)
-    const deltaTime = Date.now() - touchStart.time
-    
-    // Increased threshold to 20px and 250ms
-    if (deltaX > 20 || deltaY > 20 || deltaTime > 250) {
-      setTouchStart(null)
-      return
-    }
-    
-    // It's a click - only prevent default at the very end
-    e.preventDefault()
-    e.stopPropagation()
-    onClick()
-    setTouchStart(null)
-  }
-
-  const handleClick = (e: React.MouseEvent) => {
-    // Don't handle click if clicking on a button or interactive element
-    const target = e.target as HTMLElement
-    if (target.closest('button') || target.closest('a') || target.closest('[role="button"]')) {
-      return
-    }
-    e.preventDefault()
-    e.stopPropagation()
-    onClick()
-  }
-
-  return (
-    <tr
-      className="border-b border-gray-200 hover:bg-gray-50 cursor-pointer align-top"
-      onTouchStart={handleTouchStart}
-      onTouchMove={handleTouchMove}
-      onTouchEnd={handleTouchEnd}
-      onClick={handleClick}
-    >
-      <td className="py-2.5 px-3 text-right text-xs">
-        <div className="font-medium">{sale.client?.name || '-'}</div>
-        <div className="text-gray-500">{sale.client?.id_number || ''}</div>
-      </td>
-      <td className="py-2.5 px-3 text-right text-xs whitespace-nowrap">
-        {formatDateShort(sale.sale_date)}
-      </td>
-      <td className="py-2.5 px-3 text-right text-xs">
-        {sale.piece?.piece_number || '-'}
-      </td>
-      <td className="py-2.5 px-3 text-right text-xs">
-        {stats.paidCount}/{stats.totalCount}
-      </td>
-      <td className="py-2.5 px-3 text-right font-semibold text-xs whitespace-nowrap">
-        {formatPrice(stats.totalPaid)} DT
-      </td>
-      <td className="py-2.5 px-3 text-right font-semibold text-gray-700 text-xs whitespace-nowrap">
-        {formatPrice(stats.remaining)} DT
-      </td>
-      <td className="py-2.5 px-3 text-right text-xs whitespace-nowrap">
-        {stats.overdueAmount > 0 ? (
-          <span className="text-red-600 font-semibold">{formatPrice(stats.overdueAmount)} DT</span>
-        ) : (
-          '-'
-        )}
-      </td>
-      <td className="py-2.5 px-3 text-right text-xs">
-        {stats.nextDueDate ? (
-          <div>
-            <div>{formatDateShort(stats.nextDueDate)}</div>
-            <div className="text-gray-500">{formatNextDueDate()}</div>
-          </div>
-        ) : (
-          '-'
-        )}
-      </td>
-      <td className="py-2.5 px-3 text-right">
-        {getStatusBadge()}
-      </td>
-      <td className="py-2.5 px-3 text-right">
-        <Button
-          size="sm"
-          variant="secondary"
-          onClick={(e) => {
-            e.preventDefault()
-            e.stopPropagation()
-            onClick()
-          }}
-          className="text-xs py-1 px-2"
-        >
-          {t('installments.viewDetails')}
-        </Button>
-      </td>
-    </tr>
-  )
-}
-
-// Mobile-optimized card component; stats from batched installments (no per-card fetch)
+// Compact piece card — single source of truth for both mobile and desktop now
+// that the wide table is gone. Client identity already lives in the parent
+// header, so this card only renders piece-level info to avoid restating things
+// the user already sees one row up.
 function SaleCard({ sale, onClick, installments = [], loadingInstallments = false }: { sale: Sale; onClick: () => void; installments?: InstallmentPayment[]; loadingInstallments?: boolean }) {
   const { t } = useLanguage()
-  const [touchStart, setTouchStart] = useState<{ x: number; y: number; time: number; isScrolling?: boolean } | null>(null)
+  // Snapshot Date.now() inside the memo so render stays pure (React 19 strict
+  // rules flag bare `Date.now()` during render). The snapshot only refreshes
+  // when sale/installments change, which is fine — relative-day labels don't
+  // need to tick on every re-render.
   const stats = useMemo(() => (loadingInstallments ? null : computeStatsFromInstallments(sale, installments)), [sale, installments, loadingInstallments])
+  const dayCalc = useMemo(() => {
+    if (!stats || !stats.nextDueDate) return { daysUntilDue: null as number | null, overdueDays: null as number | null, overdueDateIso: null as string | null }
+    const now = new Date().getTime()
+    const dayMs = 1000 * 60 * 60 * 24
+    const daysUntilDue = Math.ceil((new Date(stats.nextDueDate).getTime() - now) / dayMs)
+    const overdueInst = installments.find((i) => i.status === 'pending' && new Date(i.due_date).getTime() < now)
+    const overdueDays = overdueInst ? Math.abs(Math.ceil((new Date(overdueInst.due_date).getTime() - now) / dayMs)) : null
+    return { daysUntilDue, overdueDays, overdueDateIso: overdueInst?.due_date ?? null }
+  }, [stats, installments])
 
   if (loadingInstallments || !stats) {
     return (
-      <Card className="p-2">
-        <div className="text-center py-2 text-xs text-gray-500">{t('installments.loading')}</div>
-      </Card>
+      <div className="rounded-xl border border-gray-200/80 bg-white p-2.5 shadow-[0_1px_2px_rgba(15,23,42,0.04)] animate-pulse">
+        <div className="h-3 bg-gray-100 rounded w-1/2 mb-2" />
+        <div className="h-2 bg-gray-100 rounded w-3/4 mb-2" />
+        <div className="h-1.5 bg-gray-100 rounded w-full" />
+      </div>
     )
   }
 
-  const getStatusBadge = () => {
-    if (stats.overdueCount > 0) {
-      return <Badge variant="danger" size="sm" className="text-xs">⚠️ {t('installments.badgeOverdue')}</Badge>
+  // Tone derives from priority. Border + background + status pill stay in lockstep
+  // so a quick scan of the grid surfaces the urgent cards visually, not just textually.
+  const isOverdue = stats.overdueCount > 0
+  const { daysUntilDue, overdueDays, overdueDateIso } = dayCalc
+  const isDueSoon = !isOverdue && daysUntilDue != null && daysUntilDue <= DUE_SOON_DAYS
+  const tone = isOverdue
+    ? 'border-red-200 bg-gradient-to-br from-red-50/60 to-white hover:border-red-300'
+    : isDueSoon
+    ? 'border-amber-200 bg-gradient-to-br from-amber-50/60 to-white hover:border-amber-300'
+    : 'border-gray-200/80 bg-white hover:border-blue-200'
+  const progressPct = stats.totalCount > 0 ? (stats.paidCount / stats.totalCount) * 100 : 0
+
+  const statusPill = isOverdue
+    ? <span className="inline-flex items-center gap-1 px-1.5 py-0 rounded-full text-[10px] font-bold border bg-red-50 text-red-700 border-red-100">⚠ {t('installments.badgeOverdue')}</span>
+    : isDueSoon
+    ? <span className="inline-flex items-center gap-1 px-1.5 py-0 rounded-full text-[10px] font-bold border bg-amber-50 text-amber-700 border-amber-100">⏰ {t('installments.badgeDueSoonShort')}</span>
+    : <span className="inline-flex items-center gap-1 px-1.5 py-0 rounded-full text-[10px] font-bold border bg-emerald-50 text-emerald-700 border-emerald-100">✓ {t('installments.badgeOnTrack')}</span>
+
+  // Day chip text near next-due date — relative ("3 يوم", "اليوم", "متأخر 5 يوم").
+  // All Date.now()-based math comes from the dayCalc memo above so render is pure.
+  const nextDueLabel = (() => {
+    if (!stats.nextDueDate) return null
+    if (isOverdue) {
+      if (overdueDays == null || !overdueDateIso) return null
+      return `${formatDateShort(overdueDateIso)} · ${overdueDays} ${t('installments.dayWord')}`
     }
-    if (stats.nextDueDate) {
-      const daysUntilDue = Math.ceil(
-        (new Date(stats.nextDueDate).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24)
-      )
-      if (daysUntilDue <= 7) {
-        return <Badge variant="warning" size="sm" className="text-xs">⏰ {t('installments.badgeDueSoonShort')}</Badge>
+    if (daysUntilDue === 0) return `${formatDateShort(stats.nextDueDate)} · ${t('installments.today')}`
+    return `${formatDateShort(stats.nextDueDate)} · ${daysUntilDue} ${t('installments.dayWord')}`
+  })()
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onClick}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onClick()
         }
-    }
-    return <Badge variant="success" size="sm" className="text-xs">🟢 {t('installments.badgeOnTrack')}</Badge>
-  }
-
-  // Duplicate `formatNextDueDate` removed — the canonical version above
-  // (line ~1013) is the one referenced from JSX. The TS unused-decl warning
-  // here was the second copy with no callers.
-
-  const handleTouchStart = (e: React.TouchEvent) => {
-    const touch = e.touches[0]
-    setTouchStart({
-      x: touch.clientX,
-      y: touch.clientY,
-      time: Date.now(),
-      isScrolling: false,
-    })
-  }
-
-  const handleTouchMove = (e: React.TouchEvent) => {
-    if (!touchStart) return
-    const touch = e.touches[0]
-    const deltaX = Math.abs(touch.clientX - touchStart.x)
-    const deltaY = Math.abs(touch.clientY - touchStart.y)
-    
-    // If moved more than 5px, it's definitely a scroll
-    if (deltaX > 5 || deltaY > 5) {
-      setTouchStart({ ...touchStart, isScrolling: true })
-    }
-  }
-
-  const handleTouchEnd = (e: React.TouchEvent) => {
-    if (!touchStart) return
-    
-    // Don't handle touch if clicking on a button or interactive element
-    const target = e.target as HTMLElement
-    if (target.closest('button') || target.closest('a') || target.closest('[role="button"]')) {
-      setTouchStart(null)
-      return
-    }
-    
-    // If we detected scrolling, don't treat as click
-    if (touchStart.isScrolling) {
-      setTouchStart(null)
-      return
-    }
-    
-    const touch = e.changedTouches[0]
-    const deltaX = Math.abs(touch.clientX - touchStart.x)
-    const deltaY = Math.abs(touch.clientY - touchStart.y)
-    const deltaTime = Date.now() - touchStart.time
-    
-    // Increased threshold to 20px and 250ms
-    if (deltaX > 20 || deltaY > 20 || deltaTime > 250) {
-      setTouchStart(null)
-      return
-    }
-    
-    // It's a click - only prevent default at the very end
-    e.preventDefault()
-    e.stopPropagation()
-    onClick()
-    setTouchStart(null)
-  }
-
-  const handleClick = (e: React.MouseEvent) => {
-    // Don't handle click if clicking on a button or interactive element
-    const target = e.target as HTMLElement
-    if (target.closest('button') || target.closest('a') || target.closest('[role="button"]')) {
-      return
-    }
-    e.preventDefault()
-    e.stopPropagation()
-    onClick()
-  }
-
-              return (
-    <Card 
-      className="p-2.5 sm:p-3 hover:shadow-lg transition-all cursor-pointer border border-gray-200 hover:border-blue-400 bg-white rounded-lg h-full flex flex-col" 
-      onTouchStart={handleTouchStart}
-      onTouchMove={handleTouchMove}
-      onTouchEnd={handleTouchEnd}
-      onClick={handleClick}
+      }}
+      className={`group relative rounded-lg sm:rounded-xl border p-2 sm:p-2.5 shadow-[0_1px_2px_rgba(15,23,42,0.04)] hover:shadow-md transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 ${tone}`}
     >
-      <div className="space-y-2 flex-1 flex flex-col">
-        {/* Header - Client Name & Status */}
-        <div className="flex items-start justify-between gap-1.5 pb-2 border-b border-gray-100">
-          <div className="flex-1 min-w-0">
-            <div className="font-bold text-xs sm:text-sm text-gray-900 truncate leading-tight mb-0.5">
-              {sale.client?.name || t('shared.unknown')}
-            </div>
-            <div className="text-[10px] sm:text-xs text-gray-500 truncate">
-              {sale.client?.id_number || ''}
-            </div>
-          </div>
-          <div className="flex-shrink-0">
-            {getStatusBadge()}
+      {/* Top row: piece identity + status pill */}
+      <div className="flex items-start justify-between gap-1.5 mb-1">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1 flex-wrap">
+            <span className="text-[11px] sm:text-[12.5px] font-extrabold text-gray-900 tracking-tight truncate">{sale.batch?.name || '-'}</span>
+            <span className="text-[10px] sm:text-[11.5px] font-bold text-gray-500 tabular-nums">#{sale.piece?.piece_number || '-'}</span>
+            {sale.piece?.surface_m2 != null && (
+              <span className="text-[9px] sm:text-[10.5px] text-gray-400 font-semibold tabular-nums">{sale.piece.surface_m2} m²</span>
+            )}
           </div>
         </div>
+        <div className="flex-shrink-0">{statusPill}</div>
+      </div>
 
-        {/* Piece & Date - Compact */}
-        <div className="flex items-center justify-between text-[10px] sm:text-xs">
-          <div className="flex items-center gap-1">
-            <span className="text-gray-500">📋</span>
-            <span className="font-semibold text-gray-900">{sale.piece?.piece_number || '-'}</span>
-          </div>
-          <div className="text-gray-500">
-            {formatDateShort(sale.sale_date)}
-          </div>
+      {/* Progress + counter */}
+      <div className="mb-1">
+        <div className="flex items-center justify-between mb-1">
+          <span className="text-[9.5px] sm:text-[10.5px] text-gray-500 font-semibold">{t('installments.installmentsLabel')}</span>
+          <span className="text-[10.5px] sm:text-[12px] font-extrabold text-gray-900 tabular-nums">
+            {stats.paidCount}<span className="text-gray-400">/{stats.totalCount}</span>
+          </span>
         </div>
-
-        {/* Installments Progress - Compact & Visual */}
-        <div className="bg-gradient-to-r from-blue-50 to-blue-100 rounded-md p-2 border border-blue-200">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-[10px] sm:text-xs font-medium text-gray-700">{t('installments.installmentsLabel')}</span>
-            <span className="font-bold text-sm sm:text-base text-blue-600">{stats.paidCount}/{stats.totalCount}</span>
-          </div>
-          {/* Progress bar */}
-          <div className="w-full bg-blue-200 rounded-full h-1.5 mb-1">
-            <div
-              className="bg-blue-600 h-1.5 rounded-full transition-all"
-              style={{ width: `${stats.totalCount > 0 ? (stats.paidCount / stats.totalCount) * 100 : 0}%` }}
-            />
-          </div>
-          {stats.nextDueDate && (
-            <div className="text-[9px] sm:text-[10px] text-gray-600 truncate">
-              ⏰ {formatDateShort(stats.nextDueDate)}
-            </div>
-          )}
-        </div>
-
-        {/* Financial Summary - Compact Grid */}
-        <div className="grid grid-cols-2 gap-1.5">
-          <div className="bg-green-50 rounded-md p-1.5 sm:p-2 border border-green-200">
-            <div className="text-[9px] sm:text-[10px] text-gray-600 mb-0.5">💰 {t('installments.paidLabel')}</div>
-            <div className="font-bold text-xs sm:text-sm text-green-700 leading-tight">{formatPrice(stats.totalPaid)}</div>
-          </div>
-          <div className="bg-gray-50 rounded-md p-1.5 sm:p-2 border border-gray-200">
-            <div className="text-[9px] sm:text-[10px] text-gray-600 mb-0.5">📊 {t('installments.remainingLabel')}</div>
-            <div className="font-bold text-xs sm:text-sm text-gray-800 leading-tight">{formatPrice(stats.remaining)}</div>
-          </div>
-        </div>
-
-        {/* Overdue Alert - Compact */}
-        {stats.overdueAmount > 0 && (
-          <div className="bg-red-50 rounded-md p-1.5 sm:p-2 border border-red-300">
-            <div className="flex items-center justify-between">
-              <span className="text-[9px] sm:text-[10px] font-semibold text-red-700">⚠️ {t('installments.overdueLabel')}</span>
-              <span className="font-bold text-xs sm:text-sm text-red-700">{formatPrice(stats.overdueAmount)}</span>
-            </div>
-          </div>
-        )}
-
-        {/* Action Button - Compact */}
-        <div className="pt-1.5 mt-auto">
-          <Button
-            size="sm"
-            variant="primary" 
-            onClick={(e) => { 
-              e.preventDefault()
-              e.stopPropagation()
-              onClick()
-            }}
-            className="w-full text-[10px] sm:text-xs py-1.5 px-2 font-semibold"
-          >
-            📋 {t('installments.viewDetails')}
-          </Button>
+        <div className="w-full bg-gray-100 rounded-full h-1 sm:h-1.5 overflow-hidden">
+          <div
+            className={`h-1 sm:h-1.5 rounded-full transition-all ${isOverdue ? 'bg-red-500' : isDueSoon ? 'bg-amber-500' : 'bg-blue-500'}`}
+            style={{ width: `${progressPct}%` }}
+          />
         </div>
       </div>
-    </Card>
+
+      {/* Next-due / overdue line — single dense row */}
+      {nextDueLabel && (
+        <div className={`flex items-center gap-1 mb-1 text-[9.5px] sm:text-[10.5px] font-semibold tabular-nums ${isOverdue ? 'text-red-700' : 'text-gray-600'}`}>
+          <svg className="w-2.5 h-2.5 sm:w-3 sm:h-3 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="10" /><path d="M12 6v6l4 2" />
+          </svg>
+          <span className="truncate">{isOverdue ? t('installments.badgeOverdue') : t('installments.nextLabel')}: {nextDueLabel}</span>
+        </div>
+      )}
+
+      {/* Paid / remaining — single row, no boxes (saves a lot of vertical space) */}
+      <div className="flex items-end justify-between gap-2 mb-1">
+        <div className="min-w-0">
+          <div className="text-[8.5px] sm:text-[9.5px] text-gray-500 font-semibold uppercase tracking-wide">{t('installments.paidLabel')}</div>
+          <div className="num text-[11px] sm:text-[12.5px] font-extrabold text-emerald-700 tabular-nums leading-tight">{formatPrice(stats.totalPaid)} <span className="text-[8.5px] sm:text-[9.5px] text-gray-400 font-bold">DT</span></div>
+        </div>
+        <div className="min-w-0 text-end">
+          <div className="text-[8.5px] sm:text-[9.5px] text-gray-500 font-semibold uppercase tracking-wide">{t('installments.remainingLabel')}</div>
+          <div className="num text-[11px] sm:text-[12.5px] font-extrabold text-gray-900 tabular-nums leading-tight">{formatPrice(stats.remaining)} <span className="text-[8.5px] sm:text-[9.5px] text-gray-400 font-bold">DT</span></div>
+        </div>
+      </div>
+
+      {/* Overdue line — only when actually overdue, kept tight */}
+      {stats.overdueAmount > 0 && (
+        <div className="mb-1 flex items-center justify-between gap-2 px-1.5 py-0.5 sm:px-2 sm:py-1 rounded-md sm:rounded-lg bg-red-50 border border-red-100">
+          <span className="text-[9px] sm:text-[10px] font-bold text-red-700">⚠ {t('installments.overdueLabel')}</span>
+          <span className="num text-[10px] sm:text-[11px] font-extrabold text-red-700 tabular-nums">{formatPrice(stats.overdueAmount)} DT</span>
+        </div>
+      )}
+
+      {/* Primary action — full width, matches Confirmation's primary button */}
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); onClick() }}
+        className={`w-full h-7 sm:h-8 rounded-md sm:rounded-lg text-[10.5px] sm:text-[11.5px] font-bold flex items-center justify-center gap-1 transition-colors ${
+          isOverdue
+            ? 'bg-red-600 text-white hover:bg-red-700'
+            : 'bg-blue-600 text-white hover:bg-blue-700'
+        }`}
+      >
+        {t('installments.viewDetails')}
+      </button>
+    </div>
   )
 }
