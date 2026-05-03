@@ -1,4 +1,4 @@
-import { useState, useEffect, type ReactNode } from 'react'
+import { useState, useEffect, useRef, type ReactNode } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useLanguage } from '@/i18n/context'
 import { supabase } from '@/lib/supabase'
@@ -222,6 +222,14 @@ export function HomePage({ onNavigate }: HomePageProps) {
     })
   }
   const [touchStarts, setTouchStarts] = useState<Record<string, { x: number; y: number; time: number; isScrolling?: boolean }>>({})
+  // After a touch tap, the browser fires a synthetic mouse click ~0–500ms
+  // later. We already navigate from handleTouchEnd, so the synthetic click
+  // would fire onNavigate a SECOND time. The previous fix (e.detail === 0)
+  // was wrong — it ALSO blocks keyboard activation (Enter/Space on a
+  // <button> dispatches click with detail=0), which broke a11y. Tracking
+  // the last touchend timestamp lets us suppress only synthetic-after-touch
+  // clicks while keeping keyboard activation working.
+  const lastTouchEndRef = useRef(0)
 
   const handleTouchStart = (pageId: string, e: React.TouchEvent) => {
     const touch = e.touches[0]
@@ -280,6 +288,7 @@ export function HomePage({ onNavigate }: HomePageProps) {
     }
 
     e.preventDefault()
+    lastTouchEndRef.current = Date.now()
     onNavigate(pageId)
     setTouchStarts(prev => {
       const newStarts = { ...prev }
@@ -289,7 +298,14 @@ export function HomePage({ onNavigate }: HomePageProps) {
   }
 
   const handleClick = (pageId: string, _e: React.MouseEvent) => {
-    if ('ontouchstart' in window) return
+    // Suppress the synthetic click the browser fires shortly after touchend
+    // (we already navigated from handleTouchEnd in that case). 500ms is the
+    // upper bound for the "ghost click" delay across iOS/Android. Mouse
+    // clicks have lastTouchEndRef = 0 (or far past), so they pass through.
+    // Keyboard activation (Enter/Space on <button>) also passes — that was
+    // the bug with the previous `e.detail === 0` guard, which incorrectly
+    // blocked keyboard navigation entirely.
+    if (Date.now() - lastTouchEndRef.current < 500) return
     onNavigate(pageId)
   }
 

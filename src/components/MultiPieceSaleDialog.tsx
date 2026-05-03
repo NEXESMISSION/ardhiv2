@@ -465,6 +465,12 @@ export function MultiPieceSaleDialog({
       onClose={onClose}
         title={`بيع ${pieces.length} قطعة`}
       size="lg"
+      // Block backdrop-click and Escape from closing while the user is typing
+      // a sale. Losing the form mid-entry was a real complaint — close only
+      // happens via the explicit X / إلغاء / تأكيد buttons. A draft is also
+      // saved to localStorage on every keystroke (see useEffect with draft.write)
+      // so even a hard reload preserves what they typed.
+      disableDismiss
       footer={
         <div className="flex justify-end gap-3">
           <Button variant="secondary" onClick={onClose} disabled={saving}>
@@ -598,7 +604,9 @@ export function MultiPieceSaleDialog({
             </p>
           </div>
 
-          {/* Installment Offers Selection */}
+          {/* Installment Offers Selection — 2-col grid, no scroll cap so all
+              offers stay visible at once. The previous version capped height
+              at 192px and forced scroll, which hid offers behind the fold. */}
           {saleType === 'installment' && (
             <div className="space-y-1.5 sm:space-y-2">
               <Label className="text-xs sm:text-sm">اختر عرض التقسيط *</Label>
@@ -609,46 +617,59 @@ export function MultiPieceSaleDialog({
               ) : paymentOffers.length === 0 ? (
                 <Alert variant="error" className="text-xs sm:text-sm">لا توجد عروض تقسيط متاحة لهذه الدفعة</Alert>
               ) : (
-                <div className="space-y-1.5 sm:space-y-2 max-h-40 sm:max-h-48 overflow-y-auto scrollbar-thin">
-                  {paymentOffers.map((offer) => (
-                    <Card
-                      key={offer.id}
-                      className={`p-2 sm:p-2.5 lg:p-3 cursor-pointer transition-all ${
-                        selectedOfferId === offer.id
-                          ? 'bg-blue-50 border-blue-300 border-2'
-                          : 'hover:bg-gray-50'
-                      }`}
-                      onClick={() => setSelectedOfferId(offer.id)}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mb-0.5 sm:mb-1">
-                            <input
-                              type="radio"
-                              checked={selectedOfferId === offer.id}
-                              onChange={() => setSelectedOfferId(offer.id)}
-                              className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-blue-600 flex-shrink-0"
-                            />
-                            <span className="text-xs sm:text-sm font-semibold truncate">{offer.name || 'عرض بدون اسم'}</span>
-                            <Badge variant="info" size="sm" className="text-xs flex-shrink-0">
-                              {offer.price_per_m2_installment.toLocaleString()} د/م²
-                            </Badge>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 sm:gap-2">
+                  {paymentOffers.map((offer) => {
+                    const isSelected = selectedOfferId === offer.id
+                    return (
+                      <button
+                        key={offer.id}
+                        type="button"
+                        onClick={() => setSelectedOfferId(offer.id)}
+                        aria-pressed={isSelected}
+                        className={`relative text-start p-2 sm:p-2.5 rounded-lg border-2 cursor-pointer transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 ${
+                          isSelected
+                            ? 'bg-blue-50 border-blue-500 shadow-[0_0_0_3px_rgba(59,130,246,0.12)]'
+                            : 'bg-white border-gray-200 hover:border-blue-300 hover:bg-gray-50'
+                        }`}
+                      >
+                        {/* Selection check — replaces the radio for a cleaner card look */}
+                        {isSelected && (
+                          <div className="absolute top-1.5 end-1.5 w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center shadow-sm">
+                            <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="m5 12 5 5L20 7" />
+                            </svg>
                           </div>
-                          <div className="text-xs text-gray-600 space-y-0.5 sm:space-y-1">
-                            <p>
-                              تسبقة: {offer.advance_value.toLocaleString()}{' '}
-                              {offer.advance_mode === 'percent' ? '%' : 'دت'}
-                            </p>
-                            {offer.calc_mode === 'monthlyAmount' ? (
-                              <p>مبلغ شهري: {offer.monthly_amount?.toLocaleString() || 0} دت</p>
-                            ) : (
-                              <p>عدد الأشهر: {offer.months || 0}</p>
-                            )}
-                          </div>
+                        )}
+                        <div className="flex items-center gap-1.5 mb-1 pe-6">
+                          <span className="text-[12.5px] sm:text-sm font-bold text-gray-900 truncate">{offer.name || 'عرض بدون اسم'}</span>
                         </div>
-                      </div>
-                    </Card>
-                  ))}
+                        <div className="flex items-center gap-1 mb-1">
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10.5px] font-bold bg-blue-50 text-blue-700 border border-blue-100">
+                            {offer.price_per_m2_installment.toLocaleString()} د/م²
+                          </span>
+                        </div>
+                        <div className="text-[11px] sm:text-xs text-gray-600 space-y-0.5 tabular-nums">
+                          <div className="flex items-center gap-1">
+                            <span className="text-gray-400">تسبقة:</span>
+                            <span className="font-semibold text-gray-800">
+                              {offer.advance_value.toLocaleString()}{' '}{offer.advance_mode === 'percent' ? '%' : 'دت'}
+                            </span>
+                          </div>
+                          {offer.calc_mode === 'monthlyAmount' ? (
+                            <div className="flex items-center gap-1">
+                              <span className="text-gray-400">شهري:</span>
+                              <span className="font-semibold text-gray-800">{offer.monthly_amount?.toLocaleString() || 0} دت</span>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-1">
+                              <span className="text-gray-400">أشهر:</span>
+                              <span className="font-semibold text-gray-800">{offer.months || 0}</span>
+                            </div>
+                          )}
+                        </div>
+                      </button>
+                    )
+                  })}
                 </div>
               )}
             </div>

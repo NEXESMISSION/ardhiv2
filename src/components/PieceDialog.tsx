@@ -55,6 +55,9 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
   const [selectedPieces, setSelectedPieces] = useState<Set<string>>(new Set())
   /** Ref kept in sync with selectedPieces so Sell button always uses latest selection (avoids race when user selects then quickly clicks Sell) */
   const selectedPiecesRef = useRef<Set<string>>(new Set())
+  // Tracks the last touchend timestamp for synthetic-click suppression
+  // (see handleClick / handleTouchEnd below for the why).
+  const lastTouchEndRef = useRef(0)
   useEffect(() => {
     selectedPiecesRef.current = selectedPieces
   }, [selectedPieces])
@@ -655,6 +658,11 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
       onClose={onClose}
       title={`قطع الدفعة: ${batchName}`}
       size="xl"
+      // Block stray backdrop clicks / Escape from closing the dialog. The user
+      // is in the middle of selecting pieces, adding new ones, or editing
+      // prices — losing that on a misclick is a hard failure. Close only
+      // happens via the explicit X button in the header.
+      disableDismiss
     >
       <div className="space-y-3 sm:space-y-4 lg:space-y-6 flex flex-col h-full">
         {/* Batch Image - Placeholder with loading animation until image is ready */}
@@ -935,6 +943,7 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
                   
                   // It's a click, toggle selection - only prevent default at the end
                   e.preventDefault()
+                  lastTouchEndRef.current = Date.now()
                   setSelectedPieces((prev) => {
                     const next = new Set(prev)
                     if (next.has(piece.id)) next.delete(piece.id)
@@ -945,9 +954,13 @@ export function PieceDialog({ open, onClose, batchId, batchName, batchPricePerM2
                 }
 
                 const handleClick = (_e: React.MouseEvent) => {
-                  // Only handle click on desktop (not touch devices)
-                  if ('ontouchstart' in window) return
-                  
+                  // Suppress the synthetic click that browsers fire shortly
+                  // after touchend — handleTouchEnd already toggled selection
+                  // for the touch case. The earlier `e.detail === 0` guard
+                  // also blocked keyboard activation (Enter/Space on a
+                  // focusable card), so a11y silently broke. Timestamp
+                  // window of 500ms covers ghost-click delay across iOS/Android.
+                  if (Date.now() - lastTouchEndRef.current < 500) return
                   if (canSelect) {
                     setSelectedPieces((prev) => {
                       const next = new Set(prev)

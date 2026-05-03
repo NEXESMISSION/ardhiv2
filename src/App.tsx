@@ -265,15 +265,20 @@ function AppContent() {
 
   // Update URL hash when page changes
   const handleNavigate = (page: string) => {
+    // Diagnostic: every nav click logs once. Lets the user (and us) see in
+    // the console exactly why a sidebar button "did nothing" — was it the
+    // access check, the missing-mapping check, or simply navigating to the
+    // current page (a no-op).
+    console.log(`[Nav] handleNavigate("${page}") from "${currentPage}" — owner=${systemUser?.role === 'owner'}`)
     // Check access before navigating
     if (systemUser && !hasAccessToPage(page)) {
-      console.warn(`Access denied to page: ${page}`)
+      console.warn(`[Nav] Access denied to page: ${page} (allowed_pages=${JSON.stringify(systemUser.allowed_pages)})`)
       return
     }
-    
+
     // Validate page exists in mapping
     if (!pageToHash[page]) {
-      console.warn(`Page "${page}" not found in pageToHash, defaulting to home`)
+      console.warn(`[Nav] Page "${page}" not found in pageToHash, defaulting to home`)
       const homeHash = '#home'
       setCurrentPage('home')
       if (window.location.hash !== homeHash) {
@@ -281,15 +286,20 @@ function AppContent() {
       }
       return
     }
-    
+
     const hash = pageToHash[page]
     // Only update if page is actually different
     if (currentPage !== page) {
+      console.log(`[Nav] navigating: "${currentPage}" → "${page}" (hash: ${hash})`)
       setCurrentPage(page)
       // Only update hash if it's different
       if (window.location.hash !== hash) {
         window.location.hash = hash
       }
+    } else {
+      // Clicking the page you're already on is a common "button does nothing"
+      // complaint. Log it so the user can see it's not a bug, just a no-op.
+      console.log(`[Nav] already on "${page}" — no-op`)
     }
   }
 
