@@ -24,7 +24,6 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [previousPage, setPreviousPage] = useState<string | null>(null)
   const [notificationsOpen, setNotificationsOpen] = useState(false)
-  const notificationRef = useRef<HTMLDivElement>(null)
   const [notifications, setNotifications] = useState<Notification[]>([])
   const [displayedCount, setDisplayedCount] = useState(20) // How many notifications to display
   const [unreadCount, setUnreadCount] = useState(0)
@@ -313,6 +312,7 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
   }
 
   const handleMarkAsRead = async (notificationId: string) => {
+    console.warn('[CLICK DIAG] handleMarkAsRead called', { notificationId, systemUserId: systemUser?.id })
     if (!systemUser?.id) return
 
     // Optimistic update — only count down if the notification is currently unread.
@@ -347,6 +347,7 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
   }
 
   const handleMarkAllAsRead = async () => {
+    console.warn('[CLICK DIAG] handleMarkAllAsRead called', { systemUserId: systemUser?.id, unreadCount })
     if (!systemUser?.id) return
 
     // Snapshot current state so we can revert atomically on failure.
@@ -437,6 +438,11 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
   }
 
   const handleNotificationClick = async (notification: Notification) => {
+    console.warn('[CLICK DIAG] handleNotificationClick called', {
+      id: notification.id,
+      read: notification.read,
+      entity_type: notification.entity_type,
+    })
     // Mark as read if unread (does NOT block navigation — we await for correctness
     // but the optimistic update is already visible).
     if (!notification.read) {
@@ -488,23 +494,6 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
       setHasMore(notifications.length > INITIAL_LIMIT)
     }
   }, [notificationsOpen, notifications.length])
-
-  // Close notifications when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (notificationRef.current && !notificationRef.current.contains(event.target as Node)) {
-        setNotificationsOpen(false)
-      }
-    }
-
-    if (notificationsOpen) {
-      document.addEventListener('mousedown', handleClickOutside)
-    }
-
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside)
-    }
-  }, [notificationsOpen])
 
   const handlePwaRefresh = () => {
     const updateSW = (window as any).__pwa_updateSW
@@ -837,7 +826,7 @@ export function Layout({ children, currentPage, onNavigate }: LayoutProps) {
 
               {/* Notifications - owners only */}
               {systemUser && isOwner && (
-                <div className="relative" ref={notificationRef}>
+                <div className="relative">
                   <button
                     onClick={() => {
                       setNotificationsOpen(!notificationsOpen)

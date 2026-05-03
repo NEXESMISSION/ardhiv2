@@ -1,5 +1,5 @@
 // Safely parse a money/quantity string typed by the user.
-// Tolerates locale variations: thousands separators (',', ' ', ' '), Arabic-Indic digits,
+// Tolerates locale variations: thousands separators (',', ' ', ' '), Arabic-Indic digits,
 // and ',' as a decimal separator (fr-FR/ar-* locales).
 //
 // Returns NaN for empty/invalid input (matches parseFloat conventions).
@@ -21,7 +21,7 @@ export function parseAmount(input: string | number | null | undefined): number {
                        .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x06F0))
 
   // Remove anything that isn't a digit, '.', ',', '-' or '+'.
-  const cleaned = ascii.replace(/[^\d.,+\-]/g, '')
+  const cleaned = ascii.replace(/[^\d.,+-]/g, '')
 
   // Decide which separator is the decimal one. Whichever appears LAST in the
   // string is the decimal — the other is a thousands separator.

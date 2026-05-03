@@ -1,4 +1,7 @@
 import { supabase } from '@/lib/supabase'
+import { logger } from '@/utils/logger'
+
+const log = logger('Notif')
 
 export interface Notification {
   id: string
@@ -43,9 +46,9 @@ async function checkExistingNotification(
       .limit(1)
 
     if (exactError) {
-      console.warn('[checkExistingNotification] Error checking for exact duplicates:', exactError)
+      log.warn('checkExisting: error on exact-match query', exactError)
     } else if (exactMatch && exactMatch.length > 0) {
-      console.log('[checkExistingNotification] Found exact duplicate notification')
+      log.debug('checkExisting: found exact duplicate', { type, entityType, entityId })
       return true
     }
 
@@ -61,9 +64,9 @@ async function checkExistingNotification(
         .limit(5) // Get a few to see what types exist
 
       if (saleError) {
-        console.warn('[checkExistingNotification] Error checking for sale duplicates:', saleError)
+        log.warn('checkExisting: error on sale-id query', saleError)
       } else if (saleMatch && saleMatch.length > 0) {
-        console.log(`[checkExistingNotification] Found ${saleMatch.length} existing notification(s) for sale ${entityId}:`, 
+        log.debug(`checkExisting: ${saleMatch.length} existing notif(s) for sale ${entityId}`,
           saleMatch.map(n => ({ type: n.type, title: n.title })))
         return true // Found existing notification for this sale
       }
@@ -71,7 +74,7 @@ async function checkExistingNotification(
 
     return false // No duplicates found
   } catch (error) {
-    console.warn('[checkExistingNotification] Exception checking for duplicates:', error)
+    log.warn('checkExisting: exception', error)
     return false // If check fails, allow notification
   }
 }
@@ -111,13 +114,13 @@ async function cleanupDuplicateNotifications(
         .in('id', idsToDelete)
 
       if (deleteError) {
-        console.warn('[cleanupDuplicateNotifications] Error deleting duplicates:', deleteError)
+        log.warn('cleanupDuplicates: delete error', deleteError)
       } else {
-        console.log(`[cleanupDuplicateNotifications] Deleted ${idsToDelete.length} duplicate notification(s)`)
+        log.info(`cleanupDuplicates: deleted ${idsToDelete.length} row(s)`)
       }
     }
   } catch (error) {
-    console.warn('[cleanupDuplicateNotifications] Exception cleaning duplicates:', error)
+    log.warn('cleanupDuplicates: exception', error)
   }
 }
 
@@ -136,14 +139,14 @@ export async function notifyOwners(
 ): Promise<boolean> {
   // Validate inputs
   if (!type || !title || !message) {
-    console.error('notifyOwners: Missing required parameters', { type, title, message })
+    log.error('notifyOwners: missing required params', { type, title, message })
     return false
   }
 
   // Check for existing notification to prevent duplicates
   const hasDuplicate = await checkExistingNotification(type, entityType, entityId, 30)
   if (hasDuplicate) {
-    console.log('[notifyOwners] Duplicate notification prevented:', { type, entityType, entityId })
+    log.debug('notifyOwners: duplicate prevented', { type, entityType, entityId })
     // Clean up any old duplicates that might exist
     if (entityType && entityId) {
       await cleanupDuplicateNotifications(entityType, entityId, 30)
@@ -151,31 +154,33 @@ export async function notifyOwners(
     return true // Return true to indicate "success" (we prevented a duplicate, which is good)
   }
 
-  try {
-    // Try RPC function first (most efficient)
-    console.log('[notifyOwners] Attempting RPC call:', { type, title, message: message.substring(0, 50) })
-    const { data: rpcResult, error: rpcError } = await supabase.rpc('notify_owners', {
-      p_type: type,
-      p_title: title,
-      p_message: message,
-      p_entity_type: entityType || null,
-      p_entity_id: entityId || null,
-      p_metadata: metadata || null,
-    })
+  return log.track(`notifyOwners(${type}/${entityType ?? '-'}/${entityId ?? '-'})`, async () => {
+    try {
+      // Try RPC function first (most efficient)
+      log.debug('notifyOwners: RPC call', { type, title, message: message.substring(0, 50) })
+      const { data: rpcResult, error: rpcError } = await supabase.rpc('notify_owners', {
+        p_type: type,
+        p_title: title,
+        p_message: message,
+        p_entity_type: entityType || null,
+        p_entity_id: entityId || null,
+        p_metadata: metadata || null,
+      })
 
-    if (!rpcError) {
-      console.log('[notifyOwners] RPC call succeeded:', rpcResult)
-      return rpcResult === true
+      if (!rpcError) {
+        log.info('notifyOwners: RPC succeeded', { rpcResult })
+        return rpcResult === true
+      }
+
+      // RPC failed, use fallback
+      log.warn('notifyOwners: RPC failed, falling back', rpcError)
+      return await notifyOwnersFallback(type, title, message, entityType, entityId, metadata)
+    } catch (error) {
+      log.error('notifyOwners: exception', error)
+      // Try fallback on exception
+      return await notifyOwnersFallback(type, title, message, entityType, entityId, metadata)
     }
-
-    // RPC failed, use fallback
-    console.warn('[notifyOwners] RPC failed, using fallback:', rpcError)
-    return await notifyOwnersFallback(type, title, message, entityType, entityId, metadata)
-  } catch (error) {
-    console.error('[notifyOwners] Exception occurred:', error)
-    // Try fallback on exception
-    return await notifyOwnersFallback(type, title, message, entityType, entityId, metadata)
-  }
+  })
 }
 
 /**
@@ -203,7 +208,7 @@ async function notifyOwnersFallback(
 
     if (ownersError) {
         lastError = ownersError
-        console.error(`Attempt ${attempt}: Error fetching owners:`, ownersError)
+        log.error(`notifyOwnersFallback: attempt ${attempt} - error fetching owners`, ownersError)
         if (attempt < maxRetries) {
           await new Promise(resolve => setTimeout(resolve, 1000 * attempt))
           continue
@@ -212,11 +217,11 @@ async function notifyOwnersFallback(
     }
 
     if (!owners || owners.length === 0) {
-        console.warn('[notifyOwnersFallback] No owners found for notifications')
+        log.warn('notifyOwnersFallback: no owners exist to notify')
         return true // Not an error, just no owners to notify
     }
 
-      console.log(`[notifyOwnersFallback] Found ${owners.length} owner(s) to notify`)
+      log.debug(`notifyOwnersFallback: ${owners.length} owner(s) to notify`)
 
     // Create notifications for each owner
     const notifications = owners.map(owner => ({
@@ -243,7 +248,7 @@ async function notifyOwnersFallback(
 
     if (insertError) {
           lastError = insertError
-          console.error(`Attempt ${attempt}, Batch ${Math.floor(i / batchSize) + 1}: Error inserting notifications:`, insertError)
+          log.error(`notifyOwnersFallback: attempt ${attempt}, batch ${Math.floor(i / batchSize) + 1} - insert error`, insertError)
           if (attempt < maxRetries) break // Retry outer loop
     } else {
           successCount += batch.length
@@ -251,11 +256,11 @@ async function notifyOwnersFallback(
       }
 
       if (successCount === notifications.length) {
-        console.log(`[notifyOwnersFallback] Successfully created ${successCount} notification(s)`)
+        log.info(`notifyOwnersFallback: created ${successCount} notification(s)`)
         return true
       }
       
-      console.error(`[notifyOwnersFallback] Only created ${successCount}/${notifications.length} notifications`)
+      log.error(`notifyOwnersFallback: partial success ${successCount}/${notifications.length}`)
 
       // Partial success, retry failed ones
       if (attempt < maxRetries) {
@@ -264,14 +269,14 @@ async function notifyOwnersFallback(
     }
   } catch (error) {
       lastError = error
-      console.error(`Attempt ${attempt}: Exception in notifyOwnersFallback:`, error)
+      log.error(`notifyOwnersFallback: attempt ${attempt} - exception`, error)
       if (attempt < maxRetries) {
         await new Promise(resolve => setTimeout(resolve, 1000 * attempt))
       }
     }
   }
 
-  console.error('notifyOwnersFallback: All retries failed', lastError)
+  log.error('notifyOwnersFallback: all retries failed', lastError)
   return false
 }
 
@@ -291,7 +296,7 @@ export async function notifyCurrentUser(
 ): Promise<boolean> {
   // Validate inputs
   if (!type || !title || !message || !userId) {
-    console.error('notifyCurrentUser: Missing required parameters', { type, title, message, userId })
+    log.error('notifyCurrentUser: missing required params', { type, title, message, userId })
     return false
   }
 
@@ -299,7 +304,7 @@ export async function notifyCurrentUser(
   if (entityType && entityId) {
     const hasDuplicate = await checkExistingNotification(type, entityType, entityId, 30)
     if (hasDuplicate) {
-      console.log('[notifyCurrentUser] Duplicate notification prevented:', { type, entityType, entityId, userId })
+      log.debug('notifyCurrentUser: duplicate prevented', { type, entityType, entityId, userId })
       // Clean up any old duplicates that might exist
       await cleanupDuplicateNotifications(entityType, entityId, 30)
       return true // Return true to indicate "success" (we prevented a duplicate)
@@ -330,21 +335,21 @@ export async function notifyCurrentUser(
       }
 
       lastError = insertError
-      console.error(`Attempt ${attempt}: Error inserting notification:`, insertError)
+      log.error(`notifyCurrentUser: attempt ${attempt} - insert error`, insertError)
       
       if (attempt < maxRetries) {
         await new Promise(resolve => setTimeout(resolve, 1000 * attempt))
     }
   } catch (error) {
       lastError = error
-      console.error(`Attempt ${attempt}: Exception in notifyCurrentUser:`, error)
+      log.error(`notifyCurrentUser: attempt ${attempt} - exception`, error)
       if (attempt < maxRetries) {
         await new Promise(resolve => setTimeout(resolve, 1000 * attempt))
       }
     }
   }
 
-  console.error('notifyCurrentUser: All retries failed', lastError)
+  log.error('notifyCurrentUser: all retries failed', lastError)
   return false
 }
 
@@ -396,7 +401,7 @@ export async function getNotifications(
   dateFilter: NotificationDateFilter = 'all'
 ): Promise<Notification[]> {
   if (!userId) {
-    console.error('getNotifications: Missing userId')
+    log.error('getNotifications: missing userId')
     return []
   }
 
@@ -416,13 +421,13 @@ export async function getNotifications(
       .range(offset, offset + Math.min(limit, 100) - 1)
 
     if (error) {
-      console.error('Error fetching notifications:', error)
+      log.error('getNotifications: query error', error)
       return []
     }
 
     return (data || []) as Notification[]
   } catch (error) {
-    console.error('Exception in getNotifications:', error)
+    log.error('getNotifications: exception', error)
     return []
   }
 }
@@ -444,13 +449,13 @@ export async function getUnreadCount(userId: string): Promise<number> {
       .eq('read', false)
 
     if (error) {
-      console.error('Error fetching unread count:', error)
+      log.error('getUnreadCount: query error', error)
       return 0
     }
 
     return count || 0
   } catch (error) {
-    console.error('Exception in getUnreadCount:', error)
+    log.error('getUnreadCount: exception', error)
     return 0
   }
 }
@@ -461,25 +466,35 @@ export async function getUnreadCount(userId: string): Promise<number> {
  */
 export async function markAsRead(notificationId: string, userId: string): Promise<boolean> {
   if (!notificationId || !userId) {
-    console.error('markAsRead: Missing required parameters')
+    log.error('markAsRead: missing required params')
     return false
   }
 
   try {
-    const { error } = await supabase
+    // .select() forces PostgREST to return the affected rows so we can
+    // distinguish "0 rows updated (RLS rejection)" from "1 row updated (success)".
+    // Without this, a silently RLS-blocked update returns no error but the
+    // notification is never actually marked as read, which is the exact
+    // scenario that produced the "badge stays red" bug.
+    const { data, error } = await supabase
       .from('notifications')
       .update({ read: true })
       .eq('id', notificationId)
       .eq('user_id', userId)
+      .select('id')
 
     if (error) {
-      console.error('Error marking notification as read:', error)
+      log.error('markAsRead: query error', error)
       return false
     }
-
+    if (!data || data.length === 0) {
+      log.warn('markAsRead: 0 rows updated — likely RLS rejection (auth.uid mismatch with passed user_id)', { notificationId, userId })
+      return false
+    }
+    log.debug('markAsRead: ok', { notificationId, rows: data.length })
     return true
   } catch (error) {
-    console.error('Exception in markAsRead:', error)
+    log.error('markAsRead: exception', error)
     return false
   }
 }
@@ -490,25 +505,29 @@ export async function markAsRead(notificationId: string, userId: string): Promis
  */
 export async function markAllAsRead(userId: string): Promise<boolean> {
   if (!userId) {
-    console.error('markAllAsRead: Missing userId')
+    log.error('markAllAsRead: missing userId')
     return false
   }
 
   try {
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('notifications')
       .update({ read: true })
       .eq('user_id', userId)
       .eq('read', false)
+      .select('id')
 
     if (error) {
-      console.error('Error marking all notifications as read:', error)
+      log.error('markAllAsRead: query error', error)
       return false
     }
-
+    // Zero rows here is legitimate ("nothing was unread") — log as info, not warn.
+    // It only matters for diagnosis: if the UI shows unread > 0 but this returns
+    // 0 rows, that's an RLS mismatch.
+    log.info(`markAllAsRead: ok (${data?.length ?? 0} row(s) flipped)`, { userId })
     return true
   } catch (error) {
-    console.error('Exception in markAllAsRead:', error)
+    log.error('markAllAsRead: exception', error)
     return false
   }
 }
@@ -519,7 +538,7 @@ export async function markAllAsRead(userId: string): Promise<boolean> {
  */
 export async function deleteNotification(notificationId: string, userId: string): Promise<boolean> {
   if (!notificationId || !userId) {
-    console.error('deleteNotification: Missing required parameters')
+    log.error('deleteNotification: missing required params')
     return false
   }
 
@@ -531,13 +550,13 @@ export async function deleteNotification(notificationId: string, userId: string)
       .eq('user_id', userId)
 
     if (error) {
-      console.error('Error deleting notification:', error)
+      log.error('deleteNotification: query error', error)
       return false
     }
 
     return true
   } catch (error) {
-    console.error('Exception in deleteNotification:', error)
+    log.error('deleteNotification: exception', error)
     return false
   }
 }
