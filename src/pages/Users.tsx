@@ -801,6 +801,7 @@ export function UsersPage() {
           onClose={closeDialog}
           title={editingWorkerId ? t('users.editUser') : t('users.addUserNew')}
           size="md"
+          disableDismiss
         >
           <div className="space-y-4">
             {success && <Alert variant="success">{success}</Alert>}
