@@ -68,7 +68,15 @@ export default defineConfig(({ mode }) => ({
         navigateFallbackDenylist: [/^\/api\//, /^\/_/, /^\/[^/]+\.[a-z0-9]+$/i],
         runtimeCaching: [
           {
-            urlPattern: /^https:\/\/.*\.supabase\.co\/.*/i,
+            // Cache REST/storage GETs, never the auth or edge-function endpoints —
+            // those need a live network round-trip. Caching POSTs to /functions/v1
+            // breaks supabase-js with "Failed to send a request to the Edge Function".
+            urlPattern: ({ url, request }) => {
+              if (!/\.supabase\.co$/i.test(url.hostname)) return false
+              if (url.pathname.startsWith('/functions/')) return false
+              if (url.pathname.startsWith('/auth/')) return false
+              return request.method === 'GET'
+            },
             handler: 'NetworkFirst',
             options: {
               cacheName: 'supabase-cache',
@@ -77,7 +85,7 @@ export default defineConfig(({ mode }) => ({
                 maxAgeSeconds: 60 * 60 * 24 // 24 hours
               },
               cacheableResponse: {
-                statuses: [0, 200]
+                statuses: [200]
               }
             }
           },
@@ -105,6 +113,8 @@ export default defineConfig(({ mode }) => ({
     },
   },
   server: {
-    port: 3000,
+    host: 'localhost',
+    port: 3002,
+    strictPort: true,
   },
 }))
