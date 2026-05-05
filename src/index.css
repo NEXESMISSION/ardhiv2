@@ -49,6 +49,17 @@ html, body {
   /* Inputs/buttons inherit weight cleanly */
   input, button, textarea, select { font-family: inherit; font-weight: 500; }
 
+  /* iOS Safari auto-zooms into any focused form field whose computed
+     font-size is below 16px. Force >=16px on iOS only so Android/desktop
+     typography is unaffected. Pinch-zoom stays enabled (a11y). */
+  @supports (-webkit-touch-callout: none) {
+    input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+    textarea,
+    select {
+      font-size: 16px;
+    }
+  }
+
   /* #root: fill viewport so PWA flex layout always has a height.
      Android PWA: use 100vh first so unsupported 100dvh doesn't leave height 0. */
   #root {
