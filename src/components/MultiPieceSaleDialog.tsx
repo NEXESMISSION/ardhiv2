@@ -12,6 +12,7 @@ import { ConfirmDialog } from './ui/confirm-dialog'
 import { NotificationDialog } from './ui/notification-dialog'
 import { formatPrice, calculatePiecePrice } from '@/utils/priceCalculator'
 import { calculateInstallment } from '@/utils/installmentCalculator'
+import { parseAmount } from '@/utils/parseAmount'
 import { useFormDraft } from '@/hooks/useFormDraft'
 
 interface LandPiece {
@@ -108,6 +109,20 @@ export function MultiPieceSaleDialog({
   const [selectedOfferId, setSelectedOfferId] = useState<string>('')
   const [paymentOffers, setPaymentOffers] = useState<PaymentOffer[]>([])
   const [loadingOffers, setLoadingOffers] = useState(false)
+  // Inline "create a new installment offer" form. Lets the seller add an offer
+  // to this batch without leaving the sale form (same flow as EditSaleDialog).
+  // The offer is written to `payment_offers` straight away and then selected,
+  // so the rest of the sale flow sees a normal, persisted offer.
+  const [showAddOffer, setShowAddOffer] = useState(false)
+  const [savingNewOffer, setSavingNewOffer] = useState(false)
+  const [addOfferError, setAddOfferError] = useState<string | null>(null)
+  const [newOfferName, setNewOfferName] = useState('')
+  const [newOfferPricePerM2, setNewOfferPricePerM2] = useState('')
+  const [newOfferAdvanceMode, setNewOfferAdvanceMode] = useState<'fixed' | 'percent'>('fixed')
+  const [newOfferAdvanceValue, setNewOfferAdvanceValue] = useState('')
+  const [newOfferCalcMode, setNewOfferCalcMode] = useState<'monthlyAmount' | 'months'>('monthlyAmount')
+  const [newOfferMonthlyAmount, setNewOfferMonthlyAmount] = useState('')
+  const [newOfferMonths, setNewOfferMonths] = useState('')
   const [notes, setNotes] = useState('')
   /** Per-piece manual price is the only pricing mode (kept as const so existing
    *  calculation branches that gate on this flag continue to work unchanged). */
@@ -268,6 +283,7 @@ export function MultiPieceSaleDialog({
       setSaleType('full')
       setSelectedOfferId('')
       setError(null)
+      resetAddOfferForm()
       setFixedPriceByPieceId(buildPriceSuggestionMap(pieces, batchPricePerM2))
       // Default the deadline to a week from today so the user has time to
       // complete the procedures. They can always pick a different date.
@@ -341,10 +357,13 @@ export function MultiPieceSaleDialog({
     } else {
       setPaymentOffers([])
       setSelectedOfferId('')
+      resetAddOfferForm()
     }
   }, [open, saleType, batchId])
 
-  async function loadPaymentOffers() {
+  /** `selectNewest` forces the freshest offer (list is ordered created_at desc)
+   *  to become the selection — used right after creating one inline. */
+  async function loadPaymentOffers({ selectNewest = false }: { selectNewest?: boolean } = {}) {
     setLoadingOffers(true)
     try {
       const { data, error: err } = await supabase
@@ -358,7 +377,7 @@ export function MultiPieceSaleDialog({
       setPaymentOffers(data || [])
       if (data && data.length > 0) {
         // Always set the first offer as default if none is selected
-        if (!selectedOfferId || selectedOfferId === '') {
+        if (selectNewest || !selectedOfferId || selectedOfferId === '') {
           console.log('Auto-selecting first payment offer:', data[0].id)
           setSelectedOfferId(data[0].id)
         }
@@ -371,6 +390,113 @@ export function MultiPieceSaleDialog({
       setError('فشل تحميل عروض التقسيط')
     } finally {
       setLoadingOffers(false)
+    }
+  }
+
+  function resetAddOfferForm() {
+    setShowAddOffer(false)
+    setAddOfferError(null)
+    setSavingNewOffer(false)
+    setNewOfferName('')
+    setNewOfferPricePerM2('')
+    setNewOfferAdvanceMode('fixed')
+    setNewOfferAdvanceValue('')
+    setNewOfferCalcMode('monthlyAmount')
+    setNewOfferMonthlyAmount('')
+    setNewOfferMonths('')
+  }
+
+  function openAddOfferForm() {
+    setAddOfferError(null)
+    setShowAddOffer(true)
+  }
+
+  // Create a batch-level installment offer from inside the sale form, then
+  // select it immediately so the user can finish the sale in one go. The row
+  // is identical to one created from the batch screen (land_piece_id stays
+  // null), so it also shows up next time and in the batch edit form.
+  async function handleAddNewOffer() {
+    if (!batchId) {
+      setAddOfferError('لا توجد دفعة مرتبطة بهذا البيع')
+      return
+    }
+
+    const pricePerM2 = parseAmount(newOfferPricePerM2)
+    if (isNaN(pricePerM2) || pricePerM2 <= 0) {
+      setAddOfferError('يرجى إدخال سعر المتر المربع (بالتقسيط)')
+      return
+    }
+
+    const advanceValue = parseAmount(newOfferAdvanceValue.trim() ? newOfferAdvanceValue : '0')
+    if (isNaN(advanceValue) || advanceValue < 0) {
+      setAddOfferError('يرجى إدخال قيمة تسبقة صحيحة')
+      return
+    }
+    if (newOfferAdvanceMode === 'percent' && advanceValue > 100) {
+      setAddOfferError('نسبة التسبقة يجب أن تكون بين 0 و 100')
+      return
+    }
+
+    const monthlyAmount = parseAmount(newOfferMonthlyAmount)
+    const months = parseInt(newOfferMonths, 10)
+    if (newOfferCalcMode === 'monthlyAmount') {
+      if (isNaN(monthlyAmount) || monthlyAmount <= 0) {
+        setAddOfferError('يرجى إدخال المبلغ الشهري')
+        return
+      }
+    } else if (isNaN(months) || months <= 0) {
+      setAddOfferError('يرجى إدخال عدد الأشهر')
+      return
+    }
+
+    setSavingNewOffer(true)
+    setAddOfferError(null)
+    try {
+      const payload = {
+        batch_id: batchId,
+        name: newOfferName.trim() || null,
+        price_per_m2_installment: pricePerM2,
+        advance_mode: newOfferAdvanceMode,
+        advance_value: advanceValue,
+        calc_mode: newOfferCalcMode,
+        monthly_amount: newOfferCalcMode === 'monthlyAmount' ? monthlyAmount : null,
+        months: newOfferCalcMode === 'months' ? months : null,
+      }
+
+      const { data: inserted, error: err } = await supabase
+        .from('payment_offers')
+        .insert(payload)
+        .select('id, name, price_per_m2_installment, advance_mode, advance_value, calc_mode, monthly_amount, months')
+        .single()
+
+      if (err) {
+        console.error('Error creating payment offer:', err)
+        setAddOfferError(err.message ? `فشل إنشاء العرض: ${err.message}` : 'فشل إنشاء العرض')
+        return
+      }
+
+      if (!inserted?.id) {
+        // The insert can succeed while RLS blocks reading the row back — refetch
+        // the list so the new offer still shows up and gets selected.
+        await loadPaymentOffers({ selectNewest: true })
+        resetAddOfferForm()
+        setError(null)
+        return
+      }
+
+      const created = inserted as PaymentOffer
+      setPaymentOffers((prev) => [created, ...prev.filter(Boolean)])
+      setSelectedOfferId(created.id)
+      resetAddOfferForm()
+      // Clear any "choose an offer" validation message now that one exists.
+      setError(null)
+    } catch (e) {
+      // Network / unexpected failure — the PostgREST error is handled above.
+      console.error('Error creating payment offer:', e)
+      const message = e instanceof Error ? e.message : ''
+      setAddOfferError(message ? `فشل إنشاء العرض: ${message}` : 'فشل إنشاء العرض')
+    } finally {
+      setSavingNewOffer(false)
     }
   }
 
@@ -609,15 +735,191 @@ export function MultiPieceSaleDialog({
               at 192px and forced scroll, which hid offers behind the fold. */}
           {saleType === 'installment' && (
             <div className="space-y-1.5 sm:space-y-2">
-              <Label className="text-xs sm:text-sm">اختر عرض التقسيط *</Label>
+              <div className="flex items-center justify-between gap-2">
+                <span
+                  id="mp-offer-label"
+                  className="block text-[12.5px] sm:text-[13px] font-bold text-gray-700 tracking-tight"
+                >
+                  اختر عرض التقسيط *
+                </span>
+                {!showAddOffer && (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={openAddOfferForm}
+                    className="text-xs sm:text-sm flex-shrink-0"
+                  >
+                    + عرض جديد
+                  </Button>
+                )}
+              </div>
+
+              {/* Inline offer builder — creates a batch-level offer on the spot so
+                  the seller never has to leave the sale form to add a new plan. */}
+              {showAddOffer && (
+                <Card className="p-2.5 sm:p-3 bg-blue-50 border-blue-200 space-y-2.5 sm:space-y-3">
+                  <h4 className="text-xs sm:text-sm font-bold text-blue-900">إضافة عرض تقسيط جديد</h4>
+
+                  {addOfferError && (
+                    <Alert variant="error" className="text-xs sm:text-sm">{addOfferError}</Alert>
+                  )}
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <Label htmlFor="mp-new-offer-name" className="text-xs mb-0">اسم العرض (اختياري)</Label>
+                      <Input
+                        id="mp-new-offer-name"
+                        value={newOfferName}
+                        onChange={(e) => setNewOfferName(e.target.value)}
+                        placeholder="مثال: عرض 24 شهر"
+                        size="sm"
+                        disabled={savingNewOffer}
+                        className="text-xs sm:text-sm"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="mp-new-offer-price-per-m2" className="text-xs mb-0">سعر المتر (بالتقسيط) *</Label>
+                      <Input
+                        id="mp-new-offer-price-per-m2"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={newOfferPricePerM2}
+                        onChange={(e) => setNewOfferPricePerM2(e.target.value)}
+                        placeholder="0.00"
+                        size="sm"
+                        disabled={savingNewOffer}
+                        className="text-xs sm:text-sm"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <Label htmlFor="mp-new-offer-advance-mode" className="text-xs mb-0">نوع التسبقة</Label>
+                      <select
+                        id="mp-new-offer-advance-mode"
+                        value={newOfferAdvanceMode}
+                        onChange={(e) => setNewOfferAdvanceMode(e.target.value as 'fixed' | 'percent')}
+                        disabled={savingNewOffer}
+                        className="w-full px-2 py-1.5 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs sm:text-sm disabled:opacity-60"
+                      >
+                        <option value="fixed">مبلغ ثابت (دت)</option>
+                        <option value="percent">نسبة مئوية (%)</option>
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="mp-new-offer-advance-value" className="text-xs mb-0">
+                        {newOfferAdvanceMode === 'percent' ? 'قيمة التسبقة (%)' : 'قيمة التسبقة (دت)'}
+                      </Label>
+                      <Input
+                        id="mp-new-offer-advance-value"
+                        type="number"
+                        min="0"
+                        max={newOfferAdvanceMode === 'percent' ? 100 : undefined}
+                        step={newOfferAdvanceMode === 'percent' ? '1' : '0.01'}
+                        value={newOfferAdvanceValue}
+                        onChange={(e) => setNewOfferAdvanceValue(e.target.value)}
+                        placeholder={newOfferAdvanceMode === 'percent' ? '10' : '1000'}
+                        size="sm"
+                        disabled={savingNewOffer}
+                        className="text-xs sm:text-sm"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <Label htmlFor="mp-new-offer-calc-mode" className="text-xs mb-0">طريقة الحساب</Label>
+                      <select
+                        id="mp-new-offer-calc-mode"
+                        value={newOfferCalcMode}
+                        onChange={(e) => setNewOfferCalcMode(e.target.value as 'monthlyAmount' | 'months')}
+                        disabled={savingNewOffer}
+                        className="w-full px-2 py-1.5 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs sm:text-sm disabled:opacity-60"
+                      >
+                        <option value="monthlyAmount">المبلغ الشهري</option>
+                        <option value="months">عدد الأشهر</option>
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      {newOfferCalcMode === 'monthlyAmount' ? (
+                        <>
+                          <Label htmlFor="mp-new-offer-monthly" className="text-xs mb-0">المبلغ الشهري (دت) *</Label>
+                          <Input
+                            id="mp-new-offer-monthly"
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={newOfferMonthlyAmount}
+                            onChange={(e) => setNewOfferMonthlyAmount(e.target.value)}
+                            placeholder="50"
+                            size="sm"
+                            disabled={savingNewOffer}
+                            className="text-xs sm:text-sm"
+                          />
+                        </>
+                      ) : (
+                        <>
+                          <Label htmlFor="mp-new-offer-months" className="text-xs mb-0">عدد الأشهر *</Label>
+                          <Input
+                            id="mp-new-offer-months"
+                            type="number"
+                            min="1"
+                            step="1"
+                            value={newOfferMonths}
+                            onChange={(e) => setNewOfferMonths(e.target.value)}
+                            placeholder="18"
+                            size="sm"
+                            disabled={savingNewOffer}
+                            className="text-xs sm:text-sm"
+                          />
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  <p className="text-[11px] sm:text-xs text-blue-800/80 leading-relaxed">
+                    سيتم حفظ العرض في هذه الدفعة واختياره تلقائياً، ويبقى متاحاً للبيوعات القادمة.
+                  </p>
+
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={handleAddNewOffer}
+                      disabled={savingNewOffer}
+                      className="text-xs sm:text-sm"
+                    >
+                      {savingNewOffer ? 'جاري الحفظ...' : 'حفظ العرض'}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={resetAddOfferForm}
+                      disabled={savingNewOffer}
+                      className="text-xs sm:text-sm"
+                    >
+                      إلغاء
+                    </Button>
+                  </div>
+                </Card>
+              )}
+
               {loadingOffers ? (
                 <div className="text-center py-3 sm:py-4">
                   <p className="text-xs sm:text-sm text-gray-500">جاري تحميل العروض...</p>
                 </div>
               ) : paymentOffers.length === 0 ? (
-                <Alert variant="error" className="text-xs sm:text-sm">لا توجد عروض تقسيط متاحة لهذه الدفعة</Alert>
+                showAddOffer ? null : (
+                  <Alert variant="warning" className="text-xs sm:text-sm">
+                    لا توجد عروض تقسيط متاحة لهذه الدفعة. اضغط «+ عرض جديد» لإنشاء عرض الآن.
+                  </Alert>
+                )
               ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 sm:gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 sm:gap-2" role="group" aria-labelledby="mp-offer-label">
                   {paymentOffers.map((offer) => {
                     const isSelected = selectedOfferId === offer.id
                     return (
