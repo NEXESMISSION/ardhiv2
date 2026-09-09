@@ -471,7 +471,15 @@ export function MultiPieceSaleDialog({
 
       if (err) {
         console.error('Error creating payment offer:', err)
-        setAddOfferError(err.message ? `فشل إنشاء العرض: ${err.message}` : 'فشل إنشاء العرض')
+        // 42501 = RLS rejection. Raw Postgres English is useless to a seller,
+        // so name the actual problem: this account lacks the permission.
+        setAddOfferError(
+          err.code === '42501'
+            ? 'ليس لديك صلاحية لإنشاء عرض تقسيط لهذه الدفعة. يرجى التواصل مع المالك.'
+            : err.message
+              ? `فشل إنشاء العرض: ${err.message}`
+              : 'فشل إنشاء العرض'
+        )
         return
       }
 
