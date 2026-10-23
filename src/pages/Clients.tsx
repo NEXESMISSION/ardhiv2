@@ -20,7 +20,8 @@ type ClientType = 'individual' | 'company'
 
 interface Client {
   id: string
-  id_number: string
+  /** NULL when created from a sale with "CIN not available" — fill in later. */
+  id_number: string | null
   name: string
   phone: string
   email: string | null
@@ -591,7 +592,9 @@ export function ClientsPage() {
     if (!client) return
 
     setEditingClientId(clientId)
-    setIdNumber(client.id_number)
+    // May be NULL for a client created from a sale with "CIN not available" —
+    // coalesce so the input stays controlled and the user can type it in now.
+    setIdNumber(client.id_number || '')
     setName(client.name)
     setPhone(client.phone)
     setEmail(client.email || '')
@@ -1140,7 +1143,9 @@ export function ClientsPage() {
                         <rect x="3" y="4" width="18" height="16" rx="3" />
                         <path d="M7 9h10M7 13h6" />
                       </svg>
-                      <span className="truncate tabular-nums">{client.id_number}</span>
+                      <span className="truncate tabular-nums">
+                        {client.id_number || <span className="text-amber-700">غير متوفر</span>}
+                      </span>
                     </p>
                     <p className="flex items-center gap-1.5 text-[11px] text-gray-500 font-semibold truncate" dir="ltr">
                       <svg className="w-3 h-3 flex-shrink-0 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.85" strokeLinecap="round" strokeLinejoin="round">
@@ -1438,7 +1443,9 @@ export function ClientsPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <Label className="text-xs text-gray-500">{t('clients.idNumber')}</Label>
-                  <p className="text-sm font-medium">{selectedClient.id_number}</p>
+                  <p className="text-sm font-medium">
+                    {selectedClient.id_number || <span className="text-amber-700">غير متوفر</span>}
+                  </p>
                 </div>
                 <div>
                   <Label className="text-xs text-gray-500">{t('clients.type')}</Label>

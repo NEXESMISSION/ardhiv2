@@ -26,7 +26,8 @@ interface LandPiece {
 interface Client {
   id: string
   name: string
-  id_number: string
+  /** NULL when the CIN wasn't available at sale time (filled in later). */
+  id_number: string | null
   phone: string
 }
 
@@ -625,7 +626,12 @@ export function MultiPieceSaleDialog({
             <h3 className="text-xs sm:text-sm lg:text-base font-semibold text-blue-900 mb-1.5 sm:mb-2">معلومات العميل</h3>
             <div className="text-xs sm:text-sm space-y-0.5 sm:space-y-1">
               <p><span className="font-medium">الاسم:</span> {client.name}</p>
-              <p><span className="font-medium">رقم الهوية:</span> {client.id_number}</p>
+              <p>
+                <span className="font-medium">رقم الهوية:</span>{' '}
+                {client.id_number
+                  ? client.id_number
+                  : <span className="text-amber-700 font-medium">غير متوفر — يُضاف لاحقاً</span>}
+              </p>
               <p><span className="font-medium">الهاتف:</span> {client.phone}</p>
             </div>
           </Card>

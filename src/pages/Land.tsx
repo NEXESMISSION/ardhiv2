@@ -1436,7 +1436,7 @@ export function LandPage() {
     // The MultiPieceSaleDialog.Client type isn't exported, but it has the
     // same shape we need (just id+name+phone+id_number). Use a structural
     // type here so the page compiles without coupling to the dialog file.
-    client: { id: string; name: string; id_number: string; phone: string }
+    client: { id: string; name: string; id_number: string | null; phone: string }
     depositAmount: number
     deadlineDate: string
     saleType: 'full' | 'installment' | 'promise'

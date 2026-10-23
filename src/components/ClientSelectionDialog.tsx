@@ -9,7 +9,8 @@ import { Card } from './ui/card'
 
 interface Client {
   id: string
-  id_number: string
+  /** NULL when the CIN wasn't available at sale time — filled in later. */
+  id_number: string | null
   name: string
   phone: string
   email: string | null
@@ -25,6 +26,11 @@ interface ClientSelectionDialogProps {
 
 export function ClientSelectionDialog({ open, onClose, onClientSelected }: ClientSelectionDialogProps) {
   const [cin, setCin] = useState('')
+  /** "رقم الهوية غير متوفر" — the buyer's CIN isn't on hand yet. The client is
+   *  created with id_number = NULL so the sale can go ahead now; the CIN is
+   *  filled in later from the Clients page. NULL (not a placeholder) because
+   *  the UNIQUE index allows many NULLs but only one of any real CIN. */
+  const [cinUnavailable, setCinUnavailable] = useState(false)
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [info, setInfo] = useState<string | null>(null)
@@ -42,6 +48,7 @@ export function ClientSelectionDialog({ open, onClose, onClientSelected }: Clien
     if (!open) {
       // Reset form when dialog closes
       setCin('')
+      setCinUnavailable(false)
       setFoundClient(null)
       setError(null)
       setInfo(null)
@@ -56,7 +63,7 @@ export function ClientSelectionDialog({ open, onClose, onClientSelected }: Clien
 
   // Auto-search when CIN or phone is entered (debounced) - 4+ chars for either
   useEffect(() => {
-    const canSearchByCin = open && cin.trim().length >= 4
+    const canSearchByCin = open && !cinUnavailable && cin.trim().length >= 4
     const canSearchByPhone = open && phone.trim().length >= 4
     if (!canSearchByCin && !canSearchByPhone) {
       setSearchStatus('idle')
@@ -69,12 +76,12 @@ export function ClientSelectionDialog({ open, onClose, onClientSelected }: Clien
     }, 500) // Debounce: wait 500ms after user stops typing
 
     return () => clearTimeout(searchTimeout)
-  }, [cin, phone, open])
+  }, [cin, phone, open, cinUnavailable])
 
   async function handleSearch() {
     const cinTrim = cin.trim()
     const phoneTrim = phone.trim()
-    const searchByCin = cinTrim.length >= 4
+    const searchByCin = !cinUnavailable && cinTrim.length >= 4
     const searchByPhone = phoneTrim.length >= 4
 
     if (!searchByCin && !searchByPhone) {
@@ -176,9 +183,9 @@ export function ClientSelectionDialog({ open, onClose, onClientSelected }: Clien
       setError('رقم الهاتف مطلوب')
       return
     }
-    if (!cin.trim()) {
+    if (!cinUnavailable && !cin.trim()) {
       console.log('ERROR: CIN is required')
-      setError('رقم الهوية مطلوب')
+      setError('رقم الهوية مطلوب، أو اختر "رقم الهوية غير متوفر"')
       return
     }
 
@@ -188,11 +195,13 @@ export function ClientSelectionDialog({ open, onClose, onClientSelected }: Clien
     setInfo(null)
 
     try {
-      // First, check if client already exists before attempting insert
-      console.log('Checking if client exists with CIN:', cin.trim())
-      const existingClient = await fetchExistingClient(cin.trim())
+      // First, check if client already exists before attempting insert.
+      // With no CIN there is nothing to match on, so skip straight to insert —
+      // every "CIN not available" client is a distinct new row.
+      console.log('Checking if client exists with CIN:', cinUnavailable ? '(none)' : cin.trim())
+      const existingClient = cinUnavailable ? null : await fetchExistingClient(cin.trim())
       console.log('Existing client check result:', existingClient)
-      
+
       if (existingClient) {
         // Client already exists, use it
         console.log('Client already exists, using it:', existingClient)
@@ -215,7 +224,7 @@ export function ClientSelectionDialog({ open, onClose, onClientSelected }: Clien
       const { data, error: err } = await supabase
         .from('clients')
         .insert({
-          id_number: cin.trim(),
+          id_number: cinUnavailable ? null : cin.trim(),
           name: name.trim(),
           phone: phone.trim(),
           email: email.trim() || null,
@@ -229,8 +238,17 @@ export function ClientSelectionDialog({ open, onClose, onClientSelected }: Clien
 
       if (err) {
         console.log('Supabase error:', err)
-        // Check if it's a duplicate error
-        if (isDuplicateError(err)) {
+        // 23502 = not_null_violation. Only reachable when the CIN was left out
+        // and the database still has NOT NULL on clients.id_number — i.e. the
+        // migration hasn't been applied yet. Say so instead of a raw PG string.
+        if (err.code === '23502') {
+          setError('لا يمكن ترك رقم الهوية فارغاً في قاعدة البيانات الحالية. يرجى تطبيق التحديث المطلوب (migration) أولاً.')
+          setCreating(false)
+          return
+        }
+        // Check if it's a duplicate error (impossible with no CIN — NULLs don't
+        // collide — so only follow this path when a CIN was actually entered)
+        if (!cinUnavailable && isDuplicateError(err)) {
           console.log('Duplicate error detected, fetching existing client')
           // Duplicate detected, fetch and use existing client
           const existing = await fetchExistingClient(cin.trim())
@@ -300,8 +318,8 @@ export function ClientSelectionDialog({ open, onClose, onClientSelected }: Clien
       }
     } catch (e: any) {
       console.log('Caught exception:', e)
-      // Final fallback: check if it's a duplicate error
-      if (isDuplicateError(e)) {
+      // Final fallback: check if it's a duplicate error (CIN path only)
+      if (!cinUnavailable && isDuplicateError(e)) {
         console.log('Exception is duplicate error, trying to fetch existing')
         // Try to fetch existing client one more time
         const existing = await fetchExistingClient(cin.trim())
@@ -366,7 +384,13 @@ export function ClientSelectionDialog({ open, onClose, onClientSelected }: Clien
           ) : (
             <Button 
               onClick={handleCreateClient} 
-              disabled={creating || !cin.trim() || cin.length < 4 || !name.trim() || !phone.trim()}
+              disabled={
+                creating ||
+                !name.trim() ||
+                !phone.trim() ||
+                // CIN is required unless explicitly marked unavailable
+                (!cinUnavailable && (!cin.trim() || cin.trim().length < 4))
+              }
             >
               {creating ? 'جاري الإنشاء...' : 'إنشاء واستخدام العميل'}
             </Button>
@@ -395,7 +419,11 @@ export function ClientSelectionDialog({ open, onClose, onClientSelected }: Clien
         )}
         {searchStatus === 'not-found' && (cin.trim().length >= 4 || phone.trim().length >= 4) && (
           <div className="p-1.5 sm:p-2 bg-orange-50 border border-orange-200 rounded">
-            <p className="text-xs sm:text-sm text-orange-700 font-medium">لم يتم العثور على عميل بهذا رقم الهوية أو رقم الهاتف. يمكنك ملء البيانات أدناه وإنشاء عميل جديد.</p>
+            <p className="text-xs sm:text-sm text-orange-700 font-medium">
+              {cinUnavailable
+                ? 'لم يتم العثور على عميل بهذا رقم الهاتف. يمكنك ملء البيانات أدناه وإنشاء عميل جديد بدون رقم هوية.'
+                : 'لم يتم العثور على عميل بهذا رقم الهوية أو رقم الهاتف. يمكنك ملء البيانات أدناه وإنشاء عميل جديد.'}
+            </p>
           </div>
         )}
 
@@ -406,17 +434,54 @@ export function ClientSelectionDialog({ open, onClose, onClientSelected }: Clien
           </h3>
           <div className="space-y-2 sm:space-y-2.5 lg:space-y-3">
             <div className="space-y-1">
-              <Label htmlFor="csd-cin" className="text-xs sm:text-sm">رقم الهوية (CIN) *</Label>
+              <Label htmlFor="csd-cin" className="text-xs sm:text-sm">
+                رقم الهوية (CIN) {cinUnavailable ? '' : '*'}
+              </Label>
               <Input
                 id="csd-cin"
                 type="text"
-                value={cin}
+                value={cinUnavailable ? '' : cin}
                 onChange={(e) => setCin(e.target.value)}
-                placeholder="أدخل رقم الهوية"
+                placeholder={cinUnavailable ? 'غير متوفر — يمكن إضافته لاحقاً' : 'أدخل رقم الهوية'}
+                disabled={cinUnavailable}
                 size="sm"
                 className="text-xs sm:text-sm"
               />
-              <p className="text-xs text-gray-500">سيتم البحث تلقائياً عند إدخال 4 أرقام على الأقل (رقم الهوية أو الهاتف)</p>
+
+              {/* Escape hatch for a buyer whose CIN isn't on hand: the sale can
+                  still go through now and the CIN is added later. */}
+              <label
+                htmlFor="csd-cin-unavailable"
+                className="flex items-start gap-2 cursor-pointer select-none pt-1"
+              >
+                <input
+                  id="csd-cin-unavailable"
+                  type="checkbox"
+                  checked={cinUnavailable}
+                  onChange={(e) => {
+                    setCinUnavailable(e.target.checked)
+                    setError(null)
+                    if (e.target.checked) {
+                      // Drop any partially typed CIN and any CIN-based match,
+                      // so we don't silently attach to the wrong client.
+                      setCin('')
+                      setFoundClient(null)
+                      setSearchStatus('idle')
+                    }
+                  }}
+                  className="mt-0.5 w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-500 cursor-pointer flex-shrink-0"
+                />
+                <span className="text-xs sm:text-sm text-gray-700 font-medium leading-snug">
+                  رقم الهوية غير متوفر
+                  <span className="block text-xs text-gray-500 font-normal">
+                    أكمل البيع الآن وأضف رقم الهوية لاحقاً من صفحة العملاء
+                  </span>
+                </span>
+              </label>
+
+              {!cinUnavailable && (
+                <p className="text-xs text-gray-500">سيتم البحث تلقائياً عند إدخال 4 أرقام على الأقل (رقم الهوية أو الهاتف)</p>
+              )}
             </div>
 
             <div className="space-y-1">
