@@ -114,6 +114,15 @@ export function MultiPieceSaleDialog({
   // to this batch without leaving the sale form (same flow as EditSaleDialog).
   // The offer is written to `payment_offers` straight away and then selected,
   // so the rest of the sale flow sees a normal, persisted offer.
+  /** How the installment terms are supplied. 'manual' (default) = type the
+   *  تسبقة / شهري for this sale only; 'saved' = pick one of the batch's عروض. */
+  const [offerMode, setOfferMode] = useState<'manual' | 'saved'>('manual')
+  const [manualAdvanceMode, setManualAdvanceMode] = useState<'fixed' | 'percent'>('fixed')
+  const [manualAdvanceValue, setManualAdvanceValue] = useState('')
+  const [manualCalcMode, setManualCalcMode] = useState<'monthlyAmount' | 'months'>('monthlyAmount')
+  const [manualMonthlyAmount, setManualMonthlyAmount] = useState('')
+  const [manualMonths, setManualMonths] = useState('')
+
   const [showAddOffer, setShowAddOffer] = useState(false)
   const [savingNewOffer, setSavingNewOffer] = useState(false)
   const [addOfferError, setAddOfferError] = useState<string | null>(null)
@@ -158,13 +167,48 @@ export function MultiPieceSaleDialog({
     keepOnClose: true,
   })
 
+  /** The typed terms shaped exactly like a PaymentOffer, so the calculation
+   *  below runs through the identical code path as a saved offer — nothing in
+   *  the math changes, it just gets its numbers from the form instead of a row.
+   *  `price_per_m2_installment` is 0 because the per-piece price the user typed
+   *  is the basis for the total; the rate is derived only when the row is saved.
+   *  Returns null until the terms are complete, which keeps the totals blank
+   *  rather than showing a half-finished schedule. */
+  const manualOffer = useMemo<PaymentOffer | null>(() => {
+    const advanceValue = parseAmount(manualAdvanceValue.trim() ? manualAdvanceValue : '0')
+    if (isNaN(advanceValue) || advanceValue < 0) return null
+    if (manualAdvanceMode === 'percent' && advanceValue > 100) return null
+
+    const monthlyAmount = parseAmount(manualMonthlyAmount)
+    const months = parseInt(manualMonths, 10)
+    if (manualCalcMode === 'monthlyAmount') {
+      if (isNaN(monthlyAmount) || monthlyAmount <= 0) return null
+    } else if (isNaN(months) || months <= 0) {
+      return null
+    }
+
+    return {
+      id: '__manual__',
+      name: null,
+      price_per_m2_installment: 0,
+      advance_mode: manualAdvanceMode,
+      advance_value: advanceValue,
+      calc_mode: manualCalcMode,
+      monthly_amount: manualCalcMode === 'monthlyAmount' ? monthlyAmount : null,
+      months: manualCalcMode === 'months' ? months : null,
+    }
+  }, [manualAdvanceMode, manualAdvanceValue, manualCalcMode, manualMonthlyAmount, manualMonths])
+
   // Calculate totals from manual per-piece prices, plus advance / monthly schedule when an offer is selected
   const calculations = useMemo(() => {
     let totalSurface = 0
     let totalPrice = 0
 
-    // Get selected offer inside useMemo to ensure it's fresh
-    const selectedOffer = paymentOffers.find((o) => o.id === selectedOfferId)
+    // Get selected offer inside useMemo to ensure it's fresh. In manual mode the
+    // typed terms stand in for a saved row — same shape, same code path below.
+    const selectedOffer = offerMode === 'manual'
+      ? manualOffer
+      : paymentOffers.find((o) => o.id === selectedOfferId)
 
     // Calculate total surface first
     pieces.forEach((piece) => {
@@ -273,7 +317,7 @@ export function MultiPieceSaleDialog({
       remaining,
       installmentDetails,
     }
-  }, [pieces, batchPricePerM2, depositAmount, saleType, selectedOfferId, paymentOffers, useFixedPrice, fixedPriceByPieceId])
+  }, [pieces, batchPricePerM2, depositAmount, saleType, selectedOfferId, paymentOffers, useFixedPrice, fixedPriceByPieceId, offerMode, manualOffer])
 
   // Reset form when dialog opens; pre-fill per-piece price suggestions from
   // direct_full_payment_price or batch rate × surface (user can override).
@@ -284,6 +328,7 @@ export function MultiPieceSaleDialog({
       setSaleType('full')
       setSelectedOfferId('')
       setError(null)
+      resetManualTerms()
       resetAddOfferForm()
       setFixedPriceByPieceId(buildPriceSuggestionMap(pieces, batchPricePerM2))
       // Default the deadline to a week from today so the user has time to
@@ -392,6 +437,15 @@ export function MultiPieceSaleDialog({
     } finally {
       setLoadingOffers(false)
     }
+  }
+
+  function resetManualTerms() {
+    setOfferMode('manual')
+    setManualAdvanceMode('fixed')
+    setManualAdvanceValue('')
+    setManualCalcMode('monthlyAmount')
+    setManualMonthlyAmount('')
+    setManualMonths('')
   }
 
   function resetAddOfferForm() {
@@ -543,9 +597,20 @@ export function MultiPieceSaleDialog({
       }
     }
 
-    if (saleType === 'installment' && !selectedOfferId) {
-      setError('يرجى اختيار عرض التقسيط')
-      return
+    if (saleType === 'installment') {
+      if (offerMode === 'manual') {
+        if (!manualOffer) {
+          setError(
+            manualCalcMode === 'monthlyAmount'
+              ? 'يرجى إدخال شروط التقسيط: التسبقة والمبلغ الشهري'
+              : 'يرجى إدخال شروط التقسيط: التسبقة وعدد الأشهر'
+          )
+          return
+        }
+      } else if (!selectedOfferId) {
+        setError('يرجى اختيار عرض التقسيط')
+        return
+      }
     }
 
     setShowFinalConfirmDialog(true)
@@ -556,14 +621,58 @@ export function MultiPieceSaleDialog({
     
     setShowFinalConfirmDialog(false)
     setSaving(true)
+    // Set when this sale's terms were typed rather than picked, so a failed
+    // save can roll back the row we created for it (see catch below).
+    let adhocOfferId: string | null = null
     try {
-      const selectedOffer = paymentOffers.find((o) => o.id === selectedOfferId)
+      let selectedOffer = paymentOffers.find((o) => o.id === selectedOfferId) as PaymentOffer | undefined
+      let offerIdForSale: string | undefined = selectedOfferId || undefined
+
+      if (saleType === 'installment' && offerMode === 'manual' && manualOffer) {
+        // Persist the typed terms as a private offer bound to this sale.
+        // `land_piece_id` is set, and the batch's offer list filters on
+        // `land_piece_id IS NULL`, so it never appears as a reusable عرض.
+        // Everything downstream (confirmation, schedule, edit) reads the terms
+        // through payment_offer_id exactly as it does for a saved offer.
+        const derivedRate = calculations.totalSurface > 0
+          ? Math.round((calculations.totalPrice / calculations.totalSurface) * 100) / 100
+          : 0
+        const { data: adhoc, error: adhocErr } = await supabase
+          .from('payment_offers')
+          .insert({
+            batch_id: batchId,
+            land_piece_id: pieces[0].id,
+            name: 'شروط مخصصة',
+            price_per_m2_installment: derivedRate,
+            advance_mode: manualOffer.advance_mode,
+            advance_value: manualOffer.advance_value,
+            calc_mode: manualOffer.calc_mode,
+            monthly_amount: manualOffer.monthly_amount,
+            months: manualOffer.months,
+          })
+          .select('id, name, price_per_m2_installment, advance_mode, advance_value, calc_mode, monthly_amount, months')
+          .single()
+
+        if (adhocErr) {
+          console.error('Error saving manual installment terms:', adhocErr)
+          throw new Error(
+            adhocErr.code === '42501'
+              ? 'ليس لديك صلاحية لحفظ شروط التقسيط لهذه الدفعة. يرجى التواصل مع المالك.'
+              : `فشل حفظ شروط التقسيط: ${adhocErr.message || ''}`
+          )
+        }
+
+        adhocOfferId = adhoc.id
+        offerIdForSale = adhoc.id
+        selectedOffer = adhoc as PaymentOffer
+      }
+
       await onConfirm({
         client,
         depositAmount: calculations.deposit,
         deadlineDate,
         saleType,
-        paymentOfferId: saleType === 'installment' && selectedOfferId ? selectedOfferId : undefined,
+        paymentOfferId: saleType === 'installment' && offerIdForSale ? offerIdForSale : undefined,
         installmentPricePerM2: saleType === 'installment' && selectedOffer ? selectedOffer.price_per_m2_installment : undefined,
         notes: notes.trim() || undefined,
         fixedPricesPerPiece: useFixedPrice && calculations.totalPrice > 0
@@ -573,6 +682,15 @@ export function MultiPieceSaleDialog({
       setSuccessMessage(`تم إنشاء ${pieces.length} بيع بنجاح!`)
       setShowSuccessDialog(true)
     } catch (e: any) {
+      // Roll back the terms row this attempt created, so a failed sale doesn't
+      // leave a dangling offer behind. Scoped to the exact id we just inserted.
+      if (adhocOfferId) {
+        try {
+          await supabase.from('payment_offers').delete().eq('id', adhocOfferId)
+        } catch (cleanupErr) {
+          console.error('Could not roll back manual terms row:', cleanupErr)
+        }
+      }
       setErrorMessage(e.message || 'فشل إنشاء البيع')
       setShowErrorDialog(true)
     } finally {
@@ -754,9 +872,117 @@ export function MultiPieceSaleDialog({
                   id="mp-offer-label"
                   className="block text-[12.5px] sm:text-[13px] font-bold text-gray-700 tracking-tight"
                 >
-                  اختر عرض التقسيط *
+                  {offerMode === 'manual' ? 'شروط التقسيط *' : 'اختر عرض التقسيط *'}
                 </span>
-                {!showAddOffer && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOfferMode(offerMode === 'manual' ? 'saved' : 'manual')
+                    setError(null)
+                    resetAddOfferForm()
+                  }}
+                  className="text-xs sm:text-sm font-bold text-blue-600 hover:text-blue-800 underline underline-offset-2 flex-shrink-0"
+                >
+                  {offerMode === 'manual' ? 'اختيار عرض محفوظ' : 'إدخال يدوي'}
+                </button>
+              </div>
+
+              {/* Manual terms — the default. Type this sale's تسبقة and either a
+                  monthly amount or a number of months; the other is derived in
+                  الحسابات below. Nothing is saved as a reusable عرض. */}
+              {offerMode === 'manual' && (
+                <Card className="p-2.5 sm:p-3 bg-blue-50/60 border-blue-200 space-y-2.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <Label htmlFor="mp-man-adv-mode" className="text-xs mb-0">نوع التسبقة</Label>
+                      <select
+                        id="mp-man-adv-mode"
+                        value={manualAdvanceMode}
+                        onChange={(e) => setManualAdvanceMode(e.target.value as 'fixed' | 'percent')}
+                        className="w-full px-2 py-1.5 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs sm:text-sm"
+                      >
+                        <option value="fixed">مبلغ ثابت (دت)</option>
+                        <option value="percent">نسبة مئوية (%)</option>
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="mp-man-adv-value" className="text-xs mb-0">
+                        {manualAdvanceMode === 'percent' ? 'قيمة التسبقة (%) *' : 'قيمة التسبقة (دت) *'}
+                      </Label>
+                      <Input
+                        id="mp-man-adv-value"
+                        type="number"
+                        min="0"
+                        max={manualAdvanceMode === 'percent' ? 100 : undefined}
+                        step={manualAdvanceMode === 'percent' ? '1' : '0.01'}
+                        value={manualAdvanceValue}
+                        onChange={(e) => setManualAdvanceValue(e.target.value)}
+                        placeholder={manualAdvanceMode === 'percent' ? '10' : '1000'}
+                        size="sm"
+                        className="text-xs sm:text-sm"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <Label htmlFor="mp-man-calc-mode" className="text-xs mb-0">طريقة الحساب</Label>
+                      <select
+                        id="mp-man-calc-mode"
+                        value={manualCalcMode}
+                        onChange={(e) => setManualCalcMode(e.target.value as 'monthlyAmount' | 'months')}
+                        className="w-full px-2 py-1.5 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs sm:text-sm"
+                      >
+                        <option value="monthlyAmount">أحدد المبلغ الشهري</option>
+                        <option value="months">أحدد عدد الأشهر</option>
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      {manualCalcMode === 'monthlyAmount' ? (
+                        <>
+                          <Label htmlFor="mp-man-monthly" className="text-xs mb-0">المبلغ الشهري (دت) *</Label>
+                          <Input
+                            id="mp-man-monthly"
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={manualMonthlyAmount}
+                            onChange={(e) => setManualMonthlyAmount(e.target.value)}
+                            placeholder="50"
+                            size="sm"
+                            className="text-xs sm:text-sm"
+                          />
+                        </>
+                      ) : (
+                        <>
+                          <Label htmlFor="mp-man-months" className="text-xs mb-0">عدد الأشهر *</Label>
+                          <Input
+                            id="mp-man-months"
+                            type="number"
+                            min="1"
+                            step="1"
+                            value={manualMonths}
+                            onChange={(e) => setManualMonths(e.target.value)}
+                            placeholder="18"
+                            size="sm"
+                            className="text-xs sm:text-sm"
+                          />
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  <p className="text-[11px] sm:text-xs text-blue-800/80 leading-relaxed">
+                    {manualCalcMode === 'monthlyAmount'
+                      ? 'يُحتسب عدد الأشهر تلقائياً من المبلغ المتبقي.'
+                      : 'يُحتسب المبلغ الشهري تلقائياً من المبلغ المتبقي.'}
+                    {' '}هذه الشروط تخص هذا البيع فقط ولن تُضاف إلى قائمة العروض.
+                  </p>
+                </Card>
+              )}
+
+              {offerMode === 'saved' && !showAddOffer && (
+                <div className="flex justify-end">
                   <Button
                     type="button"
                     variant="secondary"
@@ -766,8 +992,8 @@ export function MultiPieceSaleDialog({
                   >
                     + عرض جديد
                   </Button>
-                )}
-              </div>
+                </div>
+              )}
 
               {/* Inline offer builder — creates a batch-level offer on the spot so
                   the seller never has to leave the sale form to add a new plan. */}
@@ -922,7 +1148,7 @@ export function MultiPieceSaleDialog({
                 </Card>
               )}
 
-              {loadingOffers ? (
+              {offerMode === 'saved' && (loadingOffers ? (
                 <div className="text-center py-3 sm:py-4">
                   <p className="text-xs sm:text-sm text-gray-500">جاري تحميل العروض...</p>
                 </div>
@@ -987,7 +1213,7 @@ export function MultiPieceSaleDialog({
                     )
                   })}
                 </div>
-              )}
+              ))}
             </div>
           )}
 
